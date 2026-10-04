@@ -15,7 +15,7 @@ add_compile_options(-Wall -Wextra)
 # Warstwy (od dolu): terminal -> core/input/renderer/cursor -> widgets ->
 # window -> app (kontrakt App/AppContext/AppRegistry) -> desktop (framework
 # spinajacy wszystko, implementuje tez AppContext).
-add_library(fenrir_lib STATIC
+add_library(fenrir STATIC
     src/terminal/Terminal.cpp
     src/core/Screen.cpp
     src/core/FileSystem.cpp
@@ -31,18 +31,19 @@ add_library(fenrir_lib STATIC
     src/desktop/Desktop.cpp
 )
 
-target_include_directories(fenrir_lib PUBLIC
+target_include_directories(fenrir PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
 # --- przyklad niskopoziomowy (etap 1, bez frameworku Desktop) ------------
 add_executable(stage1_terminal examples/stage1_terminal/main.cpp)
-target_link_libraries(stage1_terminal PRIVATE fenrir_lib)
+target_link_libraries(stage1_terminal PRIVATE fenrir)
 
 # --- shell: den ------------------------------------------------------------
 # To jedyny plik "aplikacyjny" ktory NIE jest App-em - laczy Desktop z
 # zarejestrowanymi aplikacjami (patrz apps/shell/main.cpp).
-add_executable(fenrir
+add_executable(fenrir_bin
     apps/shell/main.cpp
 )
-target_link_libraries(fenrir PRIVATE fenrir_lib)
+target_link_libraries(fenrir_bin PRIVATE fenrir)
+set_target_properties(fenrir_bin PROPERTIES OUTPUT_NAME fenrir)
