@@ -42,8 +42,8 @@ target_link_libraries(stage1_terminal PRIVATE fenrir)
 # --- shell: den ------------------------------------------------------------
 # To jedyny plik "aplikacyjny" ktory NIE jest App-em - laczy Desktop z
 # zarejestrowanymi aplikacjami (patrz apps/shell/main.cpp).
-add_executable(fenrir_bin
+add_executable(fenrir_desktop
     apps/shell/main.cpp
 )
-target_link_libraries(fenrir_bin PRIVATE fenrir)
-set_target_properties(fenrir_bin PROPERTIES OUTPUT_NAME fenrir)
+target_link_libraries(fenrir_desktop PRIVATE fenrir)
+set_target_properties(fenrir_desktop PROPERTIES OUTPUT_NAME fenrir)
