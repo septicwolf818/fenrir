@@ -1,0 +1,23 @@
+# Build directories
+build/
+cmake-build-*/
+
+# IDE / editor files
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.sublime-*
+
+# Compiled objects / libs
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+
+# Binaries
+fenrir
+stage1_terminal
+den
