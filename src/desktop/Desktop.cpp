@@ -1,44 +1,91 @@
 #include "fenrir/desktop/Desktop.hpp"
 
 #include <algorithm>
+#include <cctype>
+#include <chrono>
+#include <ctime>
 #include <cstdio>
 #include <string>
 
 #include "fenrir/core/FileSystem.hpp"
+#include "fenrir/window/Window.hpp"
 
 namespace fenrir {
 
 namespace {
 
 void drawBox(Screen& screen, const Rect& r, std::u32string_view title) {
-    const Color border = colors::Yellow;
-    const Color bg = colors::Black;
+    // Oksienk ramki Win95: niebieski pasek tytułu (Blue/White), szara ramka
+    // (Gray), białe wnętrze (White) — spójne z resztą systemu.
+    const Color titleBg = colors::Blue;
+    const Color titleFg = colors::White;
+    const Color frameBg = colors::Gray;
+    const Color frameFg = colors::White;
+    const Color innerFg = colors::Black;
+    const Color innerBg = colors::White;
 
+    // Wnętrze — białe (menu wypełni je wpisami; puste miejsca zostają białe).
     for (int y = r.y; y < r.y + r.h; ++y)
         for (int x = r.x; x < r.x + r.w; ++x)
-            screen.set(x, y, Cell{U' ', border, bg, 0});
+            screen.set(x, y, Cell{U' ', innerFg, innerBg, 0});
 
-    screen.set(r.x, r.y, Cell{U'┌', border, bg, 0});
-    screen.set(r.x + r.w - 1, r.y, Cell{U'┐', border, bg, 0});
-    screen.set(r.x, r.y + r.h - 1, Cell{U'└', border, bg, 0});
-    screen.set(r.x + r.w - 1, r.y + r.h - 1, Cell{U'┘', border, bg, 0});
-    for (int x = r.x + 1; x < r.x + r.w - 1; ++x) {
-        screen.set(x, r.y, Cell{U'─', border, bg, 0});
-        screen.set(x, r.y + r.h - 1, Cell{U'─', border, bg, 0});
+    // Górny wiersz = niebieski pasek tytułu.
+    for (int x = r.x; x < r.x + r.w; ++x)
+        screen.set(x, r.y, Cell{U' ', titleFg, titleBg, StyleBold});
+
+    // Ramka boczna i dolna — szara.
+    for (int y = r.y + 1; y < r.y + r.h; ++y) {
+        screen.set(r.x, y, Cell{U'|', frameFg, frameBg, 0});
+        screen.set(r.x + r.w - 1, y, Cell{U'|', frameFg, frameBg, 0});
     }
-    for (int y = r.y + 1; y < r.y + r.h - 1; ++y) {
-        screen.set(r.x, y, Cell{U'│', border, bg, 0});
-        screen.set(r.x + r.w - 1, y, Cell{U'│', border, bg, 0});
-    }
+    for (int x = r.x; x < r.x + r.w; ++x)
+        screen.set(x, r.y + r.h - 1, Cell{U' ', frameFg, frameBg, 0});
+
+    // Nazwa na pasku tytułu.
     if (!title.empty()) {
-        std::u32string t = U" ";
-        t += title;
-        t += U" ";
-        screen.putText(r.x + 2, r.y, t, bg, border, StyleBold);
+        std::u32string t = U" " + std::u32string(title) + U" ";
+        screen.putText(r.x + 1, r.y, t, titleFg, titleBg, StyleBold);
     }
 }
 
 } // namespace
+
+// Pomocnicze funkcje do obslugi skrótow klawiszowych — statyczne, bo nie modyfikuja stanu Desktop.
+
+bool Desktop::matchesShortcuts(const std::vector<std::pair<KeyShortcut, std::function<void()>>>& sc, const KeyEvent& ev) {
+    for (auto& [shortcut, _] : sc) {
+        if (shortcut.ctrl != ev.ctrl) continue;
+        if (shortcut.key != ev.key) continue;
+        // Dla Key::Char porownujemy character — uwaga: terminal wysyla lowercase!
+        if (shortcut.key == Key::Char) {
+            if (shortcut.character.has_value()) {
+                char32_t sc = shortcut.character.value();
+                // Dopasowanie case-insensitive dla liter (terminal zawsze wysyla lowercase).
+                char32_t ec = ev.character;
+                if (sc != ec && std::tolower(static_cast<unsigned char>(sc)) != std::tolower(static_cast<unsigned char>(ec))) continue;
+            } else {
+                // Bez zadanego character = niepasuje (nie wiemy co porownac).
+                continue;
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
+void Desktop::invokeShortcut(std::vector<std::pair<KeyShortcut, std::function<void()>>> sc, const KeyEvent& ev) {
+    for (auto& [shortcut, cb] : sc) {
+        if (shortcut.ctrl != ev.ctrl) continue;
+        if (shortcut.key != ev.key) continue;
+        if (shortcut.key == Key::Char) {
+            if (!shortcut.character.has_value()) continue;
+            char32_t sc = shortcut.character.value();
+            char32_t ec = ev.character;
+            if (sc != ec && std::tolower(static_cast<unsigned char>(sc)) != std::tolower(static_cast<unsigned char>(ec))) continue;
+        }
+        if (cb) cb();
+    }
+}
 
 Desktop::Desktop()
     : terminal_(),
@@ -48,12 +95,14 @@ Desktop::Desktop()
       registry_() {}
 
 Rect Desktop::desktopArea() const {
-    int h = std::max(0, screenHeight() - kMenuBarHeight - kStatusBarHeight);
+    int h = std::max(0, screenHeight() - kMenuBarHeight - kTaskBarHeight);
     return Rect{0, kMenuBarHeight, screenWidth(), h};
 }
 
 void Desktop::openAppMenu() {
     if (appMenu_) return;
+    closeWinMenu(); // menu aplikacji (dropdown) i menu pulpitowe nie istnieja razem
+    appMenuClosePending_ = false; // czyscimy stale flagi z poprzedniego zamkniecia (np. po launchu aplikacji)
 
     std::vector<std::u32string> items;
     for (auto& a : registry_.apps()) {
@@ -65,7 +114,7 @@ void Desktop::openAppMenu() {
     int w = 24;
     for (auto& s : items) w = std::max<int>(w, static_cast<int>(s.size()) + 4);
     int h = static_cast<int>(items.size()) + 2;
-    appMenuBounds_ = Rect{1, kMenuBarHeight, w, h};
+    appMenuBounds_ = Rect{1, kMenuBarHeight + 1, w, h}; // 1 wiersz odstepu od paska - na wysokosci 1szego wiersza okien
 
     auto menu = std::make_unique<Menu>(items);
     Menu* raw = menu.get();
@@ -79,11 +128,97 @@ void Desktop::openAppMenu() {
         } else {
             quit();
         }
-        closeAppMenu();
+        // Domykamy PO powrocie z callbacku — reset() zniszczy Menu, wiec nie
+        // mozemy go usunać z wewnatrz wlasnego onSelect (UB na std::function).
+        appMenuClosePending_ = true;
     };
 }
 
-void Desktop::closeAppMenu() { appMenu_.reset(); }
+void Desktop::closeAppMenu() {
+    appMenu_.reset();
+    appMenuClosePending_ = false; // stale flaga po zamknieciu = domknie nastepne menu przy pierwszym klawiszu
+}
+
+// --- Menu konkretnej aplikacji (dropdown pod paskiem tytulu okna) -------------------
+
+bool Desktop::windowAlive(Window* w) const {
+    for (auto& c : wm_.windows())
+        if (c.get() == w) return true;
+    return false;
+}
+
+void Desktop::openWinMenu(Window& w, int tab) {
+    auto* content = w.content();
+    if (!content) return;
+    auto& tabs = content->menuTabs();
+    if (tabs.empty()) return;
+    if (tab < 0 || tab >= static_cast<int>(tabs.size())) tab = 0;
+
+    appMenu_.reset(); // dropdown i menu pulpitowe (F1) wykluczaja sie wzajemnie
+
+    // Zmiana karty w otwartym menu = przelaczenie na nowa karte.
+    if (winMenu_ && winMenuWin_ == &w && winMenuTab_ == tab) return;
+
+    winMenuWin_ = &w;
+    winMenuTab_ = tab;
+    winMenuClosePending_ = false;
+    buildWinMenu(w, tab);
+}
+
+void Desktop::closeWinMenu() {
+    winMenu_.reset();
+    winMenuWin_ = nullptr;
+    winMenuClosePending_ = false;
+}
+
+void Desktop::buildWinMenu(Window& w, int tab) {
+    auto* content = w.content();
+    if (!content) { closeWinMenu(); return; }
+    auto& tabs = content->menuTabs();
+    if (tab < 0 || tab >= static_cast<int>(tabs.size())) { closeWinMenu(); return; }
+
+    auto& items = tabs[static_cast<std::size_t>(tab)].second;
+
+    std::vector<std::u32string> labels;
+    labels.reserve(items.size());
+    for (auto& it : items) labels.push_back(it.label);
+
+    // Dropdown POD paskiem menu okna (wiersz menu = y+1), pod konkretna kartą.
+    // Pobieramy pozycję karty z tabStripLayout().
+    int itemW = 4;
+    for (auto& l : labels) itemW = std::max<int>(itemW, static_cast<int>(l.size()) + 2);
+    int h = static_cast<int>(labels.size()) + 2;
+    int menuW = std::max(itemW, 12);
+
+    Rect wb = w.bounds();
+    auto strips = tabStripLayout(wb.x, wb.w, content->menuTabs());
+    int x = strips.empty() ? wb.x : (strips[static_cast<std::size_t>(tab)].first + 1);
+    int y = wb.y + 2; // pod paskiem tytulu (y+0) i paskiem menu (y+1)
+    // Trzymamy dropdown w granicach ekranu.
+    x = std::max(0, std::min(x, screenWidth() - menuW));
+    y = std::max(kMenuBarHeight, std::min(y, screenHeight() - kTaskBarHeight - h));
+
+    winMenuTitle_ = tabs[static_cast<std::size_t>(tab)].first;
+    winMenuBounds_ = Rect{x, y, menuW, h};
+
+    auto menu = std::make_unique<Menu>(std::move(labels));
+    Menu* raw = menu.get();
+    raw->setBounds(Rect{winMenuBounds_.x + 1, winMenuBounds_.y + 1,
+                         winMenuBounds_.w - 2, winMenuBounds_.h - 2});
+    winMenu_ = std::move(menu);
+
+    // Snapshot: callback moze zamknac okno (np. pozycja "Wyjdziez"), wiec po
+    // nim wskaznik winMenuWin_ moze byc dangling — trzymamy etykiety + callbacky
+    // PO WARTOSCI w closure i nigdy nie wracamy po dane do okna.
+    auto itemsCopy = items; // value-capture: std::function kopiuje safe
+    raw->onSelect = [this, items = std::move(itemsCopy)](int index) {
+        if (index >= 0 && static_cast<std::size_t>(index) < items.size() &&
+            items[static_cast<std::size_t>(index)].cb) {
+            items[static_cast<std::size_t>(index)].cb();
+        }
+        winMenuClosePending_ = true; // domkamy PO powrocie z callbacku (nie zniszczamy Menu w trakcie)
+    };
+}
 
 void Desktop::launchApp(App& app) {
     Rect area = desktopArea();
@@ -92,9 +227,22 @@ void Desktop::launchApp(App& app) {
     wm_.focus(w);
     cursor_.moveTo(w->bounds().x + 2, w->bounds().y + 1);
     cursor_.clamp(screenWidth(), screenHeight());
-    // Od razu w tryb Interact - po wybraniu aplikacji z menu mozna zaczac
-    // pisac/nawigowac bez dodatkowego Enter na zawartosci okna.
-    mode_ = CursorMode::Interact;
+    // Wchodzimy w tryb Keyboard - uzytkownik nawiguje strzalami po widgetach
+    // i aktywuje je Enterem/Space. Escape -> Desktop.
+    mode_ = enterWindowMode(*w);
+}
+
+CursorMode Desktop::enterWindowMode(Window& w) {
+    if (!w.content()) return CursorMode::Keyboard;
+    return w.content()->editable() ? CursorMode::Edit : CursorMode::Keyboard;
+}
+
+void Desktop::leaveWindowMode() {
+    // Usuwamy highlight ze wszystkich widgetow w fokusowanym oknie.
+    if (Window* f = wm_.focused()) {
+        f->content()->setHighlighted(false);
+    }
+    mode_ = CursorMode::Desktop;
 }
 
 void Desktop::openDialogWindow(FileDialogMode mode, const std::string& startDir,
@@ -102,10 +250,6 @@ void Desktop::openDialogWindow(FileDialogMode mode, const std::string& startDir,
     std::string dir = fs::isDirectory(startDir) ? startDir : fs::parent(startDir);
     if (!fs::isDirectory(dir)) dir = "/";
 
-    // Okno, ktore poprosilo o dialog (np. edytor) - po zamknieciu dialogu
-    // wracamy WLASNIE do niego w trybie Interact, zeby uzytkownik mogl od
-    // razu kontynuowac prace. Bez tego tryb spadal do Desktop i kolejne
-    // klawisze (np. dalsze pisanie) nie trafialy juz do widgetu.
     Window* requester = wm_.focused();
 
     auto dialog = std::make_unique<FileDialog>(mode, dir, suggestedName);
@@ -119,25 +263,17 @@ void Desktop::openDialogWindow(FileDialogMode mode, const std::string& startDir,
                                                                : "Otworz plik";
     Window* w = wm_.createWindow(title, bounds, std::move(dialog));
     wm_.focus(w);
-    mode_ = CursorMode::Interact;
+    mode_ = enterWindowMode(*w);
 
-    // KRYTYCZNE: onConfirm/onCancel sa wolane Z WNETRZA FileDialog::handleKey,
-    // czyli z metody obiektu, ktory wm_.closeWindow(w) zaraz zniszczy - a
-    // zniszczy TEZ pamiec, w ktorej zyje TA WLASNIE lambda (onConfirm jest
-    // skladowa std::function samego FileDialog). Dlatego closeWindow(w) MUSI
-    // byc ostatnia instrukcja: wszystko, co czyta zlapane zmienne (this,
-    // onPick/onCancel), musi wykonac sie PRZED nim. Odwrotna kolejnosc
-    // (closeWindow na poczatku) powodowala realny SIGSEGV - zlapane w
-    // testach pty, nie teoretycznie.
     raw->onConfirm = [this, w, requester, onPick = std::move(onPick)](const std::string& path) {
         if (onPick) onPick(path);
-        if (requester) { wm_.focus(requester); mode_ = CursorMode::Interact; }
+        if (requester) { wm_.focus(requester); mode_ = enterWindowMode(*requester); }
         else mode_ = CursorMode::Desktop;
         wm_.closeWindow(w);
     };
     raw->onCancel = [this, w, requester, onCancel = std::move(onCancel)]() {
         if (onCancel) onCancel();
-        if (requester) { wm_.focus(requester); mode_ = CursorMode::Interact; }
+        if (requester) { wm_.focus(requester); mode_ = enterWindowMode(*requester); }
         else mode_ = CursorMode::Desktop;
         wm_.closeWindow(w);
     };
@@ -162,14 +298,62 @@ void Desktop::toggleMaximize(Window& w) {
 }
 
 void Desktop::activateAtCursor() {
+    // Nie dotykamy appMenu_ (F1 menu) — to jest oddzielne, globalne menu.
+    if (!appMenu_) {
+        // Klik gdziekolwiek = domykaj otwarty dropdown menu aplikacji — ALE nie,
+        // gdy klikamy w ta sama karte, ktora jest otwarta (bez migniecia).
+        if (winMenu_ && winMenuWin_ && windowAlive(winMenuWin_)) {
+            bool overSameTab = winMenuWin_->titleBarZoneAt(cursor_.x(), cursor_.y()) == TitleBarZone::MenuTab
+                              && winMenuWin_->menuTabIndexAt(cursor_.x(), cursor_.y()) == winMenuTab_;
+            if (!overSameTab) closeWinMenu();
+        } else if (winMenu_) {
+            closeWinMenu(); // okno juz nie zyla — czyścimy stan
+        }
+    }
+
     if (cursor_.y() < kMenuBarHeight) { openAppMenu(); return; }
 
-    if (cursor_.y() >= screenHeight() - kStatusBarHeight) return; // pasek stanu - informacyjny
+    // --- Taskbar (status bar) — aktywacja uchwytu okna ----------------------
+    if (cursor_.y() >= screenHeight() - kTaskBarHeight) {
+        const auto& wins = wm_.windows();
+        int totalHandles = static_cast<int>(wins.size());
+        if (totalHandles == 0) return; // nic do aktywacji
+
+        int canScrollLeft  = taskbarScroll_ > 0;
+        int rightArrowWidth = 1;
+        int usableWidth    = screenWidth() - (canScrollLeft ? 1 : 0) - rightArrowWidth;
+        int maxVisible     = std::max(1, usableWidth / kTaskHandleW);
+
+        // Sprawdź czy kliknięto na strzałkę scrolla
+        if (cursor_.x() == 0 && canScrollLeft) {
+            taskbarScroll_ = std::max(0, taskbarScroll_ - 1);
+            return;
+        }
+        int arrowX = screenWidth() - 1;
+        if (cursor_.x() == arrowX && (taskbarScroll_ + maxVisible < totalHandles)) {
+            taskbarScroll_ += 1;
+            return;
+        }
+
+        // Oblicz indeks okna pod kursorem
+        int visualStartX = canScrollLeft ? 1 : 0;
+        int winIdx       = (cursor_.x() - visualStartX) / kTaskHandleW;
+        winIdx += taskbarScroll_;
+
+        if (winIdx >= 0 && winIdx < totalHandles) {
+            Window* w = wins[static_cast<std::size_t>(winIdx)].get();
+            wm_.focus(w);                       // focus() przywraca zminimalizowane okna
+            mode_ = enterWindowMode(*w);         // przejdź do trybu okna
+        }
+        return;
+    }
+
+    if (cursor_.y() >= screenHeight() - kTaskBarHeight) return; // task bar - informacyjny
 
     Window* w = wm_.windowAt(cursor_.x(), cursor_.y());
     if (!w) return; // pusty pulpit - nic pod kursorem
 
-    if (w->minimized()) { wm_.focus(w); return; } // focus() przywraca (patrz WindowManager::focus)
+    if (w->minimized()) { wm_.focus(w); return; } // focus() przywraca
 
     wm_.focus(w);
     switch (w->titleBarZoneAt(cursor_.x(), cursor_.y())) {
@@ -177,7 +361,10 @@ void Desktop::activateAtCursor() {
         case TitleBarZone::MinimizeButton: w->setMinimized(true); break;
         case TitleBarZone::MaximizeButton: toggleMaximize(*w); break;
         case TitleBarZone::Drag: mode_ = CursorMode::WindowMove; break;
-        case TitleBarZone::None: mode_ = CursorMode::Interact; break;
+        case TitleBarZone::MenuTab:
+            openWinMenu(*w, w->menuTabIndexAt(cursor_.x(), cursor_.y()));
+            break;
+        case TitleBarZone::None: mode_ = enterWindowMode(*w); break;
     }
 }
 
@@ -187,12 +374,41 @@ void Desktop::handleKey(const KeyEvent& ev) {
     // mozliwosci wyjscia z aplikacji.
     if (ev.ctrl && ev.key == Key::Char && ev.character == U'q') { quit(); return; }
 
+    // --- Menu pulpitowe (F1) ma najwiekszy priorytet ---
     if (appMenu_) {
         if (ev.key == Key::Escape) { closeAppMenu(); return; }
         appMenu_->handleKey(ev);
+        if (appMenuClosePending_) closeAppMenu(); // PO powrocie z onSelect — bez UB
         return;
     }
 
+    // --- Menu aplikacji (dropdown pod paskiem tytulu okna) ---
+    if (winMenu_) {
+        if (ev.key == Key::Escape) { closeWinMenu(); return; }
+        Window* owner = winMenuWin_;
+        auto nTabs = (owner && windowAlive(owner) && owner->content())
+                         ? static_cast<int>(owner->content()->menuTabs().size())
+                         : 0;
+        // Left/Right = przelaczenie karty, o ile jest wiecej niz jedna.
+        if (nTabs > 1) {
+            if (ev.key == Key::Left)  { openWinMenu(*owner, (winMenuTab_ - 1 + nTabs) % nTabs); return; }
+            if (ev.key == Key::Right) { openWinMenu(*owner, (winMenuTab_ + 1) % nTabs); return; }
+        }
+        winMenu_->handleKey(ev);
+        if (winMenuClosePending_) closeWinMenu(); // PO powrocie z onSelect — bez UB
+        return;
+    }
+
+    // --- Globalne skróty klawiszowe — zawsze działają, niezależnie od trybu ---
+    if (ev.key == Key::F1) { openAppMenu(); return; }
+    if (ev.key == Key::Tab) { wm_.focusNext(); return; }
+    if (ev.ctrl && ev.key == Key::Char && ev.character == U'w') { wm_.closeFocused(); return; }
+    if (ev.key == Key::F5 && wm_.focused()) { mode_ = CursorMode::WindowMove; return; }
+    if (ev.key == Key::F6 && wm_.focused()) { mode_ = CursorMode::WindowResize; return; }
+    if (ev.key == Key::F7 && wm_.focused()) { toggleMaximize(*wm_.focused()); return; }
+    if (ev.key == Key::F8 && wm_.focused()) { wm_.focused()->setMinimized(true); return; }
+
+    // --- WindowMove / WindowResize (wyszczególnione najwyzej w trybie, zeby ESC wychodzil natychmiast) ---
     if (mode_ == CursorMode::WindowMove || mode_ == CursorMode::WindowResize) {
         Window* f = wm_.focused();
         if (!f) { mode_ = CursorMode::Desktop; return; }
@@ -213,25 +429,147 @@ void Desktop::handleKey(const KeyEvent& ev) {
         return;
     }
 
-    if (mode_ == CursorMode::Interact) {
-        if (ev.key == Key::Escape) { mode_ = CursorMode::Desktop; return; }
-        if (ev.ctrl && ev.key == Key::Char && ev.character == U'w') {
-            wm_.closeFocused();
-            mode_ = CursorMode::Desktop;
-            return;
+    // --- Edit mode — klawisze trafiaja do edytowalnego widgetu ---
+    if (mode_ == CursorMode::Edit) {
+        if (Window* f = wm_.focused()) {
+            if (ev.key == Key::Escape) {
+                mode_ = CursorMode::Keyboard;  // wychodzimy z edycji, ale zostajemy w oknie
+                return;
+            }
+            // F2 = menu aplikacji (dziala tez w trybie edycji).
+            if (ev.key == Key::F2) {
+                auto& tabs = f->content()->menuTabs();
+                if (!tabs.empty()) openWinMenu(*f, 0);
+                return;
+            }
+            auto* content = f->content();
+            // Sprawdz skróty aplikacji PRZED widgetem (np. Ctrl+S dla TextEditor).
+            if (matchesShortcuts(content->shortcuts(), ev)) {
+                invokeShortcut(content->shortcuts(), ev);
+                return;
+            }
+            f->handleKey(ev);
         }
-        if (Window* f = wm_.focused()) f->handleKey(ev);
         return;
     }
 
-    // mode_ == CursorMode::Desktop
-    if (ev.ctrl && ev.key == Key::Char && ev.character == U'w') { wm_.closeFocused(); return; }
-    if (ev.key == Key::Tab) { wm_.focusNext(); return; }
-    if (ev.key == Key::F1) { openAppMenu(); return; }
-    if (ev.key == Key::F5 && wm_.focused()) { mode_ = CursorMode::WindowMove; return; }
-    if (ev.key == Key::F6 && wm_.focused()) { mode_ = CursorMode::WindowResize; return; }
-    if (ev.key == Key::F7 && wm_.focused()) { toggleMaximize(*wm_.focused()); return; }
-    if (ev.key == Key::F8 && wm_.focused()) { wm_.focused()->setMinimized(true); return; }
+    // --- Keyboard mode — nawigacja miedzy widgetami w fokusowanym oknie ---
+    if (mode_ == CursorMode::Keyboard) {
+        Window* f = wm_.focused();
+        if (!f || f->minimized()) { mode_ = CursorMode::Desktop; return; }
+
+        // Escape -> wracamy na pulpit (zostawiamy okno sfokusowane, ale nie w trybie klaw.)
+        if (ev.key == Key::Escape) {
+            leaveWindowMode();
+            return;
+        }
+
+        // F2 -> otwiera/przełącza menu konkretnej aplikacji (pierwsza karta).
+        if (ev.key == Key::F2) {
+            auto& tabs = f->content()->menuTabs();
+            if (!tabs.empty()) openWinMenu(*f, 0);
+            return;
+        }
+
+        // Sprawdz skróty aplikacji PRZED widgetem.
+        auto* content = f->content();
+        if (content && matchesShortcuts(content->shortcuts(), ev)) {
+            invokeShortcut(content->shortcuts(), ev);
+            return;
+        }
+
+        // Znak -> przechodzimy do trybu Edit dla edytowalnych widgetow.
+        if (ev.key == Key::Char && !ev.ctrl) {
+            auto* content = f->content();
+            if (content && content->editable()) {
+                mode_ = CursorMode::Edit;
+            }
+        }
+
+        // Delegujemy do widgetu-zawartosci.
+        f->handleKey(ev);
+        return;
+    }
+
+    // --- Desktop mode — wolny kursor po ekranie ---
+    if (ev.key == Key::F2) {
+        // Otwiera menu pierwszego okna, na ktorego pasku tytulu stoi kursor;
+        // inaczej menu okna fokusa.
+        Window* under = wm_.windowAt(cursor_.x(), cursor_.y());
+        Window* target = (under && !under->minimized() && under->content() &&
+                          under->content()->menuTabs().size() > 0 &&
+                          (under->onTitleBar(cursor_.x(), cursor_.y()) ||
+                           under->onMenuRow(cursor_.x(), cursor_.y())))
+                             ? under
+                             : wm_.focused();
+        if (target && target->content() && !target->content()->menuTabs().empty())
+            openWinMenu(*target, 0);
+        return;
+    }
+
+    // --- Taskbar — nawigacja i aktywacja okien ------------------
+    if (cursor_.y() >= screenHeight() - kTaskBarHeight) {
+        const auto& wins = wm_.windows();
+        int totalHandles = static_cast<int>(wins.size());
+        if (totalHandles == 0) {
+            // Nic na taskbarze — po prostu nie ruszaj kursora dalej w dół
+            cursor_.moveTo(0, screenHeight() - 1);
+            return;
+        }
+
+        int canScrollLeft  = taskbarScroll_ > 0;
+        int rightArrowWidth = 1;
+        int usableWidth    = screenWidth() - (canScrollLeft ? 1 : 0) - rightArrowWidth;
+        int maxVisible     = std::max(1, usableWidth / kTaskHandleW);
+
+        if (ev.key == Key::Left) {
+            // Porusz sie w lewo o jedno pole; jesli scroll mozliwy i jestes na pocztku — przesun scroll.
+            if (canScrollLeft && cursor_.x() <= kTaskHandleW) {
+                taskbarScroll_ = std::max(0, taskbarScroll_ - 1);
+            } else {
+                cursor_.moveBy(-1, 0);
+            }
+            return;
+        }
+        if (ev.key == Key::Right) {
+            // Porusz sie w prawo o jedno pole; jesli scroll mozliwy i jestes na koncu — przesun scroll.
+            int arrowX = screenWidth() - 1;
+            bool canScrollRight = (taskbarScroll_ + maxVisible < totalHandles);
+            if (canScrollRight && cursor_.x() >= arrowX - kTaskHandleW + 1) {
+                taskbarScroll_ += 1;
+            } else {
+                cursor_.moveBy(1, 0);
+            }
+            return;
+        }
+        if (ev.key == Key::Enter || (ev.key == Key::Char && !ev.ctrl && ev.character == U' ')) {
+            // Aktywuj okno pod kursorem na taskbarze
+            int canScrollL = taskbarScroll_ > 0;
+            usableWidth    = screenWidth() - (canScrollL ? 1 : 0) - rightArrowWidth;
+            maxVisible     = std::max(1, usableWidth / kTaskHandleW);
+
+            int visualStartX = canScrollL ? 1 : 0; // pozycja pierwszego widocznego uchwytu
+            int winIdx       = (cursor_.x() - visualStartX) / kTaskHandleW;
+            winIdx += taskbarScroll_;             // dodaj offset scrolla
+
+            if (winIdx >= 0 && winIdx < totalHandles) {
+                Window* w = wins[static_cast<std::size_t>(winIdx)].get();
+                wm_.focus(w);                       // focus() przywraca zminimalizowane okna
+                mode_ = enterWindowMode(*w);         // przejdź do trybu okna
+            }
+            return;
+        }
+        // Jeśli kursor jest na taskbarze i użytkownik nacisnął strzałkę w górę,
+        // opuść task bar (wróć na pulpit).
+        if (ev.key == Key::Up) {
+            cursor_.moveTo(cursor_.x(), screenHeight() - 2);
+            return;
+        }
+
+        // Down — nie rób nic (kursor już jest na taskbarze).
+        // Każdy inny klawisz: ignorujemy (głównie Enter/Space, ale to też tu trafia).
+        return;
+    }
 
     switch (ev.key) {
         case Key::Up: cursor_.moveBy(0, -1); break;
@@ -246,9 +584,9 @@ void Desktop::handleKey(const KeyEvent& ev) {
 }
 
 void Desktop::drawDesktopBackground(Screen& screen) {
-    for (int y = kMenuBarHeight; y < screen.height() - kStatusBarHeight; ++y)
+    for (int y = kMenuBarHeight; y < screen.height() - kTaskBarHeight; ++y)
         for (int x = 0; x < screen.width(); ++x)
-            screen.set(x, y, Cell{U' ', colors::White, colors::DarkBlue, 0});
+            screen.set(x, y, Cell{U' ', colors::White, colors::Black, 0});
 }
 
 void Desktop::drawMenuBar(Screen& screen) {
@@ -258,41 +596,111 @@ void Desktop::drawMenuBar(Screen& screen) {
     std::u32string left = U" Aplikacje (F1) ";
     screen.putText(0, 0, left, colors::White, colors::Blue, StyleBold);
 
-    std::u32string name(desktopName_.begin(), desktopName_.end());
-    int rightX = screen.width() - static_cast<int>(name.size()) - 1;
+    // Tryb w prawym gornym rogu: [tryb] | Fenrir — miejsce gdzie byly "Fenrir".
+    std::u32string modeLabel = U"Desktop";
+    switch (mode_) {
+        case CursorMode::Keyboard:  modeLabel = U"Keyboard"; break;
+        case CursorMode::Edit:      modeLabel = U"Edit"; break;
+        case CursorMode::WindowMove:   modeLabel = U"Move"; break;
+        case CursorMode::WindowResize: modeLabel = U"Resize"; break;
+        default: break;
+    }
+    std::u32string right = modeLabel + U" | " + std::u32string(desktopName_.begin(), desktopName_.end());
+    int rightX = screen.width() - static_cast<int>(right.size()) - 1;
     if (rightX > static_cast<int>(left.size()))
-        screen.putText(rightX, 0, name, colors::White, colors::Blue, StyleBold);
+        screen.putText(rightX, 0, right, colors::White, colors::Blue, StyleBold);
 }
 
-void Desktop::drawStatusBar(Screen& screen) {
+void Desktop::drawTaskBar(Screen& screen) {
+    // Pasek taskbar: Black tlo. Aktywny uchwyt = "wciśnięty przycisk" (Gray tlo,
+    // White tekst, bold); nieaktywne uchwyty = White tekst; akcenty = Yellow.
+    // Celowo nie niebieski — niebieski zostaje paskom tytułu/menu okien.
+    const Color barBg = colors::Black;
+    const Color activeFg = colors::White;
+    const Color activeBg = colors::Gray;
+    const Color inactiveFg = colors::White;
+    const Color accent = colors::Yellow;
+
     int y = screen.height() - 1;
     for (int x = 0; x < screen.width(); ++x)
-        screen.set(x, y, Cell{U' ', colors::Black, colors::Gray, 0});
+        screen.set(x, y, Cell{' ', inactiveFg, barBg, 0});
 
-    std::u32string hints =
-        U"F1 menu | strzalki: kursor/okno | Enter aktywuj | F5/F6 przesun/rozmiar | F7 maks | F8 min | Ctrl+W zamknij | Ctrl+Q wyjscie";
-    if (static_cast<int>(hints.size()) > screen.width() - 2)
-        hints.resize(static_cast<std::size_t>(std::max(0, screen.width() - 2)));
-    screen.putText(1, y, hints, colors::Black, colors::Gray);
+    const auto& wins = wm_.windows();
+    int totalHandles = static_cast<int>(wins.size());
 
-    std::u32string list;
-    for (auto& w : wm_.windows()) {
-        std::string t = w->title();
-        if (!list.empty()) list += U" | ";
-        if (w->minimized()) list += U"[_]";
-        list += std::u32string(t.begin(), t.end());
+    // Compute scroll state (needed even for clock layout)
+    bool canScrollLeft  = taskbarScroll_ > 0;
+    bool canScrollRight = true;
+    int leftArrowWidth  = canScrollLeft  ? 1 : 0;
+    int rightArrowWidth = 1;
+
+    if (totalHandles > 0) {
+        int usableWidth    = screen.width() - leftArrowWidth - rightArrowWidth;
+        int maxVisible     = std::max(1, usableWidth / kTaskHandleW);
+
+        if (taskbarScroll_ + maxVisible > totalHandles)
+            taskbarScroll_ = std::max(0, totalHandles - maxVisible);
+        canScrollRight = (taskbarScroll_ + maxVisible < totalHandles);
+
+        const Window* activeWin = wm_.focused();
+        int visibleStart = taskbarScroll_;
+        int visibleEnd   = std::min(visibleStart + maxVisible, totalHandles);
+
+        for (int idx = visibleStart; idx < visibleEnd; ++idx) {
+            Window* w = wins[static_cast<std::size_t>(idx)].get();
+            bool isMinimized = w->minimized();
+            bool isActive    = (w == activeWin && !isMinimized);
+
+            Color bg = isActive ? activeBg : barBg;
+            Color fg = isActive ? activeFg : inactiveFg;
+
+            // Build title label with ASCII-only [ ] brackets and ... for truncation
+            std::string latin(w->title());
+            int maxChars = kTaskHandleW - 4;  // leave room for [ ] and ...
+            if (static_cast<int>(latin.size()) > maxChars) {
+                latin.resize(static_cast<std::size_t>(maxChars));
+            }
+            std::string label = "[" + latin + "]";
+            int pad = kTaskHandleW - static_cast<int>(label.size());
+            if (pad < 0) pad = 1; // minimum padding
+            label.insert(1, static_cast<std::size_t>(pad / 2), ' ');
+
+            int x = leftArrowWidth + (idx - visibleStart) * kTaskHandleW;
+            if (x + static_cast<int>(label.size()) < screen.width()) {
+                screen.putText(x, y, std::u32string(label.begin(), label.end()), fg, bg, isActive ? StyleBold : StyleNone);
+            }
+        }
+
+        // ASCII scroll arrows
+        if (canScrollLeft) screen.set(0, y, Cell{'<', accent, barBg});
+        if (canScrollRight) screen.set(screen.width() - 1, y, Cell{'>', accent, barBg});
     }
-    int listX = screen.width() - static_cast<int>(list.size()) - 1;
-    int minX = 2 + static_cast<int>(hints.size());
-    if (listX > minX) screen.putText(listX, y, list, colors::Black, colors::Gray, StyleBold);
+
+    // --- Date/time: ZAWSZE w tym samym miejscu (prawy kraniec, przy strzale >). ---
+    // Strefa zegara jest zarezerwowana: uchwytów okien jest tak dużo, żeby nie
+    // nachodziły na zegar. Zegar NIGDY się nie przesuwa przy otwieraniu okien.
+    time_t now = time(nullptr);
+    struct tm *ti = localtime(&now);
+    if (ti) {
+        char tbuf[20];
+        strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M", ti);
+        std::string clockStr(tbuf);
+        int clockX = screen.width() - 1 - static_cast<int>(clockStr.size()); // przyklejony do prawej
+        if (clockX < leftArrowWidth) clockX = leftArrowWidth;
+        if (clockX + static_cast<int>(clockStr.size()) <= screen.width()) {
+            screen.putText(clockX, y, std::u32string(clockStr.begin(), clockStr.end()), accent, barBg);
+        }
+    }
 }
 
 void Desktop::positionGuiCursor() {
-    if (mode_ == CursorMode::Interact) {
+    if (mode_ == CursorMode::Edit) {
         Window* f = wm_.focused();
         auto pos = (f && !f->minimized()) ? f->content()->cursorPosition() : std::nullopt;
         if (pos) cursor_.moveTo(pos->first, pos->second);
     }
+    // W trybie Desktop/Keyboard kursor stoi tam, gdzie ostatnio ustawiono (lub na pulpicie).
+    // W trybie Edit przemieszczamy go do wewnetrznego kursora edytowalnego widgetu.
     cursor_.setVisible(cursorBlinkState_);
     cursor_.render(screen_);
 }
@@ -315,15 +723,26 @@ void Desktop::tickOnce() {
         for (const KeyEvent& ev : keyParser_.feed(buf, n)) handleKey(ev);
     }
 
+    // === DRAW ORDER (DO NOT REORDER — each layer overlaps the one before): ===
+    // 1. Desktop background        2. Windows                     3. Menu bar (top row)
+    // 4. Taskbar (bottom row)     5. App dropdown (F1)           6. Win menu dropdown
+    // 7. GUI cursor (fg/bg swap — MUST be last to stay on top) ===
+
     screen_.clear(Cell{U' ', colors::White, colors::Black, 0});
     drawDesktopBackground(screen_);
-    wm_.draw(screen_);
-    drawMenuBar(screen_);
-    drawStatusBar(screen_);
+    wm_.draw(screen_);      // windows (below the bars)
+    drawMenuBar(screen_);   // menu bar on top of windows
+    drawTaskBar(screen_);   // taskbar on top of everything
 
     if (appMenu_) {
         drawBox(screen_, appMenuBounds_, U"Aplikacje");
         appMenu_->draw(screen_);
+    }
+
+    // Menu konkretnej aplikacji — dropdown pod paskiem tytułu okna.
+    if (winMenu_) {
+        drawBox(screen_, winMenuBounds_, winMenuTitle_);
+        winMenu_->draw(screen_);
     }
 
     positionGuiCursor();

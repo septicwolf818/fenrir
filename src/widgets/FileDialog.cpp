@@ -23,19 +23,18 @@ void FileDialog::confirmSave() {
 
 void FileDialog::draw(Screen& screen) {
     Rect la = listingArea();
-    drawDirectoryListing(screen, la, listing_, zone_ == Zone::List);
+    drawDirectoryListing(screen, la, listing_);
 
     if (mode_ == FileDialogMode::SaveFile) {
         int y = la.y + la.h;
-        for (int x = bounds_.x; x < bounds_.x + bounds_.w; ++x)
-            screen.set(x, y, Cell{U' ', colors::White, colors::Black, 0});
+        // Pole nazwy: Black tekst na White tle (papier). Gdy zaznaczone (fokus): White na Blue.
         bool sel = (zone_ == Zone::NameField);
-        Color fg = sel ? colors::Black : colors::White;
-        Color bg = sel ? colors::Yellow : colors::Black;
+        Color fg = sel ? colors::White : colors::Black;
+        Color bg = sel ? colors::Blue : colors::White;
         std::u32string label = U"Nazwa: " + filename_;
         for (int x = bounds_.x; x < bounds_.x + bounds_.w; ++x) screen.set(x, y, Cell{U' ', fg, bg, 0});
         if (static_cast<int>(label.size()) > bounds_.w) label.resize(static_cast<std::size_t>(bounds_.w));
-        screen.putText(bounds_.x, y, label, fg, bg, StyleBold);
+        screen.putText(bounds_.x, y, label, fg, bg, sel ? StyleBold : StyleNone);
     }
 
     int hintY = bounds_.y + bounds_.h - kHintRows;
@@ -45,50 +44,48 @@ void FileDialog::draw(Screen& screen) {
         case FileDialogMode::OpenFolder: hint = U"Enter: wejdz | S: wybierz ten folder | Esc: anuluj"; break;
         case FileDialogMode::SaveFile: hint = U"Enter: wejdz/wpisz nazwe | Tab: pole nazwy | Esc: anuluj"; break;
     }
-    for (int x = bounds_.x; x < bounds_.x + bounds_.w; ++x) screen.set(x, hintY, Cell{U' ', colors::Black, colors::Gray, 0});
+    for (int x = bounds_.x; x < bounds_.x + bounds_.w; ++x) screen.set(x, hintY, Cell{U' ', colors::White, colors::Gray, 0});
     if (static_cast<int>(hint.size()) > bounds_.w) hint.resize(static_cast<std::size_t>(bounds_.w));
-    screen.putText(bounds_.x, hintY, hint, colors::Black, colors::Gray);
+    screen.putText(bounds_.x, hintY, hint, colors::White, colors::Gray);
 }
 
-bool FileDialog::handleKey(const KeyEvent& ev) {
-    if (ev.key == Key::Escape) { if (onCancel) onCancel(); return true; }
+KeyEventResult FileDialog::handleKey(const KeyEvent& ev) {
+    if (ev.key == Key::Escape) { if (onCancel) onCancel(); return KeyEventResult::Consumed; }
 
     if (mode_ == FileDialogMode::SaveFile && ev.key == Key::Tab) {
         zone_ = (zone_ == Zone::List) ? Zone::NameField : Zone::List;
-        return true;
+        return KeyEventResult::Consumed;
     }
 
     if (zone_ == Zone::NameField) {
-        if (ev.key == Key::Backspace) { if (!filename_.empty()) filename_.pop_back(); return true; }
-        if (ev.key == Key::Enter) { confirmSave(); return true; }
-        if (ev.key == Key::Char && !ev.ctrl) { filename_ += ev.character; return true; }
-        return true; // polykamy reszte (np. strzalki), zeby nie ruszaly listy w tle
+        if (ev.key == Key::Backspace) { if (!filename_.empty()) filename_.pop_back(); return KeyEventResult::Consumed; }
+        if (ev.key == Key::Enter) { confirmSave(); return KeyEventResult::Activated; }
+        if (ev.key == Key::Char && !ev.ctrl) { filename_ += ev.character; return KeyEventResult::Consumed; }
+        return KeyEventResult::Consumed;
     }
 
-    // zone_ == Zone::List
     if (mode_ == FileDialogMode::OpenFolder && ev.key == Key::Char && !ev.ctrl &&
         (ev.character == U's' || ev.character == U'S')) {
         if (onConfirm) onConfirm(listing_.currentDir());
-        return true;
+        return KeyEventResult::Activated;
     }
 
     switch (ev.key) {
-        case Key::Up: listing_.moveSelection(-1); return true;
-        case Key::Down: listing_.moveSelection(1); return true;
+        case Key::Up: listing_.moveSelection(-1); return KeyEventResult::Consumed;
+        case Key::Down: listing_.moveSelection(1); return KeyEventResult::Consumed;
         case Key::Enter: {
-            if (listing_.activateSelected()) return true; // katalog/".." - juz nawigowalismy
-            // zaznaczenie to plik
+            if (listing_.activateSelected()) return KeyEventResult::Consumed;
             if (mode_ == FileDialogMode::OpenFile) {
                 if (onConfirm) onConfirm(listing_.selectedFullPath());
+                return KeyEventResult::Activated;
             } else if (mode_ == FileDialogMode::SaveFile) {
                 std::string name = listing_.entries()[static_cast<std::size_t>(listing_.selectedIndex())].name;
                 filename_.assign(name.begin(), name.end());
                 zone_ = Zone::NameField;
             }
-            // OpenFolder: plik pod kursorem w trybie wyboru folderu - ignorujemy
-            return true;
+            return KeyEventResult::Activated;
         }
-        default: return false;
+        default: return KeyEventResult::Ignored;
     }
 }
 

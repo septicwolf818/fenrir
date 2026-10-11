@@ -63,26 +63,28 @@ void DirectoryListing::ensureVisible(int viewportHeight) {
     if (scroll_ < 0) scroll_ = 0;
 }
 
-void drawDirectoryListing(Screen& screen, const Rect& area, DirectoryListing& listing, bool focused) {
+void drawDirectoryListing(Screen& screen, const Rect& area, DirectoryListing& listing) {
     if (area.h <= 0 || area.w <= 0) return;
 
-    // Naglowek: biezaca sciezka.
+    // Naglowek (etykieta katalogu): Gray tlo, White tekst, bold — drugorzędowy pasek.
     std::string dirLine = listing.currentDir();
     std::u32string header(dirLine.begin(), dirLine.end());
     if (static_cast<int>(header.size()) > area.w) header.resize(static_cast<std::size_t>(area.w));
-    for (int x = area.x; x < area.x + area.w; ++x) screen.set(x, area.y, Cell{U' ', colors::Black, colors::Gray, 0});
-    screen.putText(area.x, area.y, header, colors::Black, colors::Gray, StyleBold);
+    for (int x = area.x; x < area.x + area.w; ++x)
+        screen.set(x, area.y, Cell{U' ', colors::White, colors::Gray, StyleBold});
+    screen.putText(area.x, area.y, header, colors::White, colors::Gray, StyleBold);
 
+    // Tlo listy: White (papier). Wiersze: Black tekst na White tle.
     const Rect listArea{area.x, area.y + 1, area.w, area.h - 1};
     for (int y = listArea.y; y < listArea.y + listArea.h; ++y)
         for (int x = listArea.x; x < listArea.x + listArea.w; ++x)
-            screen.set(x, y, Cell{U' ', colors::White, colors::Black, 0});
+            screen.set(x, y, Cell{U' ', colors::Black, colors::White, 0});
 
     if (listing.hasError()) {
         std::string err = listing.error();
         std::u32string e(err.begin(), err.end());
         if (static_cast<int>(e.size()) > listArea.w) e.resize(static_cast<std::size_t>(listArea.w));
-        screen.putText(listArea.x, listArea.y, e, colors::Red, colors::Black, StyleBold);
+        screen.putText(listArea.x, listArea.y, e, colors::BrightRed, colors::White, StyleBold);
         return;
     }
 
@@ -93,16 +95,19 @@ void drawDirectoryListing(Screen& screen, const Rect& area, DirectoryListing& li
         if (idx < 0 || idx >= static_cast<int>(entries.size())) break;
         const fs::Entry& e = entries[static_cast<std::size_t>(idx)];
 
+        // Wybrany wiersz: White tekst na Blue tle, bold — ten sam motyw co pasek tytulu.
         bool isSel = (idx == listing.selectedIndex());
-        Color fg = isSel ? (focused ? colors::Black : colors::White) : colors::White;
-        Color bg = isSel ? (focused ? colors::Yellow : colors::DarkGray) : colors::Black;
+        Color fg = isSel ? colors::White : colors::Black;
+        Color bg = isSel ? colors::Blue : colors::White;
+        uint8_t style = isSel ? StyleBold : StyleNone;
 
         std::string label = (e.isDir ? "/ " : "  ") + e.name;
         std::u32string line(label.begin(), label.end());
         if (static_cast<int>(line.size()) > listArea.w) line.resize(static_cast<std::size_t>(listArea.w));
 
-        for (int x = listArea.x; x < listArea.x + listArea.w; ++x) screen.set(x, listArea.y + row, Cell{U' ', fg, bg, 0});
-        screen.putText(listArea.x, listArea.y + row, line, fg, bg, e.isDir ? StyleBold : StyleNone);
+        for (int x = listArea.x; x < listArea.x + listArea.w; ++x)
+            screen.set(x, listArea.y + row, Cell{U' ', fg, bg, style});
+        screen.putText(listArea.x, listArea.y + row, line, fg, bg, style);
     }
 }
 

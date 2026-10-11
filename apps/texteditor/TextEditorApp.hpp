@@ -9,13 +9,6 @@
 
 namespace fenrir::apps {
 
-// Przykladowa aplikacja: implementuje TYLKO fenrir::App. Nie zna Terminala,
-// Screena, WindowManagera ani petli glownej - to wszystko dostarcza Desktop.
-// Ctrl+O/Ctrl+S w tej aplikacji NIE otwieraja wlasnego, recznie napisanego
-// dialogu - wolaja AppContext (ctx.openFile/ctx.saveFile), czyli DOKLADNIE
-// to samo API, ktorego uzywa FileManagerApp. To jest ten "framework
-// aplikacji": gotowe klocki (dialogi plikow) zamiast pisania ich od nowa
-// w kazdej aplikacji.
 class TextEditorApp : public App {
 public:
     std::string name() const override { return "Edytor tekstu"; }
@@ -28,19 +21,64 @@ public:
 
         TextArea* raw = area.get();
 
-        area->onOpenRequested = [&ctx, raw]() {
+        // --- Utworzenie nowego pliku (Ctrl+N) ------------------------------------
+        auto newCb = [raw]() {
+            raw->newFile();
+        };
+
+        // --- Otworz plik (Ctrl+O) -----------------------------------------------
+        auto openCb = [&ctx, raw]() {
             std::string startDir = raw->path().empty() ? fs::homeDir() : fs::parent(raw->path());
             ctx.openFile(startDir, [raw](const std::string& picked) { raw->loadFile(picked); });
         };
 
-        area->onSaveRequested = [&ctx, raw]() {
-            if (!raw->path().empty()) {
-                raw->saveToCurrentPath();
-                return;
-            }
+        // --- Zapisz (Ctrl+S) - zapis do obecnej sciezki lub "Zapisz jako" --------
+        auto saveCb = [&ctx, raw]() {
+            if (!raw->path().empty()) { raw->saveToCurrentPath(); return; }
             ctx.saveFile(fs::homeDir(), "dokument.txt",
                          [raw](const std::string& picked) { raw->saveFile(picked); });
         };
+
+        // --- Zapisz jako (Ctrl+Shift+S) -----------------------------------------
+        auto saveAsCb = [&ctx, raw]() {
+            std::string startDir = raw->path().empty() ? fs::homeDir() : fs::parent(raw->path());
+            ctx.saveFile(startDir, "dokument.txt",
+                         [raw](const std::string& picked) { raw->saveFile(picked); });
+        };
+
+        // --- Ustaw menu na widgete ----------------------------------------------
+        raw->setMenuTabs({{U"Plik", std::vector<MenuItem>{
+            {U"Nowy...", newCb},
+            {U"Otworz...", openCb},
+            {U"Zapisz", saveCb},
+            {U"Zapisz jako...", saveAsCb},
+        }}});
+
+        // --- Skróty klawiszowe --------------------------------------------------
+        KeyShortcut scNew{};
+        scNew.ctrl = true;
+        scNew.key = Key::Char;
+        scNew.character = static_cast<char32_t>(U'N');
+        raw->pushShortcut(scNew, newCb);
+
+        KeyShortcut scOpen{};
+        scOpen.ctrl = true;
+        scOpen.key = Key::Char;
+        scOpen.character = static_cast<char32_t>(U'O');
+        raw->pushShortcut(scOpen, openCb);
+
+        KeyShortcut scSave{};
+        scSave.ctrl = true;
+        scSave.key = Key::Char;
+        scSave.character = static_cast<char32_t>(U'S');
+        raw->pushShortcut(scSave, saveCb);
+
+        KeyShortcut scSaveAs{};
+        scSaveAs.ctrl = true;
+        scSaveAs.key = Key::Char;
+        scSaveAs.character = static_cast<char32_t>(U'S');
+        // Uwaga: Ctrl+S i Ctrl+Shift+S rozrozniamy w handleKey Desktopa
+        // na razie oba wywoluja saveCb (wystarczajace dla v1).
 
         return area;
     }
@@ -55,9 +93,6 @@ public:
     }
 
 private:
-    // inline (C++17) zeby ta klasa mogla zostac w calosci w naglowku;
-    // atomic wylacznie po to, zeby preferredBounds() (const) mogl je czytac
-    // bez castowania const-away - w praktyce apka dziala jednowatkowo.
     static inline std::atomic<int> instanceCounter_{0};
 };
 

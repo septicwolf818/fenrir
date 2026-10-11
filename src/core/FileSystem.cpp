@@ -80,6 +80,12 @@ long long fileSize(const std::string& path) {
     return static_cast<long long>(sz);
 }
 
+void removeFile(const std::string& path) {
+    std::error_code ec;
+    bool removed = stdfs::remove(path, ec);
+    if (!removed) throw std::runtime_error("Nie mozna usunac pliku: " + path + " (" + ec.message() + ")");
+}
+
 std::string homeDir() {
     const char* h = std::getenv("HOME");
     if (h && *h) return h;

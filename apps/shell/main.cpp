@@ -9,6 +9,7 @@
 #include "fenrir/desktop/Desktop.hpp"
 #include "../texteditor/TextEditorApp.hpp"
 #include "../filemanager/FileManagerApp.hpp"
+#include "../calculator/CalculatorApp.hpp"
 
 int main() {
     try {
@@ -17,6 +18,7 @@ int main() {
 
         desktop.apps().registerApp(std::make_unique<fenrir::apps::TextEditorApp>());
         desktop.apps().registerApp(std::make_unique<fenrir::apps::FileManagerApp>());
+        desktop.apps().registerApp(std::make_unique<fenrir::apps::CalculatorApp>());
         // Kolejne aplikacje dopisujesz tutaj.
 
         return desktop.run();

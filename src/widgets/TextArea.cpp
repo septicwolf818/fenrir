@@ -60,7 +60,7 @@ std::u32string decodeUtf8Line(const std::string& line) {
 
 } // namespace
 
-TextArea::TextArea() = default;
+TextArea::TextArea() { editable_ = true; }
 
 void TextArea::loadFile(const std::string& path) {
     path_ = path;
@@ -116,6 +116,27 @@ void TextArea::saveToCurrentPath() {
         return;
     }
     saveFile(path_);
+}
+
+void TextArea::newFile() {
+    lines_.clear();
+    lines_.push_back(std::u32string());
+    cursorRow_ = 0;
+    cursorCol_ = 0;
+    scrollRow_ = 0;
+    path_.clear();
+    dirty_ = false;
+    if (onStatus) onStatus("Nowy plik");
+}
+
+void TextArea::clearText() {
+    lines_.clear();
+    lines_.push_back(std::u32string());
+    cursorRow_ = 0;
+    cursorCol_ = 0;
+    scrollRow_ = 0;
+    dirty_ = true;
+    if (onStatus) onStatus("Wyczyszczono");
 }
 
 void TextArea::insertChar(char32_t ch) {
@@ -187,32 +208,32 @@ void TextArea::ensureVisible() {
     if (cursorRow_ >= scrollRow_ + visibleRows) scrollRow_ = cursorRow_ - visibleRows + 1;
 }
 
-bool TextArea::handleKey(const KeyEvent& ev) {
+KeyEventResult TextArea::handleKey(const KeyEvent& ev) {
     if (ev.ctrl && ev.key == Key::Char && (ev.character == U's' || ev.character == U'S')) {
         if (onSaveRequested) onSaveRequested();
         else saveToCurrentPath();
-        return true;
+        return KeyEventResult::Consumed;
     }
     if (ev.ctrl && ev.key == Key::Char && (ev.character == U'o' || ev.character == U'O')) {
         if (onOpenRequested) onOpenRequested();
-        return true;
+        return KeyEventResult::Consumed;
     }
     switch (ev.key) {
-        case Key::Up: moveCursor(-1, 0); return true;
-        case Key::Down: moveCursor(1, 0); return true;
-        case Key::Left: moveCursor(0, -1); return true;
-        case Key::Right: moveCursor(0, 1); return true;
-        case Key::Home: cursorCol_ = 0; ensureVisible(); return true;
-        case Key::End: cursorCol_ = static_cast<int>(lines_[cursorRow_].size()); ensureVisible(); return true;
-        case Key::PageUp: moveCursor(-std::max(1, bounds_.h), 0); return true;
-        case Key::PageDown: moveCursor(std::max(1, bounds_.h), 0); return true;
-        case Key::Enter: insertNewline(); ensureVisible(); return true;
-        case Key::Backspace: backspace(); ensureVisible(); return true;
-        case Key::Delete: del(); return true;
+        case Key::Up: moveCursor(-1, 0); return KeyEventResult::Consumed;
+        case Key::Down: moveCursor(1, 0); return KeyEventResult::Consumed;
+        case Key::Left: moveCursor(0, -1); return KeyEventResult::Consumed;
+        case Key::Right: moveCursor(0, 1); return KeyEventResult::Consumed;
+        case Key::Home: cursorCol_ = 0; ensureVisible(); return KeyEventResult::Consumed;
+        case Key::End: cursorCol_ = static_cast<int>(lines_[cursorRow_].size()); ensureVisible(); return KeyEventResult::Consumed;
+        case Key::PageUp: moveCursor(-std::max(1, bounds_.h), 0); return KeyEventResult::Consumed;
+        case Key::PageDown: moveCursor(std::max(1, bounds_.h), 0); return KeyEventResult::Consumed;
+        case Key::Enter: insertNewline(); ensureVisible(); return KeyEventResult::Consumed;
+        case Key::Backspace: backspace(); ensureVisible(); return KeyEventResult::Consumed;
+        case Key::Delete: del(); return KeyEventResult::Consumed;
         case Key::Char:
-            if (!ev.ctrl) { insertChar(ev.character); ensureVisible(); return true; }
-            return false;
-        default: return false;
+            if (!ev.ctrl) { insertChar(ev.character); ensureVisible(); return KeyEventResult::Consumed; }
+            return KeyEventResult::Ignored;
+        default: return KeyEventResult::Ignored;
     }
 }
 

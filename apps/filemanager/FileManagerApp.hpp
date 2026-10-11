@@ -13,7 +13,54 @@ public:
     std::string name() const override { return "Menedzer plikow"; }
 
     std::unique_ptr<Widget> createView(AppContext& ctx) override {
-        return std::make_unique<FileManagerView>(ctx, fs::homeDir());
+        auto view = std::make_unique<FileManagerView>(ctx, fs::homeDir());
+        FileManagerView* raw = view.get();
+
+        // --- Nawigacja: idz do folderu nadrzednego -------------------------------
+        auto goUpCb = [raw]() {
+            raw->goUp();
+        };
+
+        // --- Wklej z schowka do przeciwnego panelu --------------------------------
+        auto pasteCb = [raw]() {
+            raw->pasteToOtherPane();
+        };
+
+        // --- Przemianuj zaznaczony element ----------------------------------------
+        auto renameCb = [raw]() {
+            raw->renameSelected();
+        };
+
+        // --- Usun zaznaczony element ----------------------------------------------
+        auto deleteCb = [raw]() {
+            raw->deleteSelected();
+        };
+
+        // --- Odswiez oba panele ---------------------------------------------------
+        auto refreshCb = [raw]() {
+            raw->refreshBoth();
+        };
+
+        // --- Idz do folderu w aktywnym panelu -------------------------------------
+        auto goToFolderCb = [raw, &ctx]() {
+            raw->goToFolder();
+        };
+
+        // --- Ustaw menu na widgete ------------------------------------------------
+        raw->setMenuTabs({{U"Plik", std::vector<MenuItem>{
+            {U"Idz do folderu...", goToFolderCb},
+            {U"Odswiez", refreshCb},
+        }},
+        {U"Nawigacja", std::vector<MenuItem>{
+            {U"Go Up (Backspace)", goUpCb},
+            {U"Wklej z innego panelu (Ctrl+V)", pasteCb},
+        }},
+        {U"Akcje", std::vector<MenuItem>{
+            {U"Przemianuj zaznaczony (Ctrl+R)", renameCb},
+            {U"Usun zaznaczony (Del)", deleteCb},
+        }}});
+
+        return view;
     }
 
     Rect preferredBounds(const Rect& desktopArea) const override {
