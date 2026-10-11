@@ -53,9 +53,15 @@ public:
         if (onDirChange && listing_.currentDir() != before) onDirChange(listing_.currentDir());
     }
 
-    // Ponowny odczyt tego samego katalogu (po usunieciu/przemianowaniu) —
-    // zaznaczenie zostaje na tym samym indeksie (clamp), zeby nie skakac do gory.
-    void reload() { refresh(/*keepSelection=*/true); }
+    // Ponowny odczyt tego samego katalogu z DYSKU (po kopiowaniu/przenoszeniu/
+    // usunieciu/przemianowaniu) — zaznaczenie zostaje na tym samym indeksie
+    // (clamp), zeby nie skakac do gory. Wczesniej brakowalo listing_.reload():
+    // odswiezalismy tylko widok z pamieciowego modelu, wiec po operacjach na
+    // plikach panele zostawaly z starymi wpisami — kopiowanie "nic nie robilo".
+    void reload() {
+        listing_.reload();
+        refresh(/*keepSelection=*/true);
+    }
 
     // Zaznaczony katalog to ".."? Niszczenie/przemianowanie ".." ruszyloby
     // katalog nadrzedny — zabezpieczenie wywolujacego (patrz menedzer plikow).
