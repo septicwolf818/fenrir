@@ -17,6 +17,6 @@ cmake-build-*/
 *.dylib
 *.dll
 
-# Binaries
-fenrir
-fenrir_desktop
+# Binaries (root-level only)
+./fenrir
+./fenrir_desktop
