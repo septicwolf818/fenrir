@@ -35,9 +35,7 @@ target_include_directories(fenrir PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# --- przyklad niskopoziomowy (etap 1, bez frameworku Desktop) ------------
-add_executable(stage1_terminal examples/stage1_terminal/main.cpp)
-target_link_libraries(stage1_terminal PRIVATE fenrir)
+
 
 # --- shell: den ------------------------------------------------------------
 # To jedyny plik "aplikacyjny" ktory NIE jest App-em - laczy Desktop z

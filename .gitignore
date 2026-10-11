@@ -19,6 +19,4 @@ cmake-build-*/
 
 # Binaries
 fenrir
-stage1_terminal
 fenrir_desktop
-den
