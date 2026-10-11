@@ -17,14 +17,15 @@ public:
         FileManagerView* raw = view.get();
 
         // Menu: operacje na panelu (te same metody co skróty).
+        // Model dwupanelowy: Ctrl+C/X kopiuja/przenosza DO DRUGIEGO panelu
+        // (aktywny = zrodlo, drugi = cel) — bez schowka i wklejania.
         view->setMenuTabs({{U"Plik", std::vector<MenuItem>{
             {U"Idz do folderu... (Ctrl+G)", [raw] { raw->goToFolder(); }},
             {U"Odswiez", [raw] { raw->refreshBoth(); }},
         }},
         {U"Edycja", std::vector<MenuItem>{
-            {U"Kopiuj (Ctrl+C)", [raw] { raw->copySelected(false); }},
-            {U"Wytnij (Ctrl+X)", [raw] { raw->copySelected(true); }},
-            {U"Wklej (Ctrl+V)", [raw] { raw->pasteToOtherPane(); }},
+            {U"Kopiuj do drugiego panelu (Ctrl+C)", [raw] { raw->copySelected(); }},
+            {U"Przenies do drugiego panelu (Ctrl+X)", [raw] { raw->moveSelected(); }},
             {U"Przemianuj (Ctrl+R)", [raw] { raw->renameSelected(); }},
             {U"Usun (Del)", [raw] { raw->deleteSelected(); }},
         }},
@@ -34,9 +35,8 @@ public:
 
         // Skróty: rejestrowane na widgetcie — Desktop sprawdza je przed handleKey.
         view->pushShortcut({true, Key::Char, U'g'}, [raw] { raw->goToFolder(); });
-        view->pushShortcut({true, Key::Char, U'c'}, [raw] { raw->copySelected(false); });
-        view->pushShortcut({true, Key::Char, U'x'}, [raw] { raw->copySelected(true); });
-        view->pushShortcut({true, Key::Char, U'v'}, [raw] { raw->pasteToOtherPane(); });
+        view->pushShortcut({true, Key::Char, U'c'}, [raw] { raw->copySelected(); });
+        view->pushShortcut({true, Key::Char, U'x'}, [raw] { raw->moveSelected(); });
         view->pushShortcut({true, Key::Char, U'r'}, [raw] { raw->renameSelected(); });
         view->pushShortcut({false, Key::Delete}, [raw] { raw->deleteSelected(); });
 

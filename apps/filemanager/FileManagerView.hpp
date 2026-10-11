@@ -1,7 +1,6 @@
 #pragma once
 #include <optional>
 #include <string>
-#include <vector>
 
 #include "fenrir/app/AppContext.hpp"
 #include "fenrir/core/FileSystem.hpp"
@@ -16,6 +15,10 @@ namespace fenrir::apps {
 // widgetow) + pasek statusu. Zero wlasnego rysowania list — wszystko przez
 // przerazane widgety (DirectoryView, StatusBar). Zapytania do uzytkownika
 // (usun/przemianuj/idz do) ida przez AppContext (Dialog/LineEdit z biblioteki).
+//
+// Model kopiowania jak w klasycznych menedzerach dwupanelowych: Ctrl+C kopiuje
+// zaznaczenie z aktywnego panelu DO DRUGIEGO panelu, Ctrl+X je przenosi.
+// Brak schowka i wklejania — panel docelowy jest zawsze znany.
 class FileManagerView : public Widget {
 public:
     FileManagerView(AppContext& ctx, std::string startDir)
@@ -37,36 +40,45 @@ public:
         status("W gorze: " + active().currentDir());
     }
 
-    void copySelected(bool cut) {
-        DirectoryView& v = active();
-        if (v.empty()) { status("Brak elementow."); return; }
-        if (!v.selectionIsSafeTarget()) { status("Nie mozna wybrac '..'."); return; }
-        clipboard_ = {v.selectedPath()};
-        clipOp_ = cut ? Op::Cut : Op::Copy;
-        status(std::string(cut ? "Wycinam: " : "Kopiuje: ") + fs::nameOf(clipboard_[0]));
+    void copySelected() {
+        DirectoryView& src = active();
+        if (src.empty()) { status("Brak elementow."); return; }
+        if (!src.selectionIsSafeTarget()) { status("Nie mozna kopiowac '..'."); return; }
+        DirectoryView& dest = other();
+        const std::string from = src.selectedPath();
+        try {
+            const std::string to = uniqueNameIn(dest.currentDir(), fs::nameOf(from));
+            fs::copyPath(from, to);
+            left_.reload();
+            right_.reload();
+            status("Skopiowano: " + fs::nameOf(from) + " -> " + dest.currentDir());
+        } catch (const std::exception& e) {
+            status(std::string("Blad: ") + e.what());
+        }
     }
 
-    void pasteToOtherPane() {
-        if (clipboard_.empty()) { status("Schowek pusty"); return; }
-        DirectoryView& dest = rightActive_ ? left_ : right_;
-        std::string errs;
-        int ok = 0;
-        for (const auto& src : clipboard_) {
+    void moveSelected() {
+        DirectoryView& src = active();
+        if (src.empty()) { status("Brak elementow."); return; }
+        if (!src.selectionIsSafeTarget()) { status("Nie mozna przeniesc '..'."); return; }
+        DirectoryView& dest = other();
+        const std::string from = src.selectedPath();
+        try {
+            const std::string to = uniqueNameIn(dest.currentDir(), fs::nameOf(from));
             try {
-                std::string dst = uniqueNameIn(dest.currentDir(), fs::nameOf(src));
-                fs::copyPath(src, dst);
-                if (clipOp_ == Op::Cut) fs::removePath(src);
-                ++ok;
-            } catch (const std::exception& e) {
-                errs += e.what();
-                errs += "; ";
+                fs::renamePath(from, to);
+            } catch (const std::exception&) {
+                // Rozne systemy plikow (np. EXDEV) — rename nie dziala:
+                // kopiuj, potem usun zrodlo (sekwencja jak w starych menedzerach).
+                fs::copyPath(from, to);
+                fs::removePath(from);
             }
+            left_.reload();
+            right_.reload();
+            status("Przeniesiono: " + fs::nameOf(from) + " -> " + dest.currentDir());
+        } catch (const std::exception& e) {
+            status(std::string("Blad: ") + e.what());
         }
-        if (clipOp_ == Op::Cut && errs.empty()) clipboard_.clear();
-        left_.reload();
-        right_.reload();
-        status((clipOp_ == Op::Cut ? "Przeniesiono: " : "Skopiowano: ") +
-               std::to_string(ok) + (errs.empty() ? "" : ", bledy: " + errs));
     }
 
     void renameSelected() {
@@ -163,11 +175,10 @@ public:
         }
         if (ev.ctrl && ev.key == Key::Char) {
             switch (ev.character) {
-                case U'c': case U'C': copySelected(false); return KeyEventResult::Consumed;
-                case U'x': case U'X': copySelected(true);  return KeyEventResult::Consumed;
-                case U'v': case U'V': pasteToOtherPane();  return KeyEventResult::Consumed;
-                case U'r': case U'R': renameSelected();    return KeyEventResult::Consumed;
-                case U'g': case U'G': goToFolder();        return KeyEventResult::Consumed;
+                case U'c': case U'C': copySelected();  return KeyEventResult::Consumed;
+                case U'x': case U'X': moveSelected();   return KeyEventResult::Consumed;
+                case U'r': case U'R': renameSelected(); return KeyEventResult::Consumed;
+                case U'g': case U'G': goToFolder();     return KeyEventResult::Consumed;
                 default: break;
             }
         }
@@ -176,9 +187,8 @@ public:
     }
 
 private:
-    enum class Op { Copy, Cut };
-
     DirectoryView& active() { return rightActive_ ? right_ : left_; }
+    DirectoryView& other() { return rightActive_ ? left_ : right_; }
 
     void status(const std::string& msg) { statusMsg_ = msg; }
 
@@ -203,10 +213,7 @@ private:
 
     StatusBar status_;
     std::string statusMsg_ =
-        "Tab: panel | Ctrl+C/X/V: kopiuj/wytnij/wklej | Del: usun | Ctrl+R: nazwa | Ctrl+G: idz do";
-
-    std::vector<std::string> clipboard_;
-    Op clipOp_ = Op::Copy;
+        "Tab: panel | Ctrl+C: kopiuj do drugiego | Ctrl+X: przenies | Del: usun | Ctrl+R: nazwa | Ctrl+G: idz do";
 };
 
 } // namespace fenrir::apps
