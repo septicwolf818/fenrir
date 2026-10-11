@@ -586,8 +586,18 @@ void Desktop::handleKeyEvent(const KeyEvent& ev) {
         const auto& wins = wm_.windows();
         int totalHandles = static_cast<int>(wins.size());
         if (totalHandles == 0) {
-            // Nic na taskbarze — po prostu nie ruszaj kursora dalej w dół
-            cursor_.moveTo(0, screenHeight() - 1);
+            // Pusty taskbar (zadne okno nie otwarte): Down nie schodzi nizej,
+            // w gore wraca na pulpit, Left/Right moga sie jeszcze poruszac
+            // po pasku, Enter/Space nic nie aktywuje. Wazne: NIE teleportujemy
+            // kursora do (0, dol) — tak wlasnie zapadal on w lewy dolny rog
+            // i nie dalo sie juz z niego wydostac (ten branch wykonywal sie
+            // PRZED obsluga strzalki w gore).
+            if (ev.key == Key::Up) {
+                cursor_.moveTo(cursor_.x(), screenHeight() - kTaskBarHeight - 1);
+            } else if (ev.key == Key::Left || ev.key == Key::Right) {
+                cursor_.moveBy(ev.key == Key::Left ? -1 : 1, 0);
+                cursor_.clamp(screenWidth(), screenHeight());
+            }
             return;
         }
 
