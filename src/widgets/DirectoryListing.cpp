@@ -1,6 +1,6 @@
 #include "fenrir/widgets/DirectoryListing.hpp"
 
-#include <algorithm>
+#include "fenrir/core/Text.hpp"
 
 namespace fenrir {
 
@@ -10,8 +10,6 @@ void DirectoryListing::loadDir(const std::string& dir) {
     dir_ = dir;
     entries_.clear();
     error_.clear();
-    selected_ = 0;
-    scroll_ = 0;
 
     std::string par = fs::parent(dir_);
     if (par != dir_) entries_.push_back(fs::Entry{"..", true});
@@ -28,87 +26,46 @@ void DirectoryListing::reload() { loadDir(dir_); }
 
 void DirectoryListing::goUp() { loadDir(fs::parent(dir_)); }
 
-void DirectoryListing::moveSelection(int delta) {
-    if (entries_.empty()) return;
-    int n = static_cast<int>(entries_.size());
-    selected_ = std::clamp(selected_ + delta, 0, n - 1);
+const fs::Entry* DirectoryListing::at(int idx) const {
+    if (idx < 0 || idx >= static_cast<int>(entries_.size())) return nullptr;
+    return &entries_[static_cast<std::size_t>(idx)];
 }
 
-bool DirectoryListing::activateSelected() {
-    if (entries_.empty()) return false;
-    const fs::Entry& e = entries_[static_cast<std::size_t>(selected_)];
-    if (!e.isDir) return false;
+std::string DirectoryListing::pathAt(int idx) const {
+    const fs::Entry* e = at(idx);
+    if (!e) return dir_;
+    if (e->name == "..") return fs::parent(dir_);
+    return fs::join(dir_, e->name);
+}
 
-    if (e.name == "..") loadDir(fs::parent(dir_));
-    else loadDir(fs::join(dir_, e.name));
+bool DirectoryListing::isFileAt(int idx) const {
+    const fs::Entry* e = at(idx);
+    return e && !e->isDir;
+}
+
+bool DirectoryListing::isParentAt(int idx) const {
+    const fs::Entry* e = at(idx);
+    return e && e->name == "..";
+}
+
+bool DirectoryListing::enterAt(int idx) {
+    const fs::Entry* e = at(idx);
+    if (!e || !e->isDir) return false;
+    if (e->name == "..") loadDir(fs::parent(dir_));
+    else loadDir(fs::join(dir_, e->name));
     return true;
 }
 
-bool DirectoryListing::selectedIsFile() const {
-    if (entries_.empty()) return false;
-    return !entries_[static_cast<std::size_t>(selected_)].isDir;
-}
-
-std::string DirectoryListing::selectedFullPath() const {
-    if (entries_.empty()) return dir_;
-    const fs::Entry& e = entries_[static_cast<std::size_t>(selected_)];
-    if (e.name == "..") return fs::parent(dir_);
-    return fs::join(dir_, e.name);
-}
-
-void DirectoryListing::ensureVisible(int viewportHeight) {
-    if (viewportHeight <= 0) return;
-    if (selected_ < scroll_) scroll_ = selected_;
-    if (selected_ >= scroll_ + viewportHeight) scroll_ = selected_ - viewportHeight + 1;
-    if (scroll_ < 0) scroll_ = 0;
-}
-
-void drawDirectoryListing(Screen& screen, const Rect& area, DirectoryListing& listing) {
-    if (area.h <= 0 || area.w <= 0) return;
-
-    // Naglowek (etykieta katalogu): Gray tlo, White tekst, bold — drugorzędowy pasek.
-    std::string dirLine = listing.currentDir();
-    std::u32string header(dirLine.begin(), dirLine.end());
-    if (static_cast<int>(header.size()) > area.w) header.resize(static_cast<std::size_t>(area.w));
-    for (int x = area.x; x < area.x + area.w; ++x)
-        screen.set(x, area.y, Cell{U' ', colors::White, colors::Gray, StyleBold});
-    screen.putText(area.x, area.y, header, colors::White, colors::Gray, StyleBold);
-
-    // Tlo listy: White (papier). Wiersze: Black tekst na White tle.
-    const Rect listArea{area.x, area.y + 1, area.w, area.h - 1};
-    for (int y = listArea.y; y < listArea.y + listArea.h; ++y)
-        for (int x = listArea.x; x < listArea.x + listArea.w; ++x)
-            screen.set(x, y, Cell{U' ', colors::Black, colors::White, 0});
-
-    if (listing.hasError()) {
-        std::string err = listing.error();
-        std::u32string e(err.begin(), err.end());
-        if (static_cast<int>(e.size()) > listArea.w) e.resize(static_cast<std::size_t>(listArea.w));
-        screen.putText(listArea.x, listArea.y, e, colors::BrightRed, colors::White, StyleBold);
-        return;
+std::vector<ListView::Item> DirectoryListing::items() const {
+    std::vector<ListView::Item> out;
+    out.reserve(entries_.size());
+    for (const auto& e : entries_) {
+        ListView::Item item;
+        item.text = (e.isDir ? U"/ " : U"  ") + text::toUtf32(e.name);
+        item.dim = (e.name == "..");
+        out.push_back(std::move(item));
     }
-
-    listing.ensureVisible(listArea.h);
-    const auto& entries = listing.entries();
-    for (int row = 0; row < listArea.h; ++row) {
-        int idx = listing.scrollOffset() + row;
-        if (idx < 0 || idx >= static_cast<int>(entries.size())) break;
-        const fs::Entry& e = entries[static_cast<std::size_t>(idx)];
-
-        // Wybrany wiersz: White tekst na Blue tle, bold — ten sam motyw co pasek tytulu.
-        bool isSel = (idx == listing.selectedIndex());
-        Color fg = isSel ? colors::White : colors::Black;
-        Color bg = isSel ? colors::Blue : colors::White;
-        uint8_t style = isSel ? StyleBold : StyleNone;
-
-        std::string label = (e.isDir ? "/ " : "  ") + e.name;
-        std::u32string line(label.begin(), label.end());
-        if (static_cast<int>(line.size()) > listArea.w) line.resize(static_cast<std::size_t>(listArea.w));
-
-        for (int x = listArea.x; x < listArea.x + listArea.w; ++x)
-            screen.set(x, listArea.y + row, Cell{U' ', fg, bg, style});
-        screen.putText(listArea.x, listArea.y + row, line, fg, bg, style);
-    }
+    return out;
 }
 
 } // namespace fenrir

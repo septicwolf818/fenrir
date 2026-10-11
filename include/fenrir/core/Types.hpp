@@ -3,33 +3,34 @@
 
 namespace fenrir {
 
-// 16 kolorów ANSI — wartości RGB odpowiadają dokładnie tym, co zwraca nearest() w Renderer.
-// Win95-inspired palette: granatowe tytuły, szare tła, biały tekst, czarne na niebieskim.
+// Kolor = indeks 0..15 w palecie ANSI. Linux TTY: wylacznie 16 kolorow,
+// zaden truecolor (38;2;R;G;B) — renderer wysyla bezposrednio kod SGR.
+// Funkcje przypisujace nazwe do numeru (30-37/90-97 itd.) sa w Rendererze.
 struct Color {
-    uint8_t r = 0, g = 0, b = 0;
-    constexpr bool operator==(const Color& o) const { return r == o.r && g == o.g && b == o.b; }
+    uint8_t index = 0;
+    constexpr bool operator==(const Color& o) const { return index == o.index; }
     constexpr bool operator!=(const Color& o) const { return !(*this == o); }
 };
 
 namespace colors {
 // ANSI 0-7 (normal)
-inline constexpr Color Black{0, 0, 0};
-inline constexpr Color Red{128, 0, 0};
-inline constexpr Color Green{0, 128, 0};
-inline constexpr Color Yellow{128, 128, 0};
-inline constexpr Color Blue{0, 0, 128};
-inline constexpr Color Magenta{128, 0, 128};
-inline constexpr Color Cyan{0, 128, 128};
-inline constexpr Color White{192, 192, 192};
+inline constexpr Color Black{0};
+inline constexpr Color Red{1};
+inline constexpr Color Green{2};
+inline constexpr Color Yellow{3};
+inline constexpr Color Blue{4};
+inline constexpr Color Magenta{5};
+inline constexpr Color Cyan{6};
+inline constexpr Color White{7}; // "off-white" (jasnoszary)
 // ANSI 8-15 (bright)
-inline constexpr Color Gray{128, 128, 128};
-inline constexpr Color BrightRed{255, 0, 0};
-inline constexpr Color BrightGreen{0, 255, 0};
-inline constexpr Color BrightYellow{255, 255, 0};
-inline constexpr Color BrightBlue{0, 0, 255};
-inline constexpr Color BrightMagenta{255, 0, 255};
-inline constexpr Color BrightCyan{0, 255, 255};
-inline constexpr Color BrightWhite{255, 255, 255};
+inline constexpr Color Gray{8};
+inline constexpr Color BrightRed{9};
+inline constexpr Color BrightGreen{10};
+inline constexpr Color BrightYellow{11};
+inline constexpr Color BrightBlue{12};
+inline constexpr Color BrightMagenta{13};
+inline constexpr Color BrightCyan{14};
+inline constexpr Color BrightWhite{15};
 } // namespace colors
 
 enum StyleFlag : uint8_t {

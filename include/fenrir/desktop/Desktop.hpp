@@ -50,11 +50,13 @@ public:
     void quit() { running_ = false; }
     int run();
 
-    // --- AppContext: API Open/OpenFolder/Save ---------------------------
+    // --- AppContext: API Open/OpenFolder/Save/Dialog ----------------------
     void openFile(const std::string& startDir, OnPick onPick, OnCancel onCancel) override;
     void openFolder(const std::string& startDir, OnPick onPick, OnCancel onCancel) override;
     void saveFile(const std::string& startDir, const std::string& suggestedName,
                   OnPick onPick, OnCancel onCancel) override;
+    void openDialog(std::u32string title, std::unique_ptr<Dialog> content,
+                    OnDialogResult onResult) override;
 
 private:
     Terminal terminal_;
@@ -90,8 +92,21 @@ private:
     Rect winMenuBounds_{};
     bool winMenuClosePending_ = false;
 
+    // Okna zamykane PO powrocie z callbacku widgetu (dialogi). Zamykanie okna
+    // z wewnatrz jego wlasnego handleKey zniszczyloby widget na stosie wywolan —
+    // flagujemy, a Desktop zamyka po dispatchu (patrz flushPendingCloses).
+    std::vector<Window*> closePending_;
+
+    void handleKey(const KeyEvent& ev);          // wrapper: dispatch + flush zamkniec
+    void handleKeyEvent(const KeyEvent& ev);     // wlasciwa obsluga klawiszy
+    void flushPendingCloses();
+    // Fokus z powrotem na okno wystawiajace dialog (guard: czy jeszcze istnieje).
+    void restoreFocusTo(Window* requester);
+    // Reakcja na wynik handleKey widgetu: EnteredEdit -> tryb Edit,
+    // Ignored + Tab/Esc -> globalne fallbacki.
+    void applyWidgetResult(KeyEventResult r, const KeyEvent& ev);
+
     void tickOnce();
-    void handleKey(const KeyEvent& ev);
 
     void openAppMenu();
     void closeAppMenu();
@@ -120,7 +135,7 @@ private:
 
     // Pomocnicze funkcje do obslugi skrótow klawiszowych.
     static bool matchesShortcuts(const std::vector<std::pair<KeyShortcut, std::function<void()>>>& sc, const KeyEvent& ev);
-    static void invokeShortcut(std::vector<std::pair<KeyShortcut, std::function<void()>>> sc, const KeyEvent& ev);
+    static void invokeShortcut(const std::vector<std::pair<KeyShortcut, std::function<void()>>>& sc, const KeyEvent& ev);
 };
 
 } // namespace fenrir

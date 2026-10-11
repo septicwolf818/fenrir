@@ -1,40 +1,51 @@
 #pragma once
+#include <algorithm>
 #include <functional>
 #include <string>
 
+#include "fenrir/core/Text.hpp"
+#include "fenrir/core/Theme.hpp"
 #include "fenrir/widgets/Widget.hpp"
 
 namespace fenrir {
 
+// Przycisk. Kolory z motywu (buttonBg/buttonText, na aktywnym buttonTextHot).
+// Obsluguje Enter/Space wprost i przez wirtualny activate() — kontenery (Panel)
+// aktywuja go bez wiedzy o typie.
 class Button : public Widget {
 public:
     explicit Button(std::u32string label) : label_(std::move(label)) {}
 
     std::function<void()> onActivate;
 
+    void setText(std::u32string t) { label_ = std::move(t); }
+    const std::u32string& text() const { return label_; }
+
     void draw(Screen& screen) override {
-        // Przycisk Win95: Gray tlo zawsze. Nieaktywny = Black tekst (ANSI 30);
-        // aktywny (fokus/highlight) = White tekst (bold). Bez białego tła.
-        Color fg = (focused_ || highlighted_) ? colors::White : colors::Black;
-        Color bg = colors::Gray;
-        uint8_t style = (focused_ || highlighted_) ? StyleBold : StyleNone;
-        for (int y = bounds_.y; y < bounds_.y + bounds_.h; ++y)
-            for (int x = bounds_.x; x < bounds_.x + bounds_.w; ++x)
-                screen.set(x, y, Cell{U' ', fg, bg, 0});
-        std::u32string text = U"[ " + label_ + U" ]";
+        const auto& t = theme::active;
+        const bool hot = focused_ || highlighted_;
+        const Color fg = hot ? t.buttonTextHot : t.buttonText;
+        const Color bg = t.buttonBg;
+
+        screen.fillRect(bounds_, Cell{U' ', fg, bg, 0});
+
+        // Etykieta przycieta do szerokosci — dlugie teksty nie wychodza poza prostokat.
+        std::u32string label = text::clip(label_, std::max(0, bounds_.w - 4));
+        std::u32string text = U"[ " + label + U" ]";
+        if (static_cast<int>(text.size()) > bounds_.w) text = text::clip(text, bounds_.w);
         int cx = bounds_.x + std::max(0, (bounds_.w - static_cast<int>(text.size())) / 2);
-        screen.putText(cx, bounds_.y + bounds_.h / 2, text, fg, bg, StyleBold | style);
+        screen.putText(cx, bounds_.y + bounds_.h / 2, text, fg, bg, hot ? StyleBold : StyleNone);
+    }
+
+    bool activate() override {
+        if (onActivate) onActivate();
+        return true;
     }
 
     KeyEventResult handleKey(const KeyEvent& ev) override {
-        if (ev.key == Key::Enter) {
-            if (onActivate) onActivate();
-            return KeyEventResult::Activated;
-        }
-        if (ev.key == Key::Char && !ev.ctrl && ev.character == U' ') {
-            if (onActivate) onActivate();
-            return KeyEventResult::Activated;
-        }
+        if (ev.key == Key::Enter) return activate() ? KeyEventResult::Activated : KeyEventResult::Ignored;
+        if (ev.key == Key::Char && !ev.ctrl && ev.character == U' ')
+            return activate() ? KeyEventResult::Activated : KeyEventResult::Ignored;
         return KeyEventResult::Ignored;
     }
 

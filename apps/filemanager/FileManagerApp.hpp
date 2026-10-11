@@ -4,7 +4,7 @@
 
 #include "fenrir/app/App.hpp"
 #include "fenrir/core/FileSystem.hpp"
-#include "fenrir/widgets/FileManagerView.hpp"
+#include "FileManagerView.hpp"
 
 namespace fenrir::apps {
 
@@ -16,57 +16,37 @@ public:
         auto view = std::make_unique<FileManagerView>(ctx, fs::homeDir());
         FileManagerView* raw = view.get();
 
-        // --- Nawigacja: idz do folderu nadrzednego -------------------------------
-        auto goUpCb = [raw]() {
-            raw->goUp();
-        };
-
-        // --- Wklej z schowka do przeciwnego panelu --------------------------------
-        auto pasteCb = [raw]() {
-            raw->pasteToOtherPane();
-        };
-
-        // --- Przemianuj zaznaczony element ----------------------------------------
-        auto renameCb = [raw]() {
-            raw->renameSelected();
-        };
-
-        // --- Usun zaznaczony element ----------------------------------------------
-        auto deleteCb = [raw]() {
-            raw->deleteSelected();
-        };
-
-        // --- Odswiez oba panele ---------------------------------------------------
-        auto refreshCb = [raw]() {
-            raw->refreshBoth();
-        };
-
-        // --- Idz do folderu w aktywnym panelu -------------------------------------
-        auto goToFolderCb = [raw, &ctx]() {
-            raw->goToFolder();
-        };
-
-        // --- Ustaw menu na widgete ------------------------------------------------
-        raw->setMenuTabs({{U"Plik", std::vector<MenuItem>{
-            {U"Idz do folderu...", goToFolderCb},
-            {U"Odswiez", refreshCb},
+        // Menu: operacje na panelu (te same metody co skróty).
+        view->setMenuTabs({{U"Plik", std::vector<MenuItem>{
+            {U"Idz do folderu... (Ctrl+G)", [raw] { raw->goToFolder(); }},
+            {U"Odswiez", [raw] { raw->refreshBoth(); }},
+        }},
+        {U"Edycja", std::vector<MenuItem>{
+            {U"Kopiuj (Ctrl+C)", [raw] { raw->copySelected(false); }},
+            {U"Wytnij (Ctrl+X)", [raw] { raw->copySelected(true); }},
+            {U"Wklej (Ctrl+V)", [raw] { raw->pasteToOtherPane(); }},
+            {U"Przemianuj (Ctrl+R)", [raw] { raw->renameSelected(); }},
+            {U"Usun (Del)", [raw] { raw->deleteSelected(); }},
         }},
         {U"Nawigacja", std::vector<MenuItem>{
-            {U"Go Up (Backspace)", goUpCb},
-            {U"Wklej z innego panelu (Ctrl+V)", pasteCb},
-        }},
-        {U"Akcje", std::vector<MenuItem>{
-            {U"Przemianuj zaznaczony (Ctrl+R)", renameCb},
-            {U"Usun zaznaczony (Del)", deleteCb},
+            {U"W gore (Backspace)", [raw] { raw->goUp(); }},
         }}});
+
+        // Skróty: rejestrowane na widgetcie — Desktop sprawdza je przed handleKey.
+        view->pushShortcut({true, Key::Char, U'g'}, [raw] { raw->goToFolder(); });
+        view->pushShortcut({true, Key::Char, U'c'}, [raw] { raw->copySelected(false); });
+        view->pushShortcut({true, Key::Char, U'x'}, [raw] { raw->copySelected(true); });
+        view->pushShortcut({true, Key::Char, U'v'}, [raw] { raw->pasteToOtherPane(); });
+        view->pushShortcut({true, Key::Char, U'r'}, [raw] { raw->renameSelected(); });
+        view->pushShortcut({false, Key::Delete}, [raw] { raw->deleteSelected(); });
 
         return view;
     }
 
     Rect preferredBounds(const Rect& desktopArea) const override {
-        int w = std::min(50, std::max(24, desktopArea.w - 6));
-        int h = std::min(18, std::max(8, desktopArea.h - 4));
-        return Rect{desktopArea.x + 3, desktopArea.y + 1, w, h};
+        int w = std::min(60, std::max(30, desktopArea.w - 6));
+        int h = std::min(20, std::max(8, desktopArea.h - 4));
+        return Rect{desktopArea.x + 2, desktopArea.y + 1, w, h};
     }
 };
 

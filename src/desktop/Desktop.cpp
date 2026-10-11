@@ -8,6 +8,8 @@
 #include <string>
 
 #include "fenrir/core/FileSystem.hpp"
+#include "fenrir/core/Text.hpp"
+#include "fenrir/core/Theme.hpp"
 #include "fenrir/window/Window.hpp"
 
 namespace fenrir {
@@ -15,14 +17,15 @@ namespace fenrir {
 namespace {
 
 void drawBox(Screen& screen, const Rect& r, std::u32string_view title) {
-    // Oksienk ramki Win95: niebieski pasek tytułu (Blue/White), szara ramka
-    // (Gray), białe wnętrze (White) — spójne z resztą systemu.
-    const Color titleBg = colors::Blue;
-    const Color titleFg = colors::White;
-    const Color frameBg = colors::Gray;
-    const Color frameFg = colors::White;
-    const Color innerFg = colors::Black;
-    const Color innerBg = colors::White;
+    // Ramka dropdownu z motywu: niebieski pasek tytulu (titleBg/titleText),
+    // szara ramka (menuBg/menuText), biale wnetrze (surfaceBg/surfaceText).
+    const auto& t = theme::active;
+    const Color titleBg = t.titleBg;
+    const Color titleFg = t.titleText;
+    const Color frameBg = t.menuBg;
+    const Color frameFg = t.menuText;
+    const Color innerFg = t.surfaceText;
+    const Color innerBg = t.surfaceBg;
 
     // Wnętrze — białe (menu wypełni je wpisami; puste miejsca zostają białe).
     for (int y = r.y; y < r.y + r.h; ++y)
@@ -73,7 +76,7 @@ bool Desktop::matchesShortcuts(const std::vector<std::pair<KeyShortcut, std::fun
     return false;
 }
 
-void Desktop::invokeShortcut(std::vector<std::pair<KeyShortcut, std::function<void()>>> sc, const KeyEvent& ev) {
+void Desktop::invokeShortcut(const std::vector<std::pair<KeyShortcut, std::function<void()>>>& sc, const KeyEvent& ev) {
     for (auto& [shortcut, cb] : sc) {
         if (shortcut.ctrl != ev.ctrl) continue;
         if (shortcut.key != ev.key) continue;
@@ -220,6 +223,39 @@ void Desktop::buildWinMenu(Window& w, int tab) {
     };
 }
 
+// --- Dialogi: zamykanie okien PO powrocie z callbackow widgetow -------------------
+
+void Desktop::flushPendingCloses() {
+    if (closePending_.empty()) return;
+    std::vector<Window*> pending = std::move(closePending_);
+    closePending_.clear();
+    for (Window* w : pending)
+        if (windowAlive(w)) wm_.closeWindow(w);
+}
+
+void Desktop::restoreFocusTo(Window* requester) {
+    if (requester && windowAlive(requester)) {
+        wm_.focus(requester);
+        mode_ = enterWindowMode(*requester);
+    } else {
+        // Wystawiajace okno zostalo zamkniete w miedzyczasie — nie dotykamy
+        // wskaznika (dangling), po prostu wracamy na pulpit.
+        mode_ = CursorMode::Desktop;
+    }
+}
+
+void Desktop::applyWidgetResult(KeyEventResult r, const KeyEvent& ev) {
+    if (r == KeyEventResult::EnteredEdit) { mode_ = CursorMode::Edit; return; }
+    if (r != KeyEventResult::Ignored) return;
+    // Widget nie chce tego klawisza — globalne fallbacki:
+    // Tab = kolejne okno, Escape = cofniecie trybu (Edit -> Keyboard -> Desktop).
+    if (ev.key == Key::Tab) { wm_.focusNext(); return; }
+    if (ev.key == Key::Escape) {
+        if (mode_ == CursorMode::Edit) mode_ = CursorMode::Keyboard;
+        else leaveWindowMode();
+    }
+}
+
 void Desktop::launchApp(App& app) {
     Rect area = desktopArea();
     Rect bounds = app.preferredBounds(area);
@@ -265,17 +301,18 @@ void Desktop::openDialogWindow(FileDialogMode mode, const std::string& startDir,
     wm_.focus(w);
     mode_ = enterWindowMode(*w);
 
+    // Zamkniecie odroczone (closePending_): callback jest wywolywany z wewnatrz
+    // handleKey widgetu — nie mozemy zniszczyc okna na jego stosie wywolan.
+    // Fokus wraca do wystawiajacego, ale TYLKO jesli jeszcze istnieje.
     raw->onConfirm = [this, w, requester, onPick = std::move(onPick)](const std::string& path) {
         if (onPick) onPick(path);
-        if (requester) { wm_.focus(requester); mode_ = enterWindowMode(*requester); }
-        else mode_ = CursorMode::Desktop;
-        wm_.closeWindow(w);
+        restoreFocusTo(requester);
+        closePending_.push_back(w);
     };
     raw->onCancel = [this, w, requester, onCancel = std::move(onCancel)]() {
         if (onCancel) onCancel();
-        if (requester) { wm_.focus(requester); mode_ = enterWindowMode(*requester); }
-        else mode_ = CursorMode::Desktop;
-        wm_.closeWindow(w);
+        restoreFocusTo(requester);
+        closePending_.push_back(w);
     };
 }
 
@@ -290,6 +327,31 @@ void Desktop::openFolder(const std::string& startDir, OnPick onPick, OnCancel on
 void Desktop::saveFile(const std::string& startDir, const std::string& suggestedName,
                         OnPick onPick, OnCancel onCancel) {
     openDialogWindow(FileDialogMode::SaveFile, startDir, suggestedName, std::move(onPick), std::move(onCancel));
+}
+
+void Desktop::openDialog(std::u32string title, std::unique_ptr<Dialog> content, OnDialogResult onResult) {
+    Window* requester = wm_.focused();
+    Dialog* raw = content.get();
+
+    // Rozmiar z samego dialogu (message wrap + pole + przyciski), wycentrowany.
+    Rect area = desktopArea();
+    int w = std::min(56, std::max(30, area.w - 6));
+    int h = raw ? raw->heightForWidth(w) : 10;
+    h = std::min(area.h - 2, std::max(5, h));
+    Rect bounds{area.x + std::max(0, (area.w - w) / 2),
+                area.y + std::max(0, (area.h - h) / 2), w, h};
+
+    Window* win = wm_.createWindow(text::toUtf8(title), bounds, std::move(content));
+    wm_.focus(win);
+    mode_ = enterWindowMode(*win);
+
+    // Callback widgetu: wynik -> app cb -> fokus -> OROCZONE zamkniecie okna
+    // (widget zywy az do powrotu z handleKey; patrz flushPendingCloses).
+    raw->onResult = [this, win, requester, cb = std::move(onResult)](int idx) {
+        if (cb) cb(idx);
+        restoreFocusTo(requester);
+        closePending_.push_back(win);
+    };
 }
 
 void Desktop::toggleMaximize(Window& w) {
@@ -369,6 +431,13 @@ void Desktop::activateAtCursor() {
 }
 
 void Desktop::handleKey(const KeyEvent& ev) {
+    // Wrapper: dispatch klawisza, a POTEM zamkniecie okien odroconych przez
+    // callbacki dialogow (widget musi juz byc poza swoim handleKey).
+    handleKeyEvent(ev);
+    flushPendingCloses();
+}
+
+void Desktop::handleKeyEvent(const KeyEvent& ev) {
     // Ctrl+Q dziala ZAWSZE, niezaleznie od trybu kursora/menu - to "wylacznik
     // awaryjny". Bez tego dałoby się utknac np. w trybie WindowMove bez
     // mozliwosci wyjscia z aplikacji.
@@ -400,8 +469,10 @@ void Desktop::handleKey(const KeyEvent& ev) {
     }
 
     // --- Globalne skróty klawiszowe — zawsze działają, niezależnie od trybu ---
+    // Uwaga: Tab NIE jest globalny — najpierw dostaje go widget (np. menedzer
+    // plikow przelacza nim panele), a focusNext() jest fallbackiem gdy widget
+    // zwraca Ignored (patrz applyWidgetResult / sekcja Desktop).
     if (ev.key == Key::F1) { openAppMenu(); return; }
-    if (ev.key == Key::Tab) { wm_.focusNext(); return; }
     if (ev.ctrl && ev.key == Key::Char && ev.character == U'w') { wm_.closeFocused(); return; }
     if (ev.key == Key::F5 && wm_.focused()) { mode_ = CursorMode::WindowMove; return; }
     if (ev.key == Key::F6 && wm_.focused()) { mode_ = CursorMode::WindowResize; return; }
@@ -431,25 +502,24 @@ void Desktop::handleKey(const KeyEvent& ev) {
 
     // --- Edit mode — klawisze trafiaja do edytowalnego widgetu ---
     if (mode_ == CursorMode::Edit) {
-        if (Window* f = wm_.focused()) {
-            if (ev.key == Key::Escape) {
-                mode_ = CursorMode::Keyboard;  // wychodzimy z edycji, ale zostajemy w oknie
-                return;
-            }
-            // F2 = menu aplikacji (dziala tez w trybie edycji).
-            if (ev.key == Key::F2) {
-                auto& tabs = f->content()->menuTabs();
-                if (!tabs.empty()) openWinMenu(*f, 0);
-                return;
-            }
-            auto* content = f->content();
-            // Sprawdz skróty aplikacji PRZED widgetem (np. Ctrl+S dla TextEditor).
-            if (matchesShortcuts(content->shortcuts(), ev)) {
-                invokeShortcut(content->shortcuts(), ev);
-                return;
-            }
-            f->handleKey(ev);
+        Window* f = wm_.focused();
+        if (!f || f->minimized()) { mode_ = CursorMode::Desktop; return; }
+
+        // F2 = menu aplikacji (dziala tez w trybie edycji).
+        if (ev.key == Key::F2) {
+            if (f->content() && !f->content()->menuTabs().empty()) openWinMenu(*f, 0);
+            return;
         }
+        auto* content = f->content();
+        // Sprawdz skróty aplikacji PRZED widgetem (np. Ctrl+S dla TextEditor).
+        if (content && matchesShortcuts(content->shortcuts(), ev)) {
+            invokeShortcut(content->shortcuts(), ev);
+            return;
+        }
+        // Widget dostaje klawisz PIERWSZY: moze zerznac Escape (dialog: anuluj)
+        // albo Tab (menedzer: przelaczenie panelu). Fallbacki Esc/Tab obsluguje
+        // applyWidgetResult, gdy widget zwraca Ignored.
+        applyWidgetResult(f->handleKey(ev), ev);
         return;
     }
 
@@ -457,12 +527,6 @@ void Desktop::handleKey(const KeyEvent& ev) {
     if (mode_ == CursorMode::Keyboard) {
         Window* f = wm_.focused();
         if (!f || f->minimized()) { mode_ = CursorMode::Desktop; return; }
-
-        // Escape -> wracamy na pulpit (zostawiamy okno sfokusowane, ale nie w trybie klaw.)
-        if (ev.key == Key::Escape) {
-            leaveWindowMode();
-            return;
-        }
 
         // F2 -> otwiera/przełącza menu konkretnej aplikacji (pierwsza karta).
         if (ev.key == Key::F2) {
@@ -479,15 +543,14 @@ void Desktop::handleKey(const KeyEvent& ev) {
         }
 
         // Znak -> przechodzimy do trybu Edit dla edytowalnych widgetow.
-        if (ev.key == Key::Char && !ev.ctrl) {
-            auto* content = f->content();
-            if (content && content->editable()) {
-                mode_ = CursorMode::Edit;
-            }
+        if (ev.key == Key::Char && !ev.ctrl && content && content->editable()) {
+            mode_ = CursorMode::Edit;
         }
 
-        // Delegujemy do widgetu-zawartosci.
-        f->handleKey(ev);
+        // Delegujemy do widgetu-zawartosci; Ignored + Esc/Tab = fallbacki globalne
+        // (Esc -> pulpit, Tab -> kolejne okno). Widget moze tez zaprosic do Edit
+        // zwrotem EnteredEdit (np. LineEdit).
+        applyWidgetResult(f->handleKey(ev), ev);
         return;
     }
 
@@ -506,6 +569,10 @@ void Desktop::handleKey(const KeyEvent& ev) {
             openWinMenu(*target, 0);
         return;
     }
+
+    // Tab na pulpicie = kolejne okno (widgety w oknach dostaja Tab najpierw —
+    // patrz applyWidgetResult — wiec ta sciezka dotyczy trybu Desktop).
+    if (ev.key == Key::Tab) { wm_.focusNext(); return; }
 
     // --- Taskbar — nawigacja i aktywacja okien ------------------
     if (cursor_.y() >= screenHeight() - kTaskBarHeight) {
@@ -584,17 +651,19 @@ void Desktop::handleKey(const KeyEvent& ev) {
 }
 
 void Desktop::drawDesktopBackground(Screen& screen) {
+    const auto& t = theme::active;
     for (int y = kMenuBarHeight; y < screen.height() - kTaskBarHeight; ++y)
         for (int x = 0; x < screen.width(); ++x)
-            screen.set(x, y, Cell{U' ', colors::White, colors::Black, 0});
+            screen.set(x, y, Cell{U' ', t.desktopText, t.desktopBg, 0});
 }
 
 void Desktop::drawMenuBar(Screen& screen) {
+    const auto& t = theme::active;
     for (int x = 0; x < screen.width(); ++x)
-        screen.set(x, 0, Cell{U' ', colors::White, colors::Blue, 0});
+        screen.set(x, 0, Cell{U' ', t.menuBarText, t.menuBarBg, 0});
 
     std::u32string left = U" Aplikacje (F1) ";
-    screen.putText(0, 0, left, colors::White, colors::Blue, StyleBold);
+    screen.putText(0, 0, left, t.menuBarText, t.menuBarBg, StyleBold);
 
     // Tryb w prawym gornym rogu: [tryb] | Fenrir — miejsce gdzie byly "Fenrir".
     std::u32string modeLabel = U"Desktop";
@@ -608,18 +677,18 @@ void Desktop::drawMenuBar(Screen& screen) {
     std::u32string right = modeLabel + U" | " + std::u32string(desktopName_.begin(), desktopName_.end());
     int rightX = screen.width() - static_cast<int>(right.size()) - 1;
     if (rightX > static_cast<int>(left.size()))
-        screen.putText(rightX, 0, right, colors::White, colors::Blue, StyleBold);
+        screen.putText(rightX, 0, right, t.menuBarText, t.menuBarBg, StyleBold);
 }
 
 void Desktop::drawTaskBar(Screen& screen) {
-    // Pasek taskbar: Black tlo. Aktywny uchwyt = "wciśnięty przycisk" (Gray tlo,
-    // White tekst, bold); nieaktywne uchwyty = White tekst; akcenty = Yellow.
-    // Celowo nie niebieski — niebieski zostaje paskom tytułu/menu okien.
-    const Color barBg = colors::Black;
-    const Color activeFg = colors::White;
-    const Color activeBg = colors::Gray;
-    const Color inactiveFg = colors::White;
-    const Color accent = colors::Yellow;
+    // Pasek zadan z motywu: taskbarBg tlo, aktywny uchwyt = "wcisniety przycisk"
+    // (taskbarActiveBg), akcenty (zegar, strzalki) = highlightText.
+    const auto& t = theme::active;
+    const Color barBg = t.taskbarBg;
+    const Color activeFg = t.taskbarText;
+    const Color activeBg = t.taskbarActiveBg;
+    const Color inactiveFg = t.taskbarText;
+    const Color accent = t.highlightText;
 
     int y = screen.height() - 1;
     for (int x = 0; x < screen.width(); ++x)

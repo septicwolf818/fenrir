@@ -53,6 +53,10 @@ std::string join(const std::string& dir, const std::string& name) {
     return p.lexically_normal().string();
 }
 
+std::string nameOf(const std::string& path) {
+    return stdfs::path(path).filename().string();
+}
+
 void copyFile(const std::string& from, const std::string& to) {
     // KRYTYCZNE: std::ofstream(to, trunc) otwiera/czysci PLIK DOCELOWY
     // natychmiast, zanim cokolwiek przeczytamy ze zrodla. Jesli from==to
@@ -84,6 +88,30 @@ void removeFile(const std::string& path) {
     std::error_code ec;
     bool removed = stdfs::remove(path, ec);
     if (!removed) throw std::runtime_error("Nie mozna usunac pliku: " + path + " (" + ec.message() + ")");
+}
+
+void copyPath(const std::string& from, const std::string& to) {
+    std::error_code ec;
+    if (isDirectory(from)) {
+        stdfs::copy(from, to, stdfs::copy_options::recursive |
+                                   stdfs::copy_options::overwrite_existing, ec);
+        if (ec) throw std::runtime_error("Nie mozna skopiowac katalogu: " + from + " (" + ec.message() + ")");
+    } else {
+        copyFile(from, to);
+    }
+}
+
+void renamePath(const std::string& from, const std::string& to) {
+    std::error_code ec;
+    stdfs::rename(from, to, ec);
+    if (ec) throw std::runtime_error("Nie mozna przemianowac/przeniesc: " + from + " (" + ec.message() + ")");
+}
+
+void removePath(const std::string& path) {
+    std::error_code ec;
+    auto removed = stdfs::remove_all(path, ec);
+    if (ec || removed == 0)
+        throw std::runtime_error("Nie mozna usunac: " + path + " (" + ec.message() + ")");
 }
 
 std::string homeDir() {

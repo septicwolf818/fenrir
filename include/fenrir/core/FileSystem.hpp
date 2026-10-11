@@ -25,8 +25,20 @@ std::string parent(const std::string& dir);
 // Sklejenie katalogu i nazwy wpisu w poprawna sciezke (bez podwojnych '/').
 std::string join(const std::string& dir, const std::string& name);
 
+// Ostatni element sciezki (nazwa pliku/katalogu). "" dla sciezek konczacych sie '/'.
+std::string nameOf(const std::string& path);
+
 // Kopiuje zawartosc pliku bajt w bajt. Rzuca std::runtime_error przy bledzie.
 void copyFile(const std::string& from, const std::string& to);
+
+// Kopiuje PLIK albo KATALOG (rekurencyjnie). Rzuca std::runtime_error.
+void copyPath(const std::string& from, const std::string& to);
+
+// Przenosi/nazwa zmienia (rename) plik lub katalog. Rzuca std::runtime_error.
+void renamePath(const std::string& from, const std::string& to);
+
+// Usuwa plik albo katalog (rekurencyjnie). Rzuca std::runtime_error.
+void removePath(const std::string& path);
 
 // Rozmiar pliku w bajtach, albo -1 jesli nie da sie odczytac.
 long long fileSize(const std::string& path);

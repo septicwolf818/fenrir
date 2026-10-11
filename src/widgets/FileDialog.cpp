@@ -2,99 +2,106 @@
 
 #include <algorithm>
 
+#include "fenrir/core/Text.hpp"
+#include "fenrir/core/Theme.hpp"
+
 namespace fenrir {
 
 FileDialog::FileDialog(FileDialogMode mode, std::string startDir, std::string suggestedName)
-    : mode_(mode), listing_(std::move(startDir)) {
-    filename_.assign(suggestedName.begin(), suggestedName.end());
+    : mode_(mode), view_(std::move(startDir)), nameEdit_(text::toUtf32(suggestedName), U"Nazwa: ") {
+    // Lista: Enter na pliku zalezy od trybu dialogu.
+    view_.onFileActivate = [this](const std::string& path) {
+        if (mode_ == FileDialogMode::OpenFile) {
+            if (onConfirm) onConfirm(path);
+        } else if (mode_ == FileDialogMode::SaveFile) {
+            // Podstawiamy nazwe zaznaczonego pliku i przeskakujemy do pola.
+            nameEdit_.setValue(text::toUtf32(fs::nameOf(path)));
+            zone_ = Zone::NameField;
+        }
+        // OpenFolder: Enter na pliku nic nie robi (wybieramy sam katalog, np. 'S').
+    };
+    nameEdit_.onSubmit = [this](const std::u32string&) { confirmSave(); };
 }
 
-Rect FileDialog::listingArea() const {
-    int h = std::max(0, bounds_.h - kHintRows - nameFieldRows());
-    return Rect{bounds_.x, bounds_.y, bounds_.w, h};
+void FileDialog::syncLayout() {
+    const int statusY = bounds_.y + bounds_.h - kStatusRows;
+    const int nameY = statusY - nameRows();
+    const Rect listRect{bounds_.x, bounds_.y, bounds_.w, std::max(0, nameY - bounds_.y)};
+    view_.setBounds(listRect);
+    if (mode_ == FileDialogMode::SaveFile)
+        nameEdit_.setBounds(Rect{bounds_.x, nameY, bounds_.w, 1});
+    status_.setBounds(Rect{bounds_.x, statusY, bounds_.w, kStatusRows});
 }
 
 void FileDialog::confirmSave() {
-    if (filename_.empty()) return;
-    std::string name(filename_.begin(), filename_.end());
-    std::string path = fs::join(listing_.currentDir(), name);
-    if (onConfirm) onConfirm(path);
+    const std::u32string& name = nameEdit_.value();
+    if (name.empty()) return;
+    if (onConfirm) onConfirm(fs::join(view_.currentDir(), text::toUtf8(name)));
 }
 
 void FileDialog::draw(Screen& screen) {
-    Rect la = listingArea();
-    drawDirectoryListing(screen, la, listing_);
+    syncLayout();
+
+    view_.setFocused(focused_ && zone_ == Zone::List);
+    view_.draw(screen);
 
     if (mode_ == FileDialogMode::SaveFile) {
-        int y = la.y + la.h;
-        // Pole nazwy: Black tekst na White tle (papier). Gdy zaznaczone (fokus): White na Blue.
-        bool sel = (zone_ == Zone::NameField);
-        Color fg = sel ? colors::White : colors::Black;
-        Color bg = sel ? colors::Blue : colors::White;
-        std::u32string label = U"Nazwa: " + filename_;
-        for (int x = bounds_.x; x < bounds_.x + bounds_.w; ++x) screen.set(x, y, Cell{U' ', fg, bg, 0});
-        if (static_cast<int>(label.size()) > bounds_.w) label.resize(static_cast<std::size_t>(bounds_.w));
-        screen.putText(bounds_.x, y, label, fg, bg, sel ? StyleBold : StyleNone);
+        nameEdit_.setFocused(focused_ && zone_ == Zone::NameField);
+        nameEdit_.draw(screen);
     }
 
-    int hintY = bounds_.y + bounds_.h - kHintRows;
     std::u32string hint;
     switch (mode_) {
-        case FileDialogMode::OpenFile: hint = U"Enter: wejdz/wybierz plik | Esc: anuluj"; break;
+        case FileDialogMode::OpenFile:   hint = U"Enter: wejdz/wybierz plik | Tab: pole nazwy | Esc: anuluj"; break;
         case FileDialogMode::OpenFolder: hint = U"Enter: wejdz | S: wybierz ten folder | Esc: anuluj"; break;
-        case FileDialogMode::SaveFile: hint = U"Enter: wejdz/wpisz nazwe | Tab: pole nazwy | Esc: anuluj"; break;
+        case FileDialogMode::SaveFile:   hint = U"Enter: wejdz/wpisz nazwe | Tab: pole nazwy | Esc: anuluj"; break;
     }
-    for (int x = bounds_.x; x < bounds_.x + bounds_.w; ++x) screen.set(x, hintY, Cell{U' ', colors::White, colors::Gray, 0});
-    if (static_cast<int>(hint.size()) > bounds_.w) hint.resize(static_cast<std::size_t>(bounds_.w));
-    screen.putText(bounds_.x, hintY, hint, colors::White, colors::Gray);
+    status_.setText(std::move(hint));
+    status_.draw(screen);
 }
 
 KeyEventResult FileDialog::handleKey(const KeyEvent& ev) {
-    if (ev.key == Key::Escape) { if (onCancel) onCancel(); return KeyEventResult::Consumed; }
+    // Esc = anuluj zawsze (dialog jest modalny; Desktop przekazuje Esc widgetowi
+    // pierw — patrz applyWidgetResult — wiec faktycznie tu dociera).
+    if (ev.key == Key::Escape) {
+        if (onCancel) onCancel();
+        return KeyEventResult::Activated;
+    }
 
-    if (mode_ == FileDialogMode::SaveFile && ev.key == Key::Tab) {
+    // Tab = przelaczenie strefy (wcześniej martwy klawisz — Desktop przekazuje
+    // teraz Tab widgetowi przed fallbackiem focusNext).
+    if (ev.key == Key::Tab && mode_ == FileDialogMode::SaveFile) {
         zone_ = (zone_ == Zone::List) ? Zone::NameField : Zone::List;
-        return KeyEventResult::Consumed;
+        return zone_ == Zone::NameField ? KeyEventResult::EnteredEdit : KeyEventResult::Consumed;
     }
 
     if (zone_ == Zone::NameField) {
-        if (ev.key == Key::Backspace) { if (!filename_.empty()) filename_.pop_back(); return KeyEventResult::Consumed; }
-        if (ev.key == Key::Enter) { confirmSave(); return KeyEventResult::Activated; }
-        if (ev.key == Key::Char && !ev.ctrl) { filename_ += ev.character; return KeyEventResult::Consumed; }
-        return KeyEventResult::Consumed;
+        // Strzalka gore/dol = powrot do listy (w polu nie ma nawigacji pionowej).
+        if (ev.key == Key::Up || ev.key == Key::Down) {
+            zone_ = Zone::List;
+            return KeyEventResult::Consumed;
+        }
+        KeyEventResult r = nameEdit_.handleKey(ev);
+        return r == KeyEventResult::Ignored ? KeyEventResult::Consumed : r;
     }
 
     if (mode_ == FileDialogMode::OpenFolder && ev.key == Key::Char && !ev.ctrl &&
         (ev.character == U's' || ev.character == U'S')) {
-        if (onConfirm) onConfirm(listing_.currentDir());
+        if (onConfirm) onConfirm(view_.currentDir());
         return KeyEventResult::Activated;
     }
 
-    switch (ev.key) {
-        case Key::Up: listing_.moveSelection(-1); return KeyEventResult::Consumed;
-        case Key::Down: listing_.moveSelection(1); return KeyEventResult::Consumed;
-        case Key::Enter: {
-            if (listing_.activateSelected()) return KeyEventResult::Consumed;
-            if (mode_ == FileDialogMode::OpenFile) {
-                if (onConfirm) onConfirm(listing_.selectedFullPath());
-                return KeyEventResult::Activated;
-            } else if (mode_ == FileDialogMode::SaveFile) {
-                std::string name = listing_.entries()[static_cast<std::size_t>(listing_.selectedIndex())].name;
-                filename_.assign(name.begin(), name.end());
-                zone_ = Zone::NameField;
-            }
-            return KeyEventResult::Activated;
-        }
-        default: return KeyEventResult::Ignored;
-    }
+    const Zone before = zone_;
+    KeyEventResult r = view_.handleKey(ev);
+    // Enter na pliku w trybie Save przeskoczyl do pola nazwy -> chcemy kursor.
+    if (zone_ != before) return KeyEventResult::EnteredEdit;
+    return r;
 }
 
 std::optional<std::pair<int, int>> FileDialog::cursorPosition() const {
-    if (zone_ != Zone::NameField) return std::nullopt;
-    int y = bounds_.y + listingArea().h;
-    int x = bounds_.x + 7 + static_cast<int>(filename_.size()); // 7 = dlugosc "Nazwa: "
-    if (x >= bounds_.x + bounds_.w) x = bounds_.x + bounds_.w - 1;
-    return std::make_pair(x, y);
+    if (mode_ == FileDialogMode::SaveFile && zone_ == Zone::NameField)
+        return nameEdit_.cursorPosition();
+    return std::nullopt;
 }
 
 } // namespace fenrir

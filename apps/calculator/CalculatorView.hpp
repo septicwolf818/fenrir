@@ -3,7 +3,7 @@
 #include <memory>
 #include <string>
 
-#include "fenrir/app/App.hpp"
+#include "fenrir/core/Theme.hpp"
 #include "fenrir/widgets/Button.hpp"
 #include "fenrir/widgets/Label.hpp"
 #include "fenrir/widgets/Panel.hpp"
@@ -13,16 +13,19 @@
 namespace fenrir::apps {
 
 // Widok kalkulatora. Uzywa TYLKO frameworkowych widgetow:
-//  - Label na glowy (setText + wyrównanie do prawej)
+//  - Label na display (kolory z motywu: pole tekstowe)
 //  - Panel jako kontener 20 Buttonow (Panel NAWIGUJE i HIGHLIGHT-uje dzieci)
 //
 // Panel obsluguje: strzalki nawigacji, Enter/Space aktywacja, podswietlanie.
-// CalculatorView tylko: obsluga cyfr/operatorow z klawiatury (bezpośrednio na silnik).
+// CalculatorView tylko: obsluga cyfr/operatorow z klawiatury (bezposrednio na silnik).
+// Ctrl+C = Clear jest zarejestrowany jako SKROT w CalculatorApp (Desktop
+// wywoluje skróty przed widgetem — handleKey nie powtarza tej obslugi).
 
 class CalculatorView : public Widget {
 public:
     CalculatorView() : panel_(4, 1, 0) {
-        display_ = std::make_unique<Label>(U"0", colors::White, colors::Black);
+        const auto& t = theme::active;
+        display_ = std::make_unique<Label>(U"0", t.fieldText, t.fieldBg);
         display_->setAlignment(LabelAlign::Right);
         buildButtons();
     }
@@ -42,13 +45,6 @@ public:
         // Direct char input -> silnik licznikowy (nie nawigacja przyciskow).
         if (ev.key == Key::Char && !ev.ctrl) {
             if (handleDirectChar(ev.character)) return KeyEventResult::Consumed;
-        }
-
-        // Ctrl+C = C (Clear)
-        if (ev.ctrl && ev.key == Key::Char && (ev.character == U'c' || ev.character == U'C')) {
-            engine_.clear();
-            refreshDisplay();
-            return KeyEventResult::Consumed;
         }
 
         // Pozostale klawisze -> panel obsluguje nawigacje (strzalki, Enter).

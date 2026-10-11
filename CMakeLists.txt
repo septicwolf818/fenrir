@@ -25,7 +25,6 @@ add_library(fenrir STATIC
     src/widgets/TextArea.cpp
     src/widgets/DirectoryListing.cpp
     src/widgets/FileDialog.cpp
-    src/widgets/FileManagerView.cpp
     src/window/Window.cpp
     src/window/WindowManager.cpp
     src/desktop/Desktop.cpp

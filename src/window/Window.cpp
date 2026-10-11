@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include "fenrir/core/Theme.hpp"
+
 namespace fenrir {
 
 Window::Window(std::string title, Rect bounds, std::unique_ptr<Widget> content, bool hasBorder)
@@ -59,7 +61,6 @@ bool Window::onMenuRow(int x, int y) const {
 // Wspolna geometria paska menu — uzywana i w draw(), i w hit-testach,
 // zeby rysowanie i klikanie sie zgadzaly co do celi.
 // Pasek menu = WLASNY wiersz pod paskiem tytulu (kласyczne okno: tytul / menu / tresc).
-constexpr int kButtonsWidth = 6; // " _  X" + luki — identycznie jak w Window.
 
 std::vector<std::pair<int, int>> tabStripLayout(int x0, int w, const std::vector<MenuTab>& tabs) {
     std::vector<std::pair<int, int>> out;
@@ -119,22 +120,22 @@ KeyEventResult Window::handleKey(const KeyEvent& ev) {
 }
 
 void Window::draw(Screen& screen) {
-    // Win95 palette:
-    //   Border: White (focused) / Gray (unfocused)
-    //   Title bar + menu bar: Blue bg, White fg  (jedyne niebieskie elementy okna)
-    //   Body (tlo pod widgetami): Gray bg
-    //   Listy: White bg, Black fg; selekcja: Gray bg
-    const Color border = focused_ ? colors::White : colors::Gray;
-    const Color titleBg = colors::Blue;
-    const Color titleFg = colors::White;
-    const Color contentBg = colors::Gray;
-    const Color contentFg = colors::White;
+    // Paleta z motywu (theme::active):
+    //   Border: bialy (focused) / szary (unfocused)
+    //   Pasek tytulu: niebieski (titleBg/titleText)
+    //   Tlo tresci: windowBg/windowText
+    const auto& t = theme::active;
+    const Color border = focused_ ? t.border : t.borderInactive;
+    const Color titleBg = t.titleBg;
+    const Color titleFg = t.titleText;
+    const Color contentBg = t.windowBg;
+    const Color contentFg = t.windowText;
 
     if (minimized_) {
         // Zminimalizowane okno = tylko pasek tytulowy, bez tresci - widoczne
         // jako "zakladka" na pulpicie (pelny widok jest tez w pasku stanu).
         std::u32string bar = U"[_] " + std::u32string(title_.begin(), title_.end());
-        screen.putText(bounds_.x, bounds_.y, bar, border, colors::Black);
+        screen.putText(bounds_.x, bounds_.y, bar, border, t.desktopBg);
         return;
     }
 
@@ -147,19 +148,19 @@ void Window::draw(Screen& screen) {
 
     for (int y = y0; y < y0 + h; ++y)
         for (int x = x0; x < x0 + w; ++x)
-            screen.set(x, y, Cell{U' ', border, colors::Black, 0});
+            screen.set(x, y, Cell{U' ', border, t.desktopBg, 0});
 
-    screen.set(x0, y0, Cell{'+', border, colors::Black, 0});
-    screen.set(x0 + w - 1, y0, Cell{'+', border, colors::Black, 0});
-    screen.set(x0, y0 + h - 1, Cell{'+', border, colors::Black, 0});
-    screen.set(x0 + w - 1, y0 + h - 1, Cell{'+', border, colors::Black, 0});
+    screen.set(x0, y0, Cell{'+', border, t.desktopBg, 0});
+    screen.set(x0 + w - 1, y0, Cell{'+', border, t.desktopBg, 0});
+    screen.set(x0, y0 + h - 1, Cell{'+', border, t.desktopBg, 0});
+    screen.set(x0 + w - 1, y0 + h - 1, Cell{'+', border, t.desktopBg, 0});
     for (int x = x0 + 1; x < x0 + w - 1; ++x) {
-        screen.set(x, y0, Cell{'-', border, colors::Black, 0});
-        screen.set(x, y0 + h - 1, Cell{'-', border, colors::Black, 0});
+        screen.set(x, y0, Cell{'-', border, t.desktopBg, 0});
+        screen.set(x, y0 + h - 1, Cell{'-', border, t.desktopBg, 0});
     }
     for (int y = y0 + 1; y < y0 + h - 1; ++y) {
-        screen.set(x0, y, Cell{'|', border, colors::Black, 0});
-        screen.set(x0 + w - 1, y, Cell{'|', border, colors::Black, 0});
+        screen.set(x0, y, Cell{'|', border, t.desktopBg, 0});
+        screen.set(x0 + w - 1, y, Cell{'|', border, t.desktopBg, 0});
     }
 
     // Pasek tytulowy (wiersz 1): nazwa okna po lewej, przyciski [_] [ ] [X] po prawej.
@@ -179,16 +180,16 @@ void Window::draw(Screen& screen) {
 
         // Przyciski [_] [ ] [X] - hit-testowane przez titleBarZoneAt().
         screen.set(x0 + w - 4, y0, Cell{'_', titleFg, titleBg, StyleBold});
-        screen.set(x0 + w - 3, y0, Cell{maximized_ ? '/' : ' ', titleFg, titleBg, StyleBold});
-        screen.set(x0 + w - 2, y0, Cell{'x', colors::White, colors::Red, StyleBold});
+        screen.set(x0 + w - 3, y0, Cell{static_cast<char32_t>(maximized_ ? U'/' : U' '), titleFg, titleBg, StyleBold});
+        screen.set(x0 + w - 2, y0, Cell{'x', t.closeText, t.closeBg, StyleBold});
     }
 
     // Pasek menu (wiersz 2, WLASNY — jak w systemach okienkowych: tytul / menu / tresc).
-    // Celowo inna barwa niz niebieski pasek tytulu — Gray tlo, White tekst.
+    // Celowo inna barwa niz niebieski pasek tytulu — menuBg tlo, menuText tekst.
     if (hasMenuTabs()) {
         int ym = y0 + 1;
-        const Color menuBg = colors::Gray;
-        const Color menuFg = colors::White;
+        const Color menuBg = t.menuBg;
+        const Color menuFg = t.menuText;
         // puste miejsca menu: White/Gray — czytelne, kursor zawsze widoczny
         for (int x = x0 + 1; x < x0 + w - 1; ++x)
             screen.set(x, ym, Cell{' ', menuFg, menuBg, StyleBold});

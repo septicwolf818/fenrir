@@ -22,8 +22,14 @@ public:
     void set(int x, int y, const Cell& cell);
     const Cell& at(int x, int y) const;
 
+    // Wypelnia prostokat podana komorka (przycity do ekranu).
+    void fillRect(const Rect& r, const Cell& cell);
+
     // Wygodne rysowanie tekstu jednym wywołaniem; przycina do granic ekranu.
     void putText(int x, int y, std::u32string_view text, Color fg, Color bg, uint8_t style = 0);
+
+    // Ramka ASCII o podanych znakach (rog / poziom / pion).
+    void drawBorder(const Rect& r, char32_t corner, char32_t hEdge, char32_t vEdge, Color fg, Color bg);
 
     const std::vector<Cell>& cells() const { return cells_; }
 

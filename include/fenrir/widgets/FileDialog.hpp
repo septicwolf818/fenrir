@@ -2,7 +2,9 @@
 #include <functional>
 #include <string>
 
-#include "fenrir/widgets/DirectoryListing.hpp"
+#include "fenrir/widgets/DirectoryView.hpp"
+#include "fenrir/widgets/LineEdit.hpp"
+#include "fenrir/widgets/StatusBar.hpp"
 #include "fenrir/widgets/Widget.hpp"
 
 namespace fenrir {
@@ -10,10 +12,10 @@ namespace fenrir {
 enum class FileDialogMode { OpenFile, OpenFolder, SaveFile };
 
 // Jeden widget obslugujacy wszystkie trzy operacje z AppContext (Open/OpenFolder/
-// Save). Komponuje DirectoryListing - DOKLADNIE TA SAMA klasa, ktorej uzywa
-// FileManagerView do zwyklego przegladania. Desktop (patrz app/AppContext.hpp)
-// opakowuje ten widget w zwykle Window - dialog NIE jest osobnym mechanizmem,
-// tylko kolejnym oknem frameworka.
+// Save). Skladany z PRZEZYTEGNIETEGO UI biblioteki: DirectoryView (lista katalogu),
+// LineEdit (pole nazwy), StatusBar (podpowiedzi) — zero wlasnego rysowania list.
+// Desktop opakowuje ten widget w zwykle Window; dialog NIE jest osobnym
+// mechanizmem, tylko kolejnym oknem frameworka.
 class FileDialog : public Widget {
 public:
     FileDialog(FileDialogMode mode, std::string startDir, std::string suggestedName);
@@ -28,16 +30,18 @@ public:
 private:
     enum class Zone { List, NameField };
 
+    void confirmSave();
+    void syncLayout();
+
     FileDialogMode mode_;
-    DirectoryListing listing_;
-    std::u32string filename_;
     Zone zone_ = Zone::List;
 
-    static constexpr int kHintRows = 1;
+    DirectoryView view_;
+    LineEdit nameEdit_; // wersja uzywana tylko w trybie SaveFile
+    StatusBar status_;
 
-    int nameFieldRows() const { return mode_ == FileDialogMode::SaveFile ? 1 : 0; }
-    Rect listingArea() const;
-    void confirmSave();
+    static constexpr int kStatusRows = 1;
+    int nameRows() const { return mode_ == FileDialogMode::SaveFile ? 1 : 0; }
 };
 
 } // namespace fenrir

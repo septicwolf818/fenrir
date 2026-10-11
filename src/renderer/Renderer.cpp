@@ -3,27 +3,11 @@
 #include <cstdio>
 #include <string>
 
+#include "fenrir/core/Text.hpp"
+
 namespace fenrir {
 
 namespace {
-
-void appendUtf8(std::string& out, char32_t cp) {
-    if (cp < 0x80) {
-        out += static_cast<char>(cp);
-    } else if (cp < 0x800) {
-        out += static_cast<char>(0xC0 | (cp >> 6));
-        out += static_cast<char>(0x80 | (cp & 0x3F));
-    } else if (cp < 0x10000) {
-        out += static_cast<char>(0xE0 | (cp >> 12));
-        out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
-        out += static_cast<char>(0x80 | (cp & 0x3F));
-    } else {
-        out += static_cast<char>(0xF0 | (cp >> 18));
-        out += static_cast<char>(0x80 | ((cp >> 12) & 0x3F));
-        out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
-        out += static_cast<char>(0x80 | (cp & 0x3F));
-    }
-}
 
 void appendMoveTo(std::string& out, int x, int y) {
     char buf[32];
@@ -32,22 +16,9 @@ void appendMoveTo(std::string& out, int x, int y) {
 }
 
 void appendSgr(std::string& out, const Cell& c) {
-    // Linux tty: only 16 ANSI basic colors (fallback for fbcon/serial).
-    static const int kAnsi[16][3] = {
-        {0,0,0},       {128,0,0},   {0,128,0},  {128,128,0},
-        {0,0,128},     {128,0,128}, {0,128,128},{192,192,192},
-        {128,128,128}, {255,0,0},   {0,255,0},  {255,255,0},
-        {0,0,255},     {255,0,255}, {0,255,255},{255,255,255},
-    };
-    auto nearest = [](const Color& col) {
-        int best = 0, bestD = 1 << 30;
-        for (int i = 0; i < 16; ++i) {
-            int dr = col.r - kAnsi[i][0], dg = col.g - kAnsi[i][1], db = col.b - kAnsi[i][2];
-            int d = dr*dr + dg*dg + db*db;
-            if (d < bestD) { bestD = d; best = i; }
-        }
-        return best;
-    };
+    // Linux tty: wylacznie 16 kolorow ANSI. Kolor juz JEST indeksem 0..15,
+    // wiec wystarczy dac go bezposrednio do SGR — bez truecolor (38;2;...),
+    // bez tablic RGB i bez szukania najblizszego koloru.
     auto code = [](int ansi, bool fg) {
         if (ansi < 8) return fg ? 30 + ansi : 40 + ansi;
         return fg ? 90 + (ansi - 8) : 100 + (ansi - 8);
@@ -56,9 +27,10 @@ void appendSgr(std::string& out, const Cell& c) {
     out += "\x1b[0m"; // reset
     if (c.style & StyleBold) out += "\x1b[1m";
     if (c.style & StyleUnderline) out += "\x1b[4m";
-    std::snprintf(buf, sizeof(buf), "\x1b[%dm", code(nearest(c.fg), true));
+    if (c.style & StyleDim) out += "\x1b[2m";
+    std::snprintf(buf, sizeof(buf), "\x1b[%dm", code(c.fg.index, true));
     out += buf;
-    std::snprintf(buf, sizeof(buf), "\x1b[%dm", code(nearest(c.bg), false));
+    std::snprintf(buf, sizeof(buf), "\x1b[%dm", code(c.bg.index, false));
     out += buf;
 }
 
@@ -74,7 +46,8 @@ void Renderer::present(const Screen& screen) {
     const auto& cells = screen.cells();
 
     if (w != prevWidth_ || h != prevHeight_) {
-        previous_.assign(cells.size(), Cell{U'\0', Color{255, 255, 255}, Color{255, 255, 255}, 0});
+        // sentinelny kolor (255) — "inny niz jakikolwiek prawdziwy", tylko do porownan
+        previous_.assign(cells.size(), Cell{U'\0', Color{255}, Color{255}, 0});
         prevWidth_ = w;
         prevHeight_ = h;
         fullRedraw_ = true;
@@ -102,7 +75,7 @@ void Renderer::present(const Screen& screen) {
                 haveLastStyle = true;
             }
 
-            appendUtf8(out, cur.character == 0 ? U' ' : cur.character);
+            text::appendUtf8(out, cur.character == 0 ? U' ' : cur.character);
             previous_[idx] = cur;
 
             lastX = x + 1;

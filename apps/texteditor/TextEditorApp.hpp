@@ -5,7 +5,7 @@
 
 #include "fenrir/app/App.hpp"
 #include "fenrir/core/FileSystem.hpp"
-#include "fenrir/widgets/TextArea.hpp"
+#include "TextEditorView.hpp"
 
 namespace fenrir::apps {
 
@@ -14,73 +14,23 @@ public:
     std::string name() const override { return "Edytor tekstu"; }
 
     std::unique_ptr<Widget> createView(AppContext& ctx) override {
-        auto area = std::make_unique<TextArea>();
         int n = ++instanceCounter_;
         std::string path = fs::join(fs::homeDir(), "dokument" + std::to_string(n) + ".txt");
-        area->loadFile(path);
+        auto view = std::make_unique<TextEditorView>(ctx, std::move(path));
+        TextEditorView* raw = view.get();
 
-        TextArea* raw = area.get();
-
-        // --- Utworzenie nowego pliku (Ctrl+N) ------------------------------------
-        auto newCb = [raw]() {
-            raw->newFile();
-        };
-
-        // --- Otworz plik (Ctrl+O) -----------------------------------------------
-        auto openCb = [&ctx, raw]() {
-            std::string startDir = raw->path().empty() ? fs::homeDir() : fs::parent(raw->path());
-            ctx.openFile(startDir, [raw](const std::string& picked) { raw->loadFile(picked); });
-        };
-
-        // --- Zapisz (Ctrl+S) - zapis do obecnej sciezki lub "Zapisz jako" --------
-        auto saveCb = [&ctx, raw]() {
-            if (!raw->path().empty()) { raw->saveToCurrentPath(); return; }
-            ctx.saveFile(fs::homeDir(), "dokument.txt",
-                         [raw](const std::string& picked) { raw->saveFile(picked); });
-        };
-
-        // --- Zapisz jako (Ctrl+Shift+S) -----------------------------------------
-        auto saveAsCb = [&ctx, raw]() {
-            std::string startDir = raw->path().empty() ? fs::homeDir() : fs::parent(raw->path());
-            ctx.saveFile(startDir, "dokument.txt",
-                         [raw](const std::string& picked) { raw->saveFile(picked); });
-        };
-
-        // --- Ustaw menu na widgete ----------------------------------------------
-        raw->setMenuTabs({{U"Plik", std::vector<MenuItem>{
-            {U"Nowy...", newCb},
-            {U"Otworz...", openCb},
-            {U"Zapisz", saveCb},
-            {U"Zapisz jako...", saveAsCb},
+        view->setMenuTabs({{U"Plik", std::vector<MenuItem>{
+            {U"Nowy (Ctrl+N)", [raw] { raw->newFile(); }},
+            {U"Otworz... (Ctrl+O)", [raw] { raw->openFile(); }},
+            {U"Zapisz (Ctrl+S)", [raw] { raw->save(); }},
+            {U"Zapisz jako...", [raw] { raw->saveAs(); }},
         }}});
 
-        // --- Skróty klawiszowe --------------------------------------------------
-        KeyShortcut scNew{};
-        scNew.ctrl = true;
-        scNew.key = Key::Char;
-        scNew.character = static_cast<char32_t>(U'N');
-        raw->pushShortcut(scNew, newCb);
+        view->pushShortcut({true, Key::Char, U'n'}, [raw] { raw->newFile(); });
+        view->pushShortcut({true, Key::Char, U'o'}, [raw] { raw->openFile(); });
+        view->pushShortcut({true, Key::Char, U's'}, [raw] { raw->save(); });
 
-        KeyShortcut scOpen{};
-        scOpen.ctrl = true;
-        scOpen.key = Key::Char;
-        scOpen.character = static_cast<char32_t>(U'O');
-        raw->pushShortcut(scOpen, openCb);
-
-        KeyShortcut scSave{};
-        scSave.ctrl = true;
-        scSave.key = Key::Char;
-        scSave.character = static_cast<char32_t>(U'S');
-        raw->pushShortcut(scSave, saveCb);
-
-        KeyShortcut scSaveAs{};
-        scSaveAs.ctrl = true;
-        scSaveAs.key = Key::Char;
-        scSaveAs.character = static_cast<char32_t>(U'S');
-        // Uwaga: Ctrl+S i Ctrl+Shift+S rozrozniamy w handleKey Desktopa
-        // na razie oba wywoluja saveCb (wystarczajace dla v1).
-
-        return area;
+        return view;
     }
 
     Rect preferredBounds(const Rect& desktopArea) const override {

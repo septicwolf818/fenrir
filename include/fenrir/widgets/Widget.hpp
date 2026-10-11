@@ -1,5 +1,6 @@
 #pragma once
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -52,8 +53,10 @@ public:
     bool highlighted() const { return highlighted_; }
 
     // Czy ten widget akceptuje tekst bezpośrednio (edytowalny)? true = wciśnięcie znaku
-    // powoduje przejście do trybu Edit na tym widgetze. Domyślnie false.
-    bool editable() const { return editable_; }
+    // powoduje przejście do trybu Edit na tym widgetze. Domyślnie false — ustawiają
+    // to tylko widgety z realną edycją (np. TextArea, pola tekstowe).
+    // Wirtualne: pojemniki (Frame) dziedzicza edytowalnosc dziecka.
+    virtual bool editable() const { return editable_; }
     void setEditable(bool e) { editable_ = e; }
 
     // --- Menu / shortcuts API (używane przez Desktop przy renderowaniu i skróty) ---
@@ -76,19 +79,38 @@ public:
     // Zwraca KeyEventResult — Desktop używa go do decydowania o trybie.
     virtual KeyEventResult handleKey(const KeyEvent& ev) = 0;
 
+    // Aktywacja "Enter/Space" (wywolywana przez kontenery, np. Panel, zamiast
+    // dynamic_cast na konkretny typ widgetu). true = widget obsluzyl aktywacje.
+    virtual bool activate() { return false; }
+
+    // Czy widget moze byc zaznaczony w nawigacji kontenera (Panel przeskakuje
+    // elementy z selectable() == false, np. etykiety).
+    virtual bool selectable() const { return true; }
+
     // Absolutna pozycja kursora GUI (w komórkach ekranu), jeśli widget
     // ma sens edycyjny (np. TextArea). std::nullopt = brak własnego kursora.
     virtual std::optional<std::pair<int, int>> cursorPosition() const { return std::nullopt; }
+
+    // Token zycia widgetu do bezpiecznych callbackow ASYNCHRONICZNYCH
+    // (dialogi otwierane przez AppContext). Callback przechwytuje weak_ptr:
+    // jesli okno z tym widgetem zostanie zamkniete zanim dialog zwroci wynik,
+    // lock() zwraca nullopt zamiast dawac UB na dangling `this`:
+    //     auto token = lifetimeToken();
+    //     ctx->confirm(msg, [token, this](bool ok){ if (!token.lock()) return; ... });
+    std::weak_ptr<int> lifetimeToken() const { return lifetime_; }
 
 protected:
     Rect bounds_{};
     bool focused_ = false;
     bool highlighted_ = false;
-    bool editable_ = true;
+    bool editable_ = false;
 
     // Metadane aplikacji — ustawiane przez createView() w Widget.
     std::vector<MenuTab> menuTabs_;
     std::vector<std::pair<KeyShortcut, std::function<void()>>> shortcuts_;
+
+private:
+    std::shared_ptr<int> lifetime_ = std::make_shared<int>(0);
 };
 
 } // namespace fenrir
