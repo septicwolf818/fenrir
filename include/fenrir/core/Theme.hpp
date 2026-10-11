@@ -1,4 +1,8 @@
 #pragma once
+#include <string>
+#include <string_view>
+#include <vector>
+
 #include "fenrir/core/Types.hpp"
 
 namespace fenrir::theme {
@@ -71,5 +75,23 @@ struct Theme {
 
 // Aktualny motyw. Podmiana = nowy motyw dla calego UI.
 inline Theme active{};
+
+// Motyw z katalogu — id (stabilny klucz w ustawieniach, np. "classic") +
+// nazwa wyswietlana (np. "Klasyczny") + pelna paleta ról.
+struct NamedTheme {
+    std::string id;
+    std::string label;
+    Theme theme;
+};
+
+// Katalog motywow dostepnych w systemie (Ustawienia cykla po nim Enterem).
+const std::vector<NamedTheme>& catalog();
+
+// Motyw o danym id albo nullptr (nieznane id).
+const NamedTheme* find(std::string_view id);
+
+// Podmienia `active` na motyw o danym id. Nieznane id = bez zmian.
+// Zwraca true, jesli motyw zostal zastosowany.
+bool apply(std::string_view id);
 
 } // namespace fenrir::theme

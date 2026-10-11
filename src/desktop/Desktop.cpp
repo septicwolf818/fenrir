@@ -8,6 +8,7 @@
 #include <string>
 
 #include "fenrir/core/FileSystem.hpp"
+#include "fenrir/core/Settings.hpp"
 #include "fenrir/core/Text.hpp"
 #include "fenrir/core/Theme.hpp"
 #include "fenrir/window/Window.hpp"
@@ -95,7 +96,13 @@ Desktop::Desktop()
       screen_(terminal_.size().columns, terminal_.size().rows),
       renderer_(terminal_),
       wm_(),
-      registry_() {}
+      registry_() {
+    // Ustawienia trwale (~/.config/fenrir/settings.ini): motyw, nazwa,
+    // zegar, migajacy kursor. Ladujemy przed pierwszym rysowaniem.
+    settings::load();
+    theme::apply(settings::active.theme);
+    desktopName_ = settings::active.desktopName;
+}
 
 Rect Desktop::desktopArea() const {
     int h = std::max(0, screenHeight() - kMenuBarHeight - kTaskBarHeight);
@@ -674,7 +681,12 @@ void Desktop::drawMenuBar(Screen& screen) {
         case CursorMode::WindowResize: modeLabel = U"Resize"; break;
         default: break;
     }
-    std::u32string right = modeLabel + U" | " + std::u32string(desktopName_.begin(), desktopName_.end());
+    // Zegar z ustawien: taskbarSeconds = dodatkowe ":SS" na koncu.
+    // Nazwa pulpitu tez z ustawien (zmiana w aplikacji Ustawienia od razu
+    // widoczna — drawMenuBar czyta settings na bieżaco).
+    const std::string& name =
+        settings::active.desktopName.empty() ? desktopName_ : settings::active.desktopName;
+    std::u32string right = modeLabel + U" | " + text::toUtf32(name);
     int rightX = screen.width() - static_cast<int>(right.size()) - 1;
     if (rightX > static_cast<int>(left.size()))
         screen.putText(rightX, 0, right, t.menuBarText, t.menuBarBg, StyleBold);
@@ -751,8 +763,10 @@ void Desktop::drawTaskBar(Screen& screen) {
     time_t now = time(nullptr);
     struct tm *ti = localtime(&now);
     if (ti) {
-        char tbuf[20];
-        strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M", ti);
+        // taskbar_seconds=1 → z "sekundami", inaczej jak dotad.
+        char tbuf[24];
+        const char* fmt = settings::active.taskbarSeconds ? "%Y-%m-%d %H:%M:%S" : "%Y-%m-%d %H:%M";
+        strftime(tbuf, sizeof(tbuf), fmt, ti);
         std::string clockStr(tbuf);
         int clockX = screen.width() - 1 - static_cast<int>(clockStr.size()); // przyklejony do prawej
         if (clockX < leftArrowWidth) clockX = leftArrowWidth;
@@ -786,7 +800,8 @@ void Desktop::tickOnce() {
     }
 
     if (n == 0) {
-        cursorBlinkState_ = !cursorBlinkState_;
+        // Migotanie kursora wylaczalne w ustawieniach (cursor_blink=0 → statyczny).
+        cursorBlinkState_ = settings::active.cursorBlink ? !cursorBlinkState_ : true;
     } else {
         cursorBlinkState_ = true;
         for (const KeyEvent& ev : keyParser_.feed(buf, n)) handleKey(ev);

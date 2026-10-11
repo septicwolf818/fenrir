@@ -10,15 +10,20 @@
 #include "../texteditor/TextEditorApp.hpp"
 #include "../filemanager/FileManagerApp.hpp"
 #include "../calculator/CalculatorApp.hpp"
+#include "../settings/SettingsApp.hpp"
 
 int main() {
     try {
         fenrir::Desktop desktop;
+        // Nazwa pulpitu: ustawienia z ~/.config/fenrir/settings.ini (ladowane
+        // w konstruktorze Desktop). Zapis domyslny — fallback gdyby plik nie
+        // istnial lub nazwa byla pusta.
         desktop.setDesktopName("Fenrir");
 
         desktop.apps().registerApp(std::make_unique<fenrir::apps::TextEditorApp>());
         desktop.apps().registerApp(std::make_unique<fenrir::apps::FileManagerApp>());
         desktop.apps().registerApp(std::make_unique<fenrir::apps::CalculatorApp>());
+        desktop.apps().registerApp(std::make_unique<fenrir::apps::SettingsApp>());
         // Kolejne aplikacje dopisujesz tutaj.
 
         return desktop.run();

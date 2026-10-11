@@ -19,6 +19,8 @@ add_library(fenrir STATIC
     src/terminal/Terminal.cpp
     src/core/Screen.cpp
     src/core/FileSystem.cpp
+    src/core/Themes.cpp
+    src/core/Settings.cpp
     src/input/KeyParser.cpp
     src/renderer/Renderer.cpp
     src/cursor/Cursor.cpp
