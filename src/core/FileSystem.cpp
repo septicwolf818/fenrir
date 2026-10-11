@@ -48,6 +48,13 @@ std::string parent(const std::string& dir) {
     return par.string();
 }
 
+std::string absolute(const std::string& path) {
+    std::error_code ec;
+    stdfs::path p = stdfs::absolute(path, ec);
+    if (ec) return path;
+    return p.lexically_normal().string();
+}
+
 std::string join(const std::string& dir, const std::string& name) {
     stdfs::path p = stdfs::path(dir) / name;
     return p.lexically_normal().string();

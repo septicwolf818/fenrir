@@ -22,6 +22,11 @@ bool exists(const std::string& path);
 // Katalog nadrzedny; dla "/" zwraca "/" (nie ma wyzej).
 std::string parent(const std::string& dir);
 
+// Sciezka bezwzgledna (wzgledem cwd, znormalizowana). Katalogi startowe
+// paneli MUSZA byc bezwzgledne — dla sciezek wzglednych (".", "foo")
+// parent() zwraca siebie same i nawigacja "w gore" sie zapada.
+std::string absolute(const std::string& path);
+
 // Sklejenie katalogu i nazwy wpisu w poprawna sciezke (bez podwojnych '/').
 std::string join(const std::string& dir, const std::string& name);
 

@@ -47,15 +47,19 @@ struct Theme {
     // --- powierzchnie: panele list, wnetrza dialogow, wiersze menu ---
     Color surfaceBg{colors::White};
     Color surfaceText{colors::Black};
+    Color dimText{colors::Gray}; // przygaszone wiersze (np. "..") na surfaceBg
 
     // --- naglowki list ---
     Color headerBg{colors::Gray};
     Color headerText{colors::White};
 
     // --- przyciski ---
-    Color buttonBg{colors::Gray};
+    // Uwaga: Gray{8} to "bright black" (ciemny szary) — na tle okna wychodzi
+    // czarne-na-czarnym. Klasyczny motyw uzywa White{7} (jasny szary) + czarny
+    // tekst; hot = niebieski tekst na jasnym tle.
+    Color buttonBg{colors::White};
     Color buttonText{colors::Black};
-    Color buttonTextHot{colors::White}; // fokus / zaznaczenie
+    Color buttonTextHot{colors::Blue}; // fokus / zaznaczenie
 
     // --- pola tekstowe ---
     Color fieldBg{colors::White};

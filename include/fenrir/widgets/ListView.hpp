@@ -92,7 +92,7 @@ public:
 
             Color fg = sel ? t.accentText : t.surfaceText;
             Color bg = sel ? t.accentBg : t.surfaceBg;
-            if (!sel && it.dim) fg = t.headerText; // przygaszony wiersz
+            if (!sel && it.dim) fg = t.dimText; // przygaszony wiersz (np. "..")
             const uint8_t style = sel ? StyleBold : StyleNone;
 
             screen.fillRect(Rect{bounds_.x, y + row, bounds_.w, 1}, Cell{U' ', fg, bg, style});
