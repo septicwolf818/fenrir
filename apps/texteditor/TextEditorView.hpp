@@ -7,6 +7,7 @@
 #include "fenrir/core/FileSystem.hpp"
 #include "fenrir/core/Prefs.hpp"
 #include "fenrir/core/Text.hpp"
+#include "fenrir/widgets/FileTree.hpp"
 #include "fenrir/widgets/StatusBar.hpp"
 #include "fenrir/widgets/TabBar.hpp"
 #include "fenrir/widgets/TextArea.hpp"
@@ -30,6 +31,13 @@ public:
         insertsSpaces_ = p.getBool("insert_spaces", false);
         openNewTab(std::move(startPath));
         refreshTabBar();
+        // Enter w drzewie otwiera plik w nowej karcie (juz otwarta = przelacz)
+        // i przenosi fokus do tekstu; Ctrl+B wraca do drzewa.
+        tree_.onOpen = [this](const std::string& path) {
+            openInEditor(path);
+            treeFocused_ = false;
+            statusMsg_ = "Otwarto: " + fs::nameOf(path);
+        };
     }
 
     // --- Karty ----------------------------------------------------------------
@@ -65,6 +73,33 @@ public:
 
     void nextTab() { switchTo(current_ + 1); }
     void prevTab() { switchTo(current_ - 1); }
+
+    // --- Folder / drzewo plikow ------------------------------------------------
+
+    // Ctrl+D: otwiera dialog wyboru folderu; po wyborze panel drzewa po
+    // lewej stronie (FileTree), zaznaczony korzen, fokus w drzewie.
+    void openFolder() {
+        std::string startDir = cur().path().empty() ? fs::homeDir() : fs::parent(cur().path());
+        const auto token = lifetimeToken();
+        ctx_.openFolder(startDir, [this, token](const std::string& picked) {
+            if (!token.lock()) return;
+            tree_.setRoot(picked);
+            treeOpen_ = true;
+            treeFocused_ = true;
+            statusMsg_ = "Folder: " + picked;
+        });
+    }
+
+    // Ctrl+B: przelacza fokus drzewo <-> tekst; gdy drzewo nieotwarte —
+    // zachowuje sie jak Ctrl+D (od razu dialog).
+    void toggleTreeFocus() {
+        if (!treeOpen_) {
+            openFolder();
+            return;
+        }
+        treeFocused_ = !treeFocused_;
+        statusMsg_ = treeFocused_ ? "Panel plikow" : "Edycja tekstu";
+    }
 
     // --- Operacje plikowe (bierzaca karta) ------------------------------------
 
@@ -112,13 +147,26 @@ public:
 
     void draw(Screen& screen) override {
         const int statusH = 1, tabH = 1;
-        const int areaH = std::max(0, bounds_.h - statusH - tabH);
+        const int bodyH = std::max(0, bounds_.h - statusH);
+        const int areaH = std::max(0, bodyH - tabH);
 
-        tabBar_.setBounds(Rect{bounds_.x, bounds_.y, bounds_.w, tabH});
+        // Drzewo po lewej (gdy otwarte), prawa kolumna: karty + tekst.
+        int treeW = 0;
+        if (treeOpen_) {
+            treeW = std::clamp(bounds_.w / 3, 12, 28);
+            if (bounds_.w - treeW < 20) treeW = std::max(0, bounds_.w - 20);
+            tree_.setBounds(Rect{bounds_.x, bounds_.y, treeW, bodyH});
+            tree_.setFocused(focused_ && treeFocused_);
+            tree_.draw(screen);
+        }
+
+        const int rx = bounds_.x + treeW;
+        const int rw = bounds_.w - treeW;
+        tabBar_.setBounds(Rect{rx, bounds_.y, rw, tabH});
         tabBar_.draw(screen);
 
-        cur().setBounds(Rect{bounds_.x, bounds_.y + tabH, bounds_.w, areaH});
-        cur().setFocused(focused_);
+        cur().setBounds(Rect{rx, bounds_.y + tabH, rw, areaH});
+        cur().setFocused(focused_ && !treeFocused_);
         cur().draw(screen);
 
         auto [row, col] = cur().cursorLineCol();
@@ -131,7 +179,7 @@ public:
         std::u32string right = text::toUtf32(std::to_string(row) + ":" + std::to_string(col));
         if (cur().dirty()) right += U" *";
 
-        status_.setBounds(Rect{bounds_.x, bounds_.y + tabH + areaH, bounds_.w, statusH});
+        status_.setBounds(Rect{bounds_.x, bounds_.y + bodyH, bounds_.w, statusH});
         status_.setText(std::move(left), std::move(right));
         status_.draw(screen);
     }
@@ -140,6 +188,15 @@ public:
         // Komunikat statusu (wczytanie/zapis/blad/owijanie) jest przelotowy:
         // znika przy pierwszym klawiszu, zeby pasek wrocil do "Plik: <sciezka>".
         statusMsg_.clear();
+        if (treeOpen_ && treeFocused_) {
+            // Esc/Tab z drzewa wraca do tekstu (dalej dzialaja globalne
+            // Alt+Tab/ctrl+Tab — te przechwytuje Desktop, nie drzewo).
+            if (ev.key == Key::Escape || (ev.key == Key::Tab && !ev.ctrl && !ev.alt)) {
+                treeFocused_ = false;
+                return KeyEventResult::Consumed;
+            }
+            return tree_.handleKey(ev);
+        }
         return cur().handleKey(ev);
     }
 
@@ -154,6 +211,7 @@ public:
     }
 
     std::optional<std::pair<int, int>> cursorPosition() const override {
+        if (treeOpen_ && treeFocused_) return std::nullopt; // kursor GUI w drzewie? nie
         return cur().cursorPosition();
     }
 
@@ -218,6 +276,9 @@ private:
     std::vector<std::unique_ptr<TextArea>> tabs_;
     int current_ = 0;
     TabBar tabBar_;
+    FileTree tree_;
+    bool treeOpen_ = false;
+    bool treeFocused_ = false;
     StatusBar status_;
     std::string statusMsg_;
     bool lineNumbers_ = false;

@@ -22,6 +22,8 @@ public:
         view->setMenuTabs({{U"Plik", std::vector<MenuItem>{
             {U"Nowa karta (Ctrl+N)", [raw] { raw->newFile(); }},
             {U"Otworz... (Ctrl+O)", [raw] { raw->openFile(); }},
+            {U"Otworz folder (Ctrl+D)", [raw] { raw->openFolder(); }},
+            {U"Panel plikow (Ctrl+B)", [raw] { raw->toggleTreeFocus(); }},
             {U"Zapisz (Ctrl+S)", [raw] { raw->save(); }},
             {U"Zapisz jako...", [raw] { raw->saveAs(); }},
             {U"Zamknij karte (Ctrl+T)", [raw] { raw->closeTab(); }},
@@ -38,6 +40,8 @@ public:
         view->pushShortcut({true, Key::Char, U't'}, [raw] { raw->closeTab(); });
         view->pushShortcut({true, Key::Char, U'g'}, [raw] { raw->toggleLineNumbers(); });
         view->pushShortcut({true, Key::Char, U'y'}, [raw] { raw->toggleSpaces(); });
+        view->pushShortcut({true, Key::Char, U'd'}, [raw] { raw->openFolder(); });
+        view->pushShortcut({true, Key::Char, U'b'}, [raw] { raw->toggleTreeFocus(); });
         // F4/F9 = nastepna/poprzednia karta (dziala tez z fokusem w polu tekstu).
         view->pushShortcut({false, Key::F4, std::nullopt}, [raw] { raw->nextTab(); });
         view->pushShortcut({false, Key::F9, std::nullopt}, [raw] { raw->prevTab(); });
