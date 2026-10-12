@@ -330,8 +330,21 @@ KeyEventResult TextArea::handleKey(const KeyEvent& ev) {
         case Key::Enter:    insertNewline(); ensureVisible(); return KeyEventResult::Consumed;
         case Key::Backspace: backspace(); ensureVisible(); return KeyEventResult::Consumed;
         case Key::Delete:   del(); ensureVisible(); return KeyEventResult::Consumed;
+        case Key::Tab:
+            // Zmodyfikowany Tab (Alt+Tab/Ctrl+Tab = globalne przelaczanie
+            // okien) przepuszczamy do Desktopu; zwykly Tab wstawia tabulator
+            // albo odstep spacji (setInsertsSpaces).
+            if (ev.ctrl || ev.alt) return KeyEventResult::Ignored;
+            if (insertsSpaces_) {
+                const int n = 4 - (cursorCol_ % 4);
+                for (int i = 0; i < n; ++i) insertChar(U' ');
+            } else {
+                insertChar(U'\t');
+            }
+            ensureVisible();
+            return KeyEventResult::Consumed;
         case Key::Char:
-            if (!ev.ctrl) { insertChar(ev.character); ensureVisible(); return KeyEventResult::Consumed; }
+            if (!ev.ctrl && !ev.alt) { insertChar(ev.character); ensureVisible(); return KeyEventResult::Consumed; }
             return KeyEventResult::Ignored;
         default: return KeyEventResult::Ignored;
     }
@@ -359,10 +372,14 @@ void TextArea::draw(Screen& screen) {
             if (len <= 0) continue;
         }
         const int n = std::min(len, bounds_.w);
-        screen.putText(bounds_.x, bounds_.y + row,
-                       std::u32string_view(line).substr(static_cast<std::size_t>(start),
-                                                        static_cast<std::size_t>(n)),
-                       t.editorText, t.editorBg);
+        // Znaki sterujace w buforze (np. '\t' z wczytanego pliku) musza byc
+        // podmienione PRZED rysowaniem — inaczej trafilby do terminala jako
+        // surowy bajt i rozjechalby kursor. Tab widoczny jako '→'.
+        std::u32string cell(line.substr(static_cast<std::size_t>(start),
+                                        static_cast<std::size_t>(n)));
+        for (char32_t& c : cell)
+            if (c == U'\t') c = U'→';
+        screen.putText(bounds_.x, bounds_.y + row, cell, t.editorText, t.editorBg);
     }
 }
 

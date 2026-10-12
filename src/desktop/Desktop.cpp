@@ -553,9 +553,15 @@ void Desktop::handleKeyEvent(const KeyEvent& ev) {
     }
 
     // --- Globalne skróty klawiszowe — zawsze działają, niezależnie od trybu ---
-    // Uwaga: Tab NIE jest globalny — najpierw dostaje go widget (np. menedzer
-    // plikow przelacza nim panele), a focusNext() jest fallbackiem gdy widget
-    // zwraca Ignored (patrz applyWidgetResult / sekcja Desktop).
+    // Uwaga: zwykly Tab NIE jest globalny — najpierw dostaje go widget (np.
+    // edytor wstawia tabulator, menedzer plikow przelacza panele), a
+    // focusNext() jest fallbackiem gdy widget zwraca Ignored (patrz
+    // applyWidgetResult / sekcja Desktop). Globalne sa tylko ZMODYFIKOWANE
+    // warianty: Alt+Tab (gola konsola Linux wysyla to jako ESC+Tab — jedyne
+    // combo z modyfikatorem, jakie da sie odebrac na TTY; Ctrl+Tab nie
+    // produkuje ZADNEGO bajtu w domyslnej keymapie) i Ctrl+Tab dla
+    // keymapow/emulatorow, ktore dostarczaja odrębna sekwencje.
+    if (ev.key == Key::Tab && (ev.alt || ev.ctrl)) { wm_.focusNext(); return; }
     if (ev.key == Key::F1) { openAppMenu(); return; }
     if (ev.ctrl && ev.key == Key::Char && ev.character == U'w') {
         // Guard: brudne okno (Widget::dirty) pyta o potwierdzenie przed zamknieciem.
@@ -631,8 +637,9 @@ void Desktop::handleKeyEvent(const KeyEvent& ev) {
             return;
         }
 
-        // Znak -> przechodzimy do trybu Edit dla edytowalnych widgetow.
-        if (ev.key == Key::Char && !ev.ctrl && content && content->editable()) {
+        // Znak -> przechodzimy do trybu Edit dla edytowalnych widgetow
+        // (alt+znak pomijamy — to nie jest wpisywanie tekstu).
+        if (ev.key == Key::Char && !ev.ctrl && !ev.alt && content && content->editable()) {
             mode_ = CursorMode::Edit;
         }
 

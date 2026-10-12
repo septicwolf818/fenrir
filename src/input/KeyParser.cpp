@@ -1,5 +1,7 @@
 #include "fenrir/input/KeyParser.hpp"
 
+#include <cstdlib>
+
 namespace fenrir {
 
 std::pair<char32_t, int> KeyParser::decodeUtf8(std::string_view data) {
@@ -60,6 +62,28 @@ KeyEvent KeyParser::parseEscapeSequence(std::string_view seq) const {
         // sekwencje CSI zakończone '~', np. ESC[3~ (Delete), ESC[5~ (PgUp)
         if (seq.back() == '~') {
             std::string_view num = seq.substr(1, seq.size() - 2);
+            // modifyOtherKeys / CSI-u: ESC[27;<mods>;<code>~ (np. 27;5;9~ =
+            // Ctrl+Tab). Dostarczaja to emulatory i keymapy obslugujace
+            // modyfikatory; na golym TTY (Linux VC) taka sekwencja po prostu
+            // sie nie pojawia i ta sciezka jest martwa — ale kosztuje zero.
+            if (num.size() > 3 && num.substr(0, 2) == "27") {
+                auto s1 = num.find(';');
+                auto s2 = (s1 == std::string_view::npos) ? std::string_view::npos
+                                                         : num.find(';', s1 + 1);
+                if (s1 != std::string_view::npos && s2 != std::string_view::npos) {
+                    const int mods = std::atoi(std::string(num.substr(s1 + 1, s2 - s1 - 1)).c_str());
+                    const int code = std::atoi(std::string(num.substr(s2 + 1)).c_str());
+                    ev.ctrl = (mods & 4) != 0;
+                    ev.alt = (mods & 2) != 0;
+                    switch (code) {
+                        case 9:  ev.key = Key::Tab; return ev;
+                        case 13: ev.key = Key::Enter; return ev;
+                        case 27: ev.key = Key::Escape; return ev;
+                        case 32: ev.key = Key::Char; ev.character = U' '; return ev;
+                        default: break;
+                    }
+                }
+            }
             if (num == "1" || num == "7") ev.key = Key::Home;
             else if (num == "3") ev.key = Key::Delete;
             else if (num == "4" || num == "8") ev.key = Key::End;
@@ -123,6 +147,33 @@ std::vector<KeyEvent> KeyParser::feed(const char* data, std::size_t len) {
                 std::string_view seq(data + i + 1, j - (i + 1));
                 out.push_back(parseEscapeSequence(seq));
                 i = j;
+            } else if (i + 1 < len && data[i + 1] != 0x1b) {
+                // ESC + znak = Alt+znak. Konsola Linux (VC_META domyslnie
+                // wl.) wysyla wlasnie tak Alt+X — np. Alt+Tab = ESC 0x09.
+                // ESC ESC pomijamy tu celowo — to dwa osobne Escape.
+                unsigned char b2 = static_cast<unsigned char>(data[i + 1]);
+                KeyEvent ev;
+                ev.alt = true;
+                std::size_t adv = 2;
+                if (b2 == '\r' || b2 == '\n') {
+                    ev.key = Key::Enter;
+                } else if (b2 == '\t') {
+                    ev.key = Key::Tab;
+                } else if (b2 == 0x7f || b2 == 0x08) {
+                    ev.key = Key::Backspace;
+                } else if (b2 < 0x20) {
+                    ev.key = Key::Char;
+                    ev.ctrl = true;
+                    ev.character = static_cast<char32_t>(b2 + 0x60); // Alt+Ctrl+litera
+                } else {
+                    auto [cp, consumed] = decodeUtf8(std::string_view(data + i + 1, len - (i + 1)));
+                    if (consumed <= 0) consumed = 1;
+                    ev.key = Key::Char;
+                    ev.character = cp;
+                    adv = 1 + static_cast<std::size_t>(consumed);
+                }
+                out.push_back(ev);
+                i += adv;
             } else {
                 out.push_back(KeyEvent{Key::Escape, 0, false});
                 ++i;

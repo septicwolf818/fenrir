@@ -24,6 +24,20 @@ public:
     void newFile();   // utworz nowy pusty dokument
     void clearText(); // czyści cały tekst
 
+    // Wstawianie przy Tab: znak tabulatora ('\t', domyslnie) albo spacje
+    // (odstep do kolejnej kolumny 4). Ustawiane z preferencji aplikacji
+    // edytora; ktorykolwiek tryb — Tab JEST wstawiany (nie przelacza okien).
+    void setInsertsSpaces(bool on) { insertsSpaces_ = on; }
+    bool insertsSpaces() const { return insertsSpaces_; }
+
+    // Numery linii (gutter po lewej) — przelaczane z menu/shortcutu.
+    void setShowLineNumbers(bool on) {
+        if (lineNumbers_ == on) return;
+        lineNumbers_ = on;
+        markDirty();
+    }
+    bool showLineNumbers() const { return lineNumbers_; }
+
     const std::string& path() const { return path_; }
     bool dirty() const override { return dirty_; }
 
@@ -79,6 +93,8 @@ private:
     int scrollRow_ = 0;                 // pierwszy widoczny wiersz WIZUALNY
     int scrollCol_ = 0;                 // pierwsza widoczna kolumna (tylko gdy brak owijania)
     bool wrap_ = true;                  // owijanie linii (domyslnie wl.)
+    bool insertsSpaces_ = false;        // Tab wstawia spacje zamiast '\t'
+    bool lineNumbers_ = false;          // gutter z numerami linii
     int goalCol_ = 0; // "lepka" kolumna wizualna dla ruchu góra/dół (PageUp itp.)
 
     void markDirty() { layoutDirty_ = true; }

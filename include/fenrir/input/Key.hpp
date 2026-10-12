@@ -16,6 +16,10 @@ struct KeyEvent {
     Key key = Key::Unknown;
     char32_t character = 0; // ważne gdy key == Key::Char (albo ctrl==true)
     bool ctrl = false;      // np. ctrl=true, character=U'S' -> Ctrl+S
+    // Alt (meta). Konsola Linux nie ma odrębnego bajtu dla Alt+X — domyślnie
+    // (tryb VC_META) wysyła ESC + X, więc KeyParser składa z tego zdarzenie
+    // z alt=true. Jedyne praktyczne combo na gołej TTY: Alt+Tab (ESC+Tab).
+    bool alt = false;
 };
 
 } // namespace fenrir

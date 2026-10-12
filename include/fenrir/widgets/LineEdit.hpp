@@ -115,7 +115,7 @@ public:
                 if (onSubmit) onSubmit(value_);
                 return KeyEventResult::Consumed;
             case Key::Char:
-                if (!ev.ctrl) {
+                if (!ev.ctrl && !ev.alt) {
                     value_.insert(value_.begin() + cursor_, ev.character);
                     ++cursor_;
                     if (onChange) onChange(value_);
