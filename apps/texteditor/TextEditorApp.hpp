@@ -27,11 +27,15 @@ public:
         }},
         {U"Format", std::vector<MenuItem>{
             {U"Zawijanie linii (Ctrl+E)", [raw] { raw->toggleWrap(); }},
+            {U"Numery linii (Ctrl+G)", [raw] { raw->toggleLineNumbers(); }},
+            {U"Tab = spacje (Ctrl+Y)", [raw] { raw->toggleSpaces(); }},
         }}});
 
         view->pushShortcut({true, Key::Char, U'n'}, [raw] { raw->newFile(); });
         view->pushShortcut({true, Key::Char, U'o'}, [raw] { raw->openFile(); });
         view->pushShortcut({true, Key::Char, U's'}, [raw] { raw->save(); });
+        view->pushShortcut({true, Key::Char, U'g'}, [raw] { raw->toggleLineNumbers(); });
+        view->pushShortcut({true, Key::Char, U'y'}, [raw] { raw->toggleSpaces(); });
 
         return view;
     }

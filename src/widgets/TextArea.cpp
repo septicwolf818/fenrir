@@ -13,8 +13,16 @@ TextArea::TextArea() { editable_ = true; }
 
 // --- Layout (linie logiczne -> wiersze wizualne) -----------------------------
 
+int TextArea::gutterW() const {
+    if (!lineNumbers_) return 0;
+    int n = static_cast<int>(lines_.size());
+    int digits = 1;
+    while (n >= 10) { n /= 10; ++digits; }
+    return digits + 1; // liczba + jedna spacja odstepu
+}
+
 void TextArea::rebuildLayout() const {
-    layoutW_ = std::max(1, bounds_.w);
+    layoutW_ = std::max(1, bounds_.w - gutterW());
     layout_.clear();
 
     for (int li = 0; li < static_cast<int>(lines_.size()); ++li) {
@@ -53,7 +61,7 @@ void TextArea::rebuildLayout() const {
 }
 
 void TextArea::ensureLayout() const {
-    if (!layoutDirty_ && layoutW_ == std::max(1, bounds_.w)) return;
+    if (!layoutDirty_ && layoutW_ == std::max(1, bounds_.w - gutterW())) return;
     rebuildLayout();
 }
 
@@ -283,8 +291,9 @@ void TextArea::ensureVisible() {
         return;
     }
     const int off = visualOffset(); // kolumna kursora w jego wierszu wizualnym
+    const int textW = std::max(1, bounds_.w - gutterW());
     if (off < scrollCol_) scrollCol_ = off;
-    if (off >= scrollCol_ + bounds_.w) scrollCol_ = off - bounds_.w + 1;
+    if (off >= scrollCol_ + textW) scrollCol_ = off - textW + 1;
     scrollCol_ = std::max(0, scrollCol_);
 }
 
@@ -356,6 +365,8 @@ void TextArea::draw(Screen& screen) {
     ensureLayout();
     const auto& t = theme::active;
     const Cell fill{U' ', t.editorText, t.editorBg, 0};
+    const int gut = gutterW();
+    const int textW = std::max(1, bounds_.w - gut);
 
     for (int row = 0; row < bounds_.h; ++row) {
         screen.fillRect(Rect{bounds_.x, bounds_.y + row, bounds_.w, 1}, fill);
@@ -363,6 +374,21 @@ void TextArea::draw(Screen& screen) {
         if (segIdx >= static_cast<int>(layout_.size())) continue; // za tekstem - samo tlo
         const Seg& s = layout_[static_cast<std::size_t>(segIdx)];
         const std::u32string& line = lines_[static_cast<std::size_t>(s.line)];
+
+        // Gutter: numer linii logycznej na PIERWSZYM wierszu wizualnym
+        // (przy owijaniu kontynuacje zostaja puste). Prawostronnie + spacja.
+        if (gut > 0) {
+            const bool firstRow =
+                segIdx == 0 || layout_[static_cast<std::size_t>(segIdx - 1)].line != s.line;
+            if (firstRow) {
+                std::u32string num = text::toUtf32(std::to_string(s.line + 1));
+                if (static_cast<int>(num.size()) > gut - 1)
+                    num = num.substr(num.size() - static_cast<std::size_t>(gut - 1));
+                const int pad = gut - 1 - static_cast<int>(num.size());
+                screen.putText(bounds_.x + pad, bounds_.y + row, num, t.dimText, t.editorBg);
+            }
+        }
+
         if (s.len <= 0) continue;
         int start = s.col0;
         int len = s.len;
@@ -371,7 +397,7 @@ void TextArea::draw(Screen& screen) {
             len -= scrollCol_;
             if (len <= 0) continue;
         }
-        const int n = std::min(len, bounds_.w);
+        const int n = std::min(len, textW);
         // Znaki sterujace w buforze (np. '\t' z wczytanego pliku) musza byc
         // podmienione PRZED rysowaniem — inaczej trafilby do terminala jako
         // surowy bajt i rozjechalby kursor. Tab widoczny jako '→'.
@@ -379,7 +405,7 @@ void TextArea::draw(Screen& screen) {
                                         static_cast<std::size_t>(n)));
         for (char32_t& c : cell)
             if (c == U'\t') c = U'→';
-        screen.putText(bounds_.x, bounds_.y + row, cell, t.editorText, t.editorBg);
+        screen.putText(bounds_.x + gut, bounds_.y + row, cell, t.editorText, t.editorBg);
     }
 }
 
@@ -387,12 +413,14 @@ std::optional<std::pair<int, int>> TextArea::cursorPosition() const {
     ensureLayout();
     const int seg = visualRowOf(cursorRow_, cursorCol_);
     const int screenRow = seg - scrollRow_;
+    const int gut = gutterW();
+    const int textW = std::max(1, bounds_.w - gut);
     if (screenRow < 0 || screenRow >= bounds_.h || bounds_.w <= 0) return std::nullopt;
     int offset = visualOffset();
     if (!wrap_) offset -= scrollCol_; // pozycja na ekranie (kolumna moze byc przewiniete)
     if (offset < 0) offset = 0;
-    if (offset >= bounds_.w) offset = bounds_.w - 1; // koniec pelnego wiersza wizualnego
-    return std::make_pair(bounds_.x + offset, bounds_.y + screenRow);
+    if (offset >= textW) offset = textW - 1; // koniec pelnego wiersza wizualnego
+    return std::make_pair(bounds_.x + gut + offset, bounds_.y + screenRow);
 }
 
 } // namespace fenrir

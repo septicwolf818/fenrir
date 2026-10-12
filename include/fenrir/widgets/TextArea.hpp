@@ -100,6 +100,7 @@ private:
     void markDirty() { layoutDirty_ = true; }
     void ensureLayout() const;
     void rebuildLayout() const;
+    int gutterW() const;               // szerokosc guttera z numerami linii (0 = brak)
     int visualRowOf(int row, int col) const; // index w layout_ dla (row,col)
     std::pair<int, int> logicalOf(int segIdx, int offset) const;
     int visualOffset() const; // biezacy kursor -> offset w jego wierszu wizualnym

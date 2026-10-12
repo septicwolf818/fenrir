@@ -4,6 +4,7 @@
 
 #include "fenrir/app/AppContext.hpp"
 #include "fenrir/core/FileSystem.hpp"
+#include "fenrir/core/Prefs.hpp"
 #include "fenrir/core/Text.hpp"
 #include "fenrir/widgets/StatusBar.hpp"
 #include "fenrir/widgets/TextArea.hpp"
@@ -21,6 +22,12 @@ public:
     TextEditorView(AppContext& ctx, std::string startPath) : ctx_(ctx) {
         area_.onStatus = [this](const std::string& m) { statusMsg_ = m; };
         area_.loadFile(std::move(startPath));
+        // Preferencje edytora (jeden plik na aplikacje, patrz core/Prefs).
+        auto& p = prefs::forApp("editor");
+        lineNumbers_ = p.getBool("line_numbers", false);
+        insertsSpaces_ = p.getBool("insert_spaces", false);
+        area_.setShowLineNumbers(lineNumbers_);
+        area_.setInsertsSpaces(insertsSpaces_);
     }
 
     // --- Operacje wywolywane z menu / skrotow --------------------------------
@@ -58,6 +65,22 @@ public:
 
     // Przelacza owijanie linii (Ctrl+E) — wylaczone = przewijanie poziome dlugich linii.
     void toggleWrap() { area_.toggleWrap(); }
+
+    // Numery linii (Ctrl+G) — gutter po lewej; zapisywane w preferencjach.
+    void toggleLineNumbers() {
+        lineNumbers_ = !lineNumbers_;
+        area_.setShowLineNumbers(lineNumbers_);
+        prefs::forApp("editor").setBool("line_numbers", lineNumbers_);
+        statusMsg_ = lineNumbers_ ? "Numery linii: wlaczone" : "Numery linii: wylaczone";
+    }
+
+    // Tab wstawia spacje zamiast tabulatora (Ctrl+Y); zapisywane w preferencjach.
+    void toggleSpaces() {
+        insertsSpaces_ = !insertsSpaces_;
+        area_.setInsertsSpaces(insertsSpaces_);
+        prefs::forApp("editor").setBool("insert_spaces", insertsSpaces_);
+        statusMsg_ = insertsSpaces_ ? "Tab = spacje (4): wlaczone" : "Tab = tabulator: wylaczone spacje";
+    }
 
     // --- Widget --------------------------------------------------------------
 
@@ -117,6 +140,8 @@ private:
     TextArea area_;
     StatusBar status_;
     std::string statusMsg_;
+    bool lineNumbers_ = false;
+    bool insertsSpaces_ = false;
 };
 
 } // namespace fenrir::apps
