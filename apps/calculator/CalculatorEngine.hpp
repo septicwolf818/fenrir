@@ -20,7 +20,11 @@ public:
         if (error_) return;
         if (justEvaluated_) resetAfterEquals();
         if (!entering_) { entry_.clear(); entering_ = true; }
+        rhsReady_ = true; // swiezy operand = "=" moze liczyc
+        // Notacja naukowa (zapis po %/x^2) nie nadaje sie do dopisywania cyfr.
+        if (entry_.find_first_of("eE") != std::string::npos) entry_.clear();
         if (entry_ == "0") entry_.clear();
+        else if (entry_ == "-0") entry_.erase(1); // "-0" + cyfra -> "-5", nie "-05"
         if (entry_.size() < 16) entry_ += d;
     }
 
@@ -28,31 +32,42 @@ public:
         if (error_) return;
         if (justEvaluated_) resetAfterEquals();
         if (!entering_) { entry_.clear(); entering_ = true; }
+        rhsReady_ = true; // jw.
+        if (entry_.find_first_of("eE") != std::string::npos) entry_.clear(); // jw.
         if (entry_.find('.') == std::string::npos) entry_ += '.';
     }
 
     void setOp(char op) {
         if (error_) return;
         double cur = currentEntry();
+        const bool repeat = !entering_ && pendingOp_ == op;
         if (entering_) {
             if (pendingOp_) {
                 if (!apply(acc_, pendingOp_, cur)) return;
             } else {
                 acc_ = cur;
             }
-        } else if (pendingOp_) {
-            // lancuchowe operacje bez wpisu: "5 + + *" -> 5+5, potem *
+        } else if (repeat) {
+            // powtorzenie operatora bez wpisu: "5 + + *" -> 5+5, potem mnozenie
             if (!apply(acc_, pendingOp_, cur)) return;
         }
+        // Inny operator bez wpisu = tylko podmiana ("5 + *" -> potem mnozenie).
+        // entry_ puste: glowa pokazuje acc_ tak jak po "=".
+        entry_.clear();
         pendingOp_ = op;
         entering_ = false;
         justEvaluated_ = false;
+        // Po powtorzeniu acc_ juz zawiera wynik — nastepne "=" tylko go
+        // potwierdza, nie liczy drugi raz (10+10). Bez powtorzenia "=" moze
+        // liczyc z acc_ jako prawym operandem ("5 + =" -> 10).
+        rhsReady_ = !repeat;
     }
 
     void equals() {
         if (error_ || !pendingOp_) return;
-        double cur = currentEntry();
-        if (!apply(acc_, pendingOp_, cur)) return;
+        if (rhsReady_) {
+            if (!apply(acc_, pendingOp_, currentEntry())) return;
+        }
         pendingOp_ = 0;
         entering_ = false;
         entry_.clear(); // w glowie pokazywany jest teraz acc_
@@ -62,6 +77,7 @@ public:
     void clear() {
         acc_ = 0; entry_.clear(); pendingOp_ = 0;
         entering_ = false; justEvaluated_ = false; error_ = false;
+        rhsReady_ = true;
     }
 
     void negate() {
@@ -85,6 +101,7 @@ public:
         entry_ = format(v);
         entering_ = true;
         justEvaluated_ = false;
+        rhsReady_ = true; // swiezy operand po przeliczeniu
     }
 
     void square() {
@@ -94,18 +111,18 @@ public:
         entry_ = format(v);
         entering_ = true;
         justEvaluated_ = false;
+        rhsReady_ = true; // jw.
     }
 
     // Tekst na glowie (right-aligned; widok sam go wyrównuje).
     std::string display() const {
-        if (error_) return "Błęd";
+        if (error_) return "Błąd";
         if (entry_.empty()) return format(acc_);
         std::string s = entry_;
         if (s.back() == '.') s.pop_back(); // "2." -> "2"
+        if (s.empty()) return "0";         // sam "." -> pokazuj "0"
         return s;
     }
-
-    bool error() const { return error_; }
 
 private:
     double acc_ = 0.0;          // akumulator (pierwszy operand / wynik)
@@ -113,6 +130,7 @@ private:
     char pendingOp_ = 0;        // oczekujacy operator: + - * /
     bool entering_ = false;     // true = wpychanie entry_
     bool justEvaluated_ = false;// true = dopiero co naciśnięto "="
+    bool rhsReady_ = true;      // "=" moze uzyc acc_ jako prawego operandu
     bool error_ = false;
 
     void resetAfterEquals() {

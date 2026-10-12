@@ -3,6 +3,7 @@
 #include <memory>
 #include <string>
 
+#include "fenrir/core/Text.hpp"
 #include "fenrir/core/Theme.hpp"
 #include "fenrir/widgets/Button.hpp"
 #include "fenrir/widgets/Label.hpp"
@@ -31,6 +32,8 @@ public:
     }
 
     void draw(Screen& screen) override {
+        // Kolory z bieżącego motywu — theme::apply podmienia active w locie.
+        display_->setColors(theme::active.fieldText, theme::active.fieldBg);
         Rect displayRect{bounds_.x, bounds_.y, bounds_.w, std::max(0, bounds_.h / 4)};
         display_->setBounds(displayRect);
         display_->draw(screen);
@@ -51,11 +54,12 @@ public:
         return panel_.handleKey(ev);
     }
 
-    // resetEngine() wywolywana z menu aplikacji (setMenuItems) — musi byc publiczna.
+    // resetEngine() wywolywana z menu aplikacji (setMenuTabs) — musi byc publiczna.
     void resetEngine() { engine_.clear(); refreshDisplay(); }
 
-    // Minimum: display (h/4 >= 2) + 5 wierszy przyciskow, 4 kolumny "[7 ]" = 20.
-    int minWidth() const override { return 20; }
+    // Minimum: display (h/4 >= 2) + 5 wierszy przyciskow; kolumna musi zmiescic
+    // "[ 7 ]" = 5 komorek -> 4*5 + 2*pad(1) = 22.
+    int minWidth() const override { return 22; }
     int minHeight() const override { return 8; }
 
 private:
@@ -80,7 +84,7 @@ private:
 
     void refreshDisplay() {
         std::string s = engine_.display();
-        display_->setText(std::u32string(s.begin(), s.end()));
+        display_->setText(text::toUtf32(s));
     }
 
     void buildButtons() {
