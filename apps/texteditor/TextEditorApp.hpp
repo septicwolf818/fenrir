@@ -20,10 +20,11 @@ public:
         TextEditorView* raw = view.get();
 
         view->setMenuTabs({{U"Plik", std::vector<MenuItem>{
-            {U"Nowy (Ctrl+N)", [raw] { raw->newFile(); }},
+            {U"Nowa karta (Ctrl+N)", [raw] { raw->newFile(); }},
             {U"Otworz... (Ctrl+O)", [raw] { raw->openFile(); }},
             {U"Zapisz (Ctrl+S)", [raw] { raw->save(); }},
             {U"Zapisz jako...", [raw] { raw->saveAs(); }},
+            {U"Zamknij karte (Ctrl+T)", [raw] { raw->closeTab(); }},
         }},
         {U"Format", std::vector<MenuItem>{
             {U"Zawijanie linii (Ctrl+E)", [raw] { raw->toggleWrap(); }},
@@ -34,8 +35,12 @@ public:
         view->pushShortcut({true, Key::Char, U'n'}, [raw] { raw->newFile(); });
         view->pushShortcut({true, Key::Char, U'o'}, [raw] { raw->openFile(); });
         view->pushShortcut({true, Key::Char, U's'}, [raw] { raw->save(); });
+        view->pushShortcut({true, Key::Char, U't'}, [raw] { raw->closeTab(); });
         view->pushShortcut({true, Key::Char, U'g'}, [raw] { raw->toggleLineNumbers(); });
         view->pushShortcut({true, Key::Char, U'y'}, [raw] { raw->toggleSpaces(); });
+        // F4/F9 = nastepna/poprzednia karta (dziala tez z fokusem w polu tekstu).
+        view->pushShortcut({false, Key::F4, std::nullopt}, [raw] { raw->nextTab(); });
+        view->pushShortcut({false, Key::F9, std::nullopt}, [raw] { raw->prevTab(); });
 
         return view;
     }
