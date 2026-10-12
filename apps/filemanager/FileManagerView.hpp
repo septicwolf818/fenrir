@@ -36,8 +36,12 @@ public:
     // --- Operacje wywolywane tez z menu aplikacji ---------------------------
 
     void goUp() {
+        const std::string before = active().currentDir();
         active().goUp();
-        status("W gorze: " + active().currentDir());
+        // Na korzeniu parent() zwraca siebie i panel nie rusza — komunikat nie
+        // moze udawac, ze wszedl wyzej. Pisownia jak w pozycji menu "W gore".
+        if (active().currentDir() == before) status("Juz jestes w korzeniu.");
+        else status("W gore: " + active().currentDir());
     }
 
     void copySelected() {
@@ -46,11 +50,16 @@ public:
         if (!src.selectionIsSafeTarget()) { status("Nie mozna kopiowac '..'."); return; }
         DirectoryView& dest = other();
         const std::string from = src.selectedPath();
+        // Katalog docelowy = zrodlo lub jego potomek -> stdfs::copy probowalby
+        // skopiowac katalog do samego siebie (rekurencja az do zapelnienia dysku).
+        if (fs::isDirectory(from) && isWithin(dest.currentDir(), from)) {
+            status("Cel to katalog zrodlowy lub jego podkatalog.");
+            return;
+        }
         try {
             const std::string to = uniqueNameIn(dest.currentDir(), fs::nameOf(from));
             fs::copyPath(from, to);
-            left_.reload();
-            right_.reload();
+            reloadBoth();
             status("Skopiowano: " + fs::nameOf(from) + " -> " + dest.currentDir());
         } catch (const std::exception& e) {
             status(std::string("Blad: ") + e.what());
@@ -62,7 +71,20 @@ public:
         if (src.empty()) { status("Brak elementow."); return; }
         if (!src.selectionIsSafeTarget()) { status("Nie mozna przeniesc '..'."); return; }
         DirectoryView& dest = other();
+        // Oba panele w tym samym katalogu: uniqueNameIn daloby nowa nazwe i
+        // "przeniesienie" skonczyloby sie cichym przemianowaniem na "nazwa (1)".
+        if (dest.currentDir() == src.currentDir()) {
+            status("Zrodlo i cel sa w tym samym katalogu.");
+            return;
+        }
         const std::string from = src.selectedPath();
+        // Cel = zrodlo lub jego potomek: rename do wlasnego potomka zawsze sie
+        // wylozy, a wzgledny fallback (kopiuj + usun) probowalby skopiowac
+        // katalog do samego siebie.
+        if (fs::isDirectory(from) && isWithin(dest.currentDir(), from)) {
+            status("Cel to katalog zrodlowy lub jego podkatalog.");
+            return;
+        }
         try {
             const std::string to = uniqueNameIn(dest.currentDir(), fs::nameOf(from));
             try {
@@ -73,8 +95,7 @@ public:
                 fs::copyPath(from, to);
                 fs::removePath(from);
             }
-            left_.reload();
-            right_.reload();
+            reloadBoth();
             status("Przeniesiono: " + fs::nameOf(from) + " -> " + dest.currentDir());
         } catch (const std::exception& e) {
             status(std::string("Blad: ") + e.what());
@@ -83,7 +104,8 @@ public:
 
     void renameSelected() {
         DirectoryView& v = active();
-        if (v.empty() || !v.selectionIsSafeTarget()) { status("Brak elementow."); return; }
+        if (v.empty()) { status("Brak elementow."); return; }
+        if (!v.selectionIsSafeTarget()) { status("Nie mozna przemianowac '..'."); return; }
         const std::string oldPath = v.selectedPath();
         const auto token = lifetimeToken();
         ctx_.prompt(U"Przemianuj", U"Nowa nazwa:", U"Nazwa: ",
@@ -99,8 +121,7 @@ public:
                                 return;
                             }
                             fs::renamePath(oldPath, newPath);
-                            left_.reload();
-                            right_.reload();
+                            reloadBoth();
                             status("Przemianowano na: " + newBase);
                         } catch (const std::exception& e) {
                             status(std::string("Blad: ") + e.what());
@@ -119,10 +140,9 @@ public:
                          if (!token.lock()) return;
                          if (!ok) { status("Anulowano."); return; }
                          try {
-                             fs::removePath(path);
-                             left_.reload();
-                             right_.reload();
-                             status("Usunieto: " + fs::nameOf(path));
+                              fs::removePath(path);
+                              reloadBoth();
+                              status("Usunieto: " + fs::nameOf(path));
                          } catch (const std::exception& e) {
                              status(std::string("Blad: ") + e.what());
                          }
@@ -130,8 +150,7 @@ public:
     }
 
     void refreshBoth() {
-        left_.reload();
-        right_.reload();
+        reloadBoth();
         status("Odswiezono oba panele.");
     }
 
@@ -166,7 +185,11 @@ public:
         right_.draw(screen);
 
         status_.setBounds(Rect{bounds_.x, bounds_.y + paneH, bounds_.w, 1});
-        status_.setText(text::toUtf32(statusMsg_), rightActive_ ? U"Prawy" : U"Lewy");
+        // StatusBar rysuje etykiete panelu az do konca paska, wiec lewy tekst
+        // ucinamy tak, zeby nie wchodzil mu pod spod (mieszal sie: "...przLewy").
+        const int statusLeftW = bounds_.w - 6; // "Prawy" (5 znakow) + odstep
+        status_.setText(text::clip(text::toUtf32(statusMsg_), statusLeftW),
+                        rightActive_ ? U"Prawy" : U"Lewy");
         status_.draw(screen);
     }
 
@@ -188,7 +211,10 @@ public:
             }
         }
         if (ev.key == Key::Delete) { deleteSelected(); return KeyEventResult::Consumed; }
-        return active().handleKey(ev); // nawigacja/Enter/Backspace idzie do panelu
+        // Backspace tez przez goUp(), a nie przez panel: DirectoryView nie
+        // zglosilby zmiany statusu i pasek pokazywalby stary katalog.
+        if (ev.key == Key::Backspace) { goUp(); return KeyEventResult::Consumed; }
+        return active().handleKey(ev); // nawigacja/Enter idzie do panelu
     }
 
 private:
@@ -209,6 +235,36 @@ private:
             dst = fs::join(dir, stem + " (" + std::to_string(n) + ")" + ext);
             if (!fs::exists(dst)) return dst;
         }
+    }
+
+    // Odswiezenie obu paneli po operacji na plikach. Jesli panel stal wewnatrz
+    // katalogu, ktory wlasnie zniknal (usuniecie) lub zmienil nazwe (przeniesienie/
+    // przemianowanie), jego katalog juz nie istnieje — bez tej naprawy panel
+    // zostaje na stale z czerwonym bledem listowania zamiast pokazac zawartosc.
+    void reloadBoth() {
+        left_.reload();
+        right_.reload();
+        repointIfGone(left_);
+        repointIfGone(right_);
+    }
+
+    static void repointIfGone(DirectoryView& v) {
+        std::string dir = v.currentDir();
+        while (!fs::exists(dir)) {
+            const std::string up = fs::parent(dir);
+            if (up == dir) break; // korzen i tak istnieje — petla obronna
+            dir = up;
+        }
+        if (dir != v.currentDir()) v.setDirectory(dir);
+    }
+
+    // Czy `dir` to `root` albo sciezka w nim zawarta. Pilnujemy pietra '/':
+    // "/ab" NIE jest wewnatrz "/a". Kopiowanie/przenoszenie katalogu do niego
+    // samego lub do wlasnego potomka konczy sie rekurencja stdfs::copy.
+    static bool isWithin(const std::string& dir, const std::string& root) {
+        if (dir == root) return true;
+        const std::string prefix = root == "/" ? "/" : root + "/";
+        return dir.compare(0, prefix.size(), prefix) == 0;
     }
 
     AppContext& ctx_;
