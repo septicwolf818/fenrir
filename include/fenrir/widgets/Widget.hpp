@@ -59,6 +59,14 @@ public:
     virtual bool editable() const { return editable_; }
     void setEditable(bool e) { editable_ = e; }
 
+    // Czy zawartosc tego widgetu ma niezapisane zmiany? Desktop pyta o
+    // potwierdzenie przed zamknieciem okna z brudna trescia (guard zamykania,
+    // patrz closeWithConfirm w Desktop.cpp). Domyslnie false — nadpisuja to
+    // widgety z realnym stanem edycji (TextArea robi to juz swoim wlasnym
+    // dirty(), widoki aplikacji — TextEditor, Paint — deleguja). Dialogi i
+    // okna wyboru plikow sa zawsze czyste, wiec nie wymagaja override.
+    virtual bool dirty() const { return false; }
+
     // --- Menu / shortcuts API (używane przez Desktop przy renderowaniu i skróty) ---
 
     // Wszystkie karty menu tej aplikacji (zapisywane przez createView() w Widget).

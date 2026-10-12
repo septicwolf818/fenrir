@@ -25,7 +25,7 @@ public:
     void clearText(); // czyści cały tekst
 
     const std::string& path() const { return path_; }
-    bool dirty() const { return dirty_; }
+    bool dirty() const override { return dirty_; }
 
     // Pozycja kursora: (linia, kolumna), obie 1-based — dla paska statusu.
     std::pair<int, int> cursorLineCol() const { return {cursorRow_ + 1, cursorCol_ + 1}; }

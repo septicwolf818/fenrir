@@ -218,6 +218,11 @@ public:
 
     bool editable() const override { return true; } // znaki od razu maluja (tryb Edit)
 
+    // Niezapisane zmiany rysunku — Desktop pyta o potwierdzenie, zanim zamknie
+    // okno z brudna trescia. Czyszcza: Nowy (guardDirty), udane wczytanie
+    // (loadFrom) i udany zapis (writeTo).
+    bool dirty() const override { return dirty_; }
+
     std::optional<std::pair<int, int>> cursorPosition() const override {
         const int viewH = std::max(1, bounds_.h - 1);
         if (palOpen_) {

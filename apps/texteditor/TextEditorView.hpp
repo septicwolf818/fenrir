@@ -91,6 +91,10 @@ public:
 
     bool editable() const override { return area_.editable(); }
 
+    // Niezapisane zmiany pliku — Desktop pyta o potwierdzenie, zanim zamknie
+    // okno z brudna trescia (guard zamykania). Delegujemy do TextArea.
+    bool dirty() const override { return area_.dirty(); }
+
     std::optional<std::pair<int, int>> cursorPosition() const override { return area_.cursorPosition(); }
 
     // Minimum tresci: pare wierszy tekstu + pasek statusu, czytelna kolumna.

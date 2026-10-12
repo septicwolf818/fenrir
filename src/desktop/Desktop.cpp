@@ -52,6 +52,22 @@ void drawBox(Screen& screen, const Rect& r, std::u32string_view title) {
     }
 }
 
+// Guard zamykania okna: okno z brudna trescia (Widget::dirty) nie zamyka sie
+// od razu — pytamy uzytkownika (AppContext::confirm = Dialog Ok/Anuluj), a
+// zamkniecie enkuje dopiero na OK; przy Anuluj/Esc nic sie nie dzieje.
+// `deferClose` zawsze enkuje zamkniecie (closePending_), takze dla okna
+// czystego: callback dialogu biegnie z wewnatrz handleKey widgetu, wiec okno
+// moze zginac dopiero w flushPendingCloses — po powrocie z dispatchu. Obie
+// sciezki koncza sie wienc zamknieciem po obsluzeniu klawisza (albo klikniecia).
+void closeWithConfirm(AppContext& ctx, Window* w, std::function<void()> deferClose) {
+    if (!w) return;
+    if (!w->content() || !w->content()->dirty()) { deferClose(); return; }
+    ctx.confirm(U"Niezapisane zmiany. Zamknac okno?",
+                [deferClose = std::move(deferClose)](bool ok) {
+                    if (ok) deferClose();
+                });
+}
+
 } // namespace
 
 // Pomocnicze funkcje do obslugi skrótow klawiszowych — statyczne, bo nie modyfikuja stanu Desktop.
@@ -337,7 +353,59 @@ void Desktop::openFolder(const std::string& startDir, OnPick onPick, OnCancel on
 
 void Desktop::saveFile(const std::string& startDir, const std::string& suggestedName,
                         OnPick onPick, OnCancel onCancel) {
-    openDialogWindow(FileDialogMode::SaveFile, startDir, suggestedName, std::move(onPick), std::move(onCancel));
+    // "Zapisz jako" na juz istniejacy plik: pytamy o potwierdzenie zamiast cicho
+    // nadpisywac (dotad FileDialog::confirmSave oddawal sciezke bez sprawdzenia,
+    // a zapis (TextArea/Paint) ucinajacy plik - bez pytania). Ctrl+S na otwartym
+    // pliku (saveToCurrentPath) NIE przechodzi przez ten dialog - potwierdzenie
+    // dotyczy wylacznie przeplywow przez "Zapisz jako".
+    // requester = okno wystawiajace (aplikacja): dialog zapisu moze zostac
+    // zamkniety wczesniej, niz uzytkownik rozstrzygnie potwierdzenie nadpisania.
+    Window* requester = wm_.focused();
+
+    // guard = wspoldzielony "straznik nadpisania": ponowne otwarcia dialogu
+    // zapisu (po Anuluj) w koluje przez ten sam guard, wiec kazdy kolejny wybor
+    // jest tez sprawdzany. Trzymamy go trampoliny OnPick (kopiujace shared_ptr);
+    // weak PRZED lambda-guarda przecina cykl guard -> lamba -> guard.
+    using GuardFn = std::function<void(const std::string&)>;
+    auto guard = std::make_shared<GuardFn>();
+    *guard = [this, requester, startDir, suggestedName, onPick, onCancel,
+              weak = std::weak_ptr<GuardFn>(guard)](const std::string& path) {
+        if (!fs::exists(path)) {
+            // Fokus wprost do wystawiajacego okna (wlasciwy requester moze byc
+            // juz niezywy, jesli to ponownie otwarty dialog zapisu); wrapper
+            // openDialogWindow zobaczy nowy fokus i nie przywroci starego.
+            restoreFocusTo(requester);
+            if (onPick) onPick(path);
+            return;
+        }
+        // Plik juz istnieje - pytamy, czy nadpisac. keep = mocny uchwyt dla
+        // callbacku potwierdzenia: dialog zapisu (z trampolina guard) zostanie
+        // zamkniety przez closePending_, zanim potwierdzenie sie rozstrzygnie.
+        auto keep = weak.lock();
+        const std::u32string msg =
+            U"Plik " + text::toUtf32(fs::nameOf(path)) + U" juz istnieje. Nadpisac?";
+        confirm(msg, [this, requester, path, startDir, suggestedName, onPick, onCancel,
+                      keep](bool ok) {
+            if (ok) {
+                // Fokus wprost do wystawiajacego okna (dialog zapisu juz nie
+                // zyje); PRZED onPick - jesli aplikacja otworzy wlasny dialog
+                // (np. blad zapisu), to on dostanie fokus po naszym.
+                restoreFocusTo(requester);
+                if (onPick) onPick(path);
+            } else {
+                // Nadpisanie anulowane: ponownie otwieramy "Zapisz jako" z tym
+                // samym katalogiem, podpowiedzia nazwy i straznikiem nadpisania,
+                // zeby uzytkownik mogl wybrac inna nazwe (petla przez guard).
+                OnCancel cancelCopy{onCancel}; // onCancel w lambdzie jest const
+                openDialogWindow(FileDialogMode::SaveFile, startDir, suggestedName,
+                                 OnPick([keep](const std::string& p) { (*keep)(p); }),
+                                 std::move(cancelCopy));
+            }
+        });
+    };
+    openDialogWindow(FileDialogMode::SaveFile, startDir, suggestedName,
+                     OnPick([guard](const std::string& p) { (*guard)(p); }),
+                     std::move(onCancel));
 }
 
 void Desktop::openDialog(std::u32string title, std::unique_ptr<Dialog> content, OnDialogResult onResult) {
@@ -432,7 +500,10 @@ void Desktop::activateAtCursor() {
 
     wm_.focus(w);
     switch (w->titleBarZoneAt(cursor_.x(), cursor_.y())) {
-        case TitleBarZone::CloseButton: wm_.closeWindow(w); break;
+        case TitleBarZone::CloseButton:
+            // Guard: brudna tresc = pytanie przed zamknieciem (jak Ctrl+W).
+            closeWithConfirm(*this, w, [this, w] { closePending_.push_back(w); });
+            break;
         case TitleBarZone::MinimizeButton: w->setMinimized(true); break;
         case TitleBarZone::MaximizeButton: toggleMaximize(*w); break;
         case TitleBarZone::Drag: mode_ = CursorMode::WindowMove; break;
@@ -486,7 +557,12 @@ void Desktop::handleKeyEvent(const KeyEvent& ev) {
     // plikow przelacza nim panele), a focusNext() jest fallbackiem gdy widget
     // zwraca Ignored (patrz applyWidgetResult / sekcja Desktop).
     if (ev.key == Key::F1) { openAppMenu(); return; }
-    if (ev.ctrl && ev.key == Key::Char && ev.character == U'w') { wm_.closeFocused(); return; }
+    if (ev.ctrl && ev.key == Key::Char && ev.character == U'w') {
+        // Guard: brudne okno (Widget::dirty) pyta o potwierdzenie przed zamknieciem.
+        Window* w = wm_.focused();
+        closeWithConfirm(*this, w, [this, w] { closePending_.push_back(w); });
+        return;
+    }
     if (ev.key == Key::F5 && wm_.focused()) { mode_ = CursorMode::WindowMove; return; }
     if (ev.key == Key::F6 && wm_.focused()) { mode_ = CursorMode::WindowResize; return; }
     if (ev.key == Key::F7 && wm_.focused()) { toggleMaximize(*wm_.focused()); return; }
