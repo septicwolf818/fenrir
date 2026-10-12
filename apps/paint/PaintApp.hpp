@@ -174,15 +174,22 @@ public:
         if (ev.key == Key::Char && ev.ctrl) return KeyEventResult::Consumed;
 
         const int viewH = std::max(1, bounds_.h - 1);
+        const int viewW = std::max(1, bounds_.w);
         const int maxY = std::max({1, static_cast<int>(rows_.size()), viewH}) - 1;
 
         switch (ev.key) {
             case Key::Up:    curY_ = std::max(0, curY_ - 1); return KeyEventResult::Consumed;
             case Key::Down:  curY_ = std::min(curY_ + 1, maxY); return KeyEventResult::Consumed;
             case Key::Left:  curX_ = std::max(0, curX_ - 1); return KeyEventResult::Consumed;
-            case Key::Right:
-                curX_ = std::min(curX_ + 1, rowLength(curY_)); // do pozycji "za znakiem" = dopisywanie
+            case Key::Right: {
+                // Swobodnie w prawo — tak jak w dol niezalezne od rysowanych
+                // znakow: az do konca widoku albo do konca wiersza (pozycja
+                // "za znakiem" pozwala dopisywac dalej). Bez cofania: gdy
+                // kursor wszedl tu z dluzszego wiersza (Down), nie wraca.
+                const int maxX = std::max(rowLength(curY_), viewW - 1);
+                if (curX_ < maxX) ++curX_;
                 return KeyEventResult::Consumed;
+            }
             case Key::PageUp:   curY_ = std::max(0, curY_ - viewH); return KeyEventResult::Consumed;
             case Key::PageDown: curY_ = std::min(curY_ + viewH, maxY); return KeyEventResult::Consumed;
             case Key::Home:  curX_ = 0; return KeyEventResult::Consumed;
