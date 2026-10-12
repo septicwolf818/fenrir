@@ -142,9 +142,9 @@ public:
         if (!statusMsg_.empty()) {
             left = text::toUtf32(statusMsg_);
         } else if (palOpen_) {
-            left = U"Paleta 16x16: strzalki=wybor | Enter=ok | Esc=zamknij";
+            left = U"Paleta: strzalki | Enter=ok | Esc=zamknij";
         } else {
-            left = U"Strzalki: ruch | Znak: maluj | Spacja: powtorz | Del: gumka | F3: kolory";
+            left = U"Strzalki=ruch | Znak=maluj | Del=gumka | F3=kolory";
         }
         std::u32string right;
         if (palOpen_) {
@@ -152,6 +152,9 @@ public:
         } else {
             right = text::toUtf32(std::to_string(curX_ + 1) + ":" + std::to_string(curY_ + 1));
         }
+        // StatusBar rysuje prawa etykiete przy samej krawedzi — bez tego podpowiedz
+        // i pozycja kursora nachodza na siebie (widac wtedy zlepek liter).
+        left = text::clip(left, std::max(0, bounds_.w - static_cast<int>(right.size()) - 1));
         status_.setText(std::move(left), std::move(right));
         status_.draw(screen);
     }
@@ -225,7 +228,7 @@ public:
             if (x >= bounds_.x && x < bounds_.x + bounds_.w &&
                 y >= bounds_.y && y < bounds_.y + viewH)
                 return std::pair<int, int>{x, y};
-            return std::nullopt; // paleta przycieta na malym oknie — status pokazuje fg/bg
+            return std::nullopt; // defensywnie (paleta wycieta) — status pokazuje fg/bg
         }
         if (curY_ < scrollY_ || curY_ >= scrollY_ + viewH ||
             curX_ < scrollX_ || curX_ >= scrollX_ + bounds_.w) return std::nullopt;
@@ -278,11 +281,11 @@ private:
 
     void paint(int y, int x, const Px& val) {
         if (y < 0 || x < 0) return;
+        const Px old = cellAt(y, x); // brak pola = komorka domyslna
+        if (old == val) return; // nic sie nie zmienia — nie rozciagamy wiersza
         if (y >= static_cast<int>(rows_.size())) rows_.resize(static_cast<std::size_t>(y) + 1);
         std::vector<Px>& line = rows_[y];
         if (x >= static_cast<int>(line.size())) line.resize(static_cast<std::size_t>(x) + 1);
-        const Px old = line[x];
-        if (old == val) return;
         undo_.push_back({y, x, old});
         if (undo_.size() > 1000) undo_.erase(undo_.begin());
         line[x] = val;
@@ -302,9 +305,12 @@ private:
     // --- Paleta 16x16 ----------------------------------------------------------
 
     // Punkt poczatkowy palety (wycentrowana w obszarze rysowania).
+    // Gdy okno jest za niskie na 16 wierszy — przesuwamy ja w gore, zeby
+    // wybrany wiersz bg zawsze byl widoczny (jak scroll za kursorem).
     std::pair<int, int> palOrigin(int viewH) const {
         const int px = bounds_.x + std::max(0, (bounds_.w - kPalSize) / 2);
-        const int py = bounds_.y + std::max(0, (viewH - kPalSize) / 2);
+        int py = bounds_.y + std::max(0, (viewH - kPalSize) / 2);
+        if (viewH < kPalSize) py = bounds_.y - std::min(palBg_, kPalSize - viewH);
         return {px, py};
     }
 
@@ -312,9 +318,10 @@ private:
         const auto& t = theme::active;
         const auto [px, py] = palOrigin(viewH);
         const int w = std::min(kPalSize, bounds_.x + bounds_.w - px);
-        const int h = std::min(kPalSize, bounds_.y + viewH - py);
-        if (w <= 0 || h <= 0) return;
-        screen.fillRect(Rect{px, py, w, h}, Cell{U' ', t.surfaceText, t.surfaceBg, 0});
+        const int y0 = std::max(py, bounds_.y); // wycinek palety widoczny w oknie
+        const int y1 = std::min(py + kPalSize, bounds_.y + viewH);
+        if (w <= 0 || y1 <= y0) return;
+        screen.fillRect(Rect{px, y0, w, y1 - y0}, Cell{U' ', t.surfaceText, t.surfaceBg, 0});
         for (int bg = 0; bg < kPalSize; ++bg) {
             for (int fg = 0; fg < kPalSize; ++fg) {
                 const int x = px + fg;
@@ -527,10 +534,11 @@ public:
     }
 
     Rect preferredBounds(const Rect& desktopArea) const override {
-        int w = std::min(56, std::max(30, desktopArea.w - 6));
-        // Wysokosc "na caly pulpit" - paleta 16 wierszy + status musza sie zmiescic
-        // w tresci okna (tresc = h - 2 ramka - 1 menu => h >= 20 dla palety).
-        int h = std::max(8, desktopArea.h - 2);
+        int w = std::min(60, std::max(30, desktopArea.w - 6));
+        // Wysokosc 20 = paleta 16 wierszy + pasek statusu + ramka i pasek menu
+        // okna (tresc = h - 3 => h = 20, gdy paleta ma sie cala zmiescic).
+        // Sciete tez do obszaru pulpitu - zwykle okno, nie "na caly pulpit".
+        int h = std::min(20, std::max(8, desktopArea.h - 4));
         return Rect{desktopArea.x + 5, desktopArea.y + 2, w, h};
     }
 };
