@@ -12,9 +12,10 @@
 namespace fenrir::apps {
 
 // Widok edytora = TextArea + StatusBar z biblioteki widgetow. Pasek pokazuje
-// komunikat (wczytanie/zapis/blad), pozycje kursora (Wiersz:Kolumna) i
-// gwiazdke gdy plik jest zmodyfikowany. Nowy/Otworz przy brudnym pliku
-// pytaja o potwierdzenie (AppContext::confirm).
+// komunikat (wczytanie/zapis/blad — az do pierwszego klawisza), potem nazwe
+// pliku, pozycje kursora (Wiersz:Kolumna) i gwiazdke gdy plik jest
+// zmodyfikowany. Nowy/Otworz przy brudnym pliku pytaja o potwierdzenie
+// (AppContext::confirm).
 class TextEditorView : public Widget {
 public:
     TextEditorView(AppContext& ctx, std::string startPath) : ctx_(ctx) {
@@ -44,8 +45,12 @@ public:
 
     void saveAs() {
         std::string startDir = area_.path().empty() ? fs::homeDir() : fs::parent(area_.path());
+        // Podsuwamy nazwe BIEZACEGO pliku (dokumentN.txt), a nie staly
+        // "dokument.txt" — inaczej "Zapisz jako" podsunalaby zla nazwe.
+        std::string suggest =
+            area_.path().empty() ? std::string("dokument.txt") : fs::nameOf(area_.path());
         const auto token = lifetimeToken();
-        ctx_.saveFile(startDir, "dokument.txt", [this, token](const std::string& picked) {
+        ctx_.saveFile(startDir, suggest, [this, token](const std::string& picked) {
             if (!token.lock()) return;
             area_.saveFile(picked);
         });
@@ -76,7 +81,13 @@ public:
         status_.draw(screen);
     }
 
-    KeyEventResult handleKey(const KeyEvent& ev) override { return area_.handleKey(ev); }
+    KeyEventResult handleKey(const KeyEvent& ev) override {
+        // Komunikat statusu (wczytanie/zapis/blad/owijanie) jest przelotowy:
+        // znika przy pierwszym klawiszu, zeby pasek wrocil do "Plik: <sciezka>"
+        // (Ctrl+E ustawia nowy komunikat PO tym czyszczeniu — patrz toggleWrap).
+        statusMsg_.clear();
+        return area_.handleKey(ev);
+    }
 
     bool editable() const override { return area_.editable(); }
 
