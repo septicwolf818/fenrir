@@ -106,7 +106,10 @@ public:
             screen.fillRect(Rect{bounds_.x, y + row, bounds_.w, 1}, Cell{U' ', fg, bg, style});
 
             // Kolumna detail przypieta do prawej — tekst glowny ucina sie przed nia.
-            int detailW = static_cast<int>(it.detail.size());
+            // Detail dluzszy od wiersza nie moze wyjsc poza widget (drukowalby
+            // na ramce okna) — przycinamy do w-1, zostawiajac miejsce na tekst.
+            int detailW = std::min(static_cast<int>(it.detail.size()),
+                                   std::max(0, bounds_.w - 1));
             int textW = detailW > 0 ? std::max(0, bounds_.w - detailW - 1) : bounds_.w;
             if (detailW > 0) {
                 int dx = bounds_.x + bounds_.w - detailW;

@@ -100,6 +100,12 @@ void removeFile(const std::string& path) {
 void copyPath(const std::string& from, const std::string& to) {
     std::error_code ec;
     if (isDirectory(from)) {
+        // stdfs::copy(recursive) nie broni sie przed kopiowaniem katalogu do
+        // niego samego ani do wlasnego potomka — konczy sie rekurencja az do
+        // zapelnienia dysku. Prefiks z pietrem '/': "/ab" nie jest w "/a".
+        const std::string prefix = from == "/" ? "/" : from + "/";
+        if (to == from || (!to.empty() && to.compare(0, prefix.size(), prefix) == 0))
+            throw std::runtime_error("Nie mozna skopiowac katalogu do niego samego: " + from);
         stdfs::copy(from, to, stdfs::copy_options::recursive |
                                    stdfs::copy_options::overwrite_existing, ec);
         if (ec) throw std::runtime_error("Nie mozna skopiowac katalogu: " + from + " (" + ec.message() + ")");

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include "fenrir/core/Text.hpp"
 #include "fenrir/core/Theme.hpp"
 
 namespace fenrir {
@@ -157,7 +158,8 @@ void Window::draw(Screen& screen) {
     if (minimized_) {
         // Zminimalizowane okno = tylko pasek tytulowy, bez tresci - widoczne
         // jako "zakladka" na pulpicie (pelny widok jest tez w pasku stanu).
-        std::u32string bar = U"[_] " + std::u32string(title_.begin(), title_.end());
+        // toUtf32, bo std::u32string(bajty) daje mojibake dla liter spoza ASCII.
+        std::u32string bar = U"[_] " + text::toUtf32(title_);
         screen.putText(bounds_.x, bounds_.y, bar, border, t.desktopBg);
         return;
     }

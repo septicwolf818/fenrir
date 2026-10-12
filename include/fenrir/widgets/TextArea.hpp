@@ -22,7 +22,7 @@ public:
     void saveToCurrentPath(); // zapisuje tam, skad wczytano / dokad zapisano ostatnio
 
     void newFile();   // utworz nowy pusty dokument
-    void clearText(); // czyści cały tekst (dla Calculator)
+    void clearText(); // czyści cały tekst
 
     const std::string& path() const { return path_; }
     bool dirty() const { return dirty_; }

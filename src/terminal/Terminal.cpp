@@ -73,10 +73,28 @@ Terminal::Terminal() : impl_(new Impl()) {
 
     g_activeImpl.store(impl_);
 
-    enableRawMode();
-    enterAlternateScreen();
-    hideSystemCursor();
-    installSignalHandlers();
+    // Konstruktor nie ma destruktora — jesli rzucimy w polowie (np. write w
+    // enterAlternateScreen), ~Terminal() NIE zostanie wywolany, a uzytkownik
+    // zostalby z wylaczonym echo i ekranem alternatywnym. Cofamy wiec recznie
+    // wszystko, co zdazylismy wlaczyc, i dopiero wtedy wyrzucamy blad.
+    try {
+        enableRawMode();
+        enterAlternateScreen();
+        hideSystemCursor();
+        installSignalHandlers();
+    } catch (...) {
+        // Poszczegolne kroki moga sie tez nie udac (write do zepsutego
+        // stdout) — ignorujemy, zeby nie zgubic oryginalnego bledu ani
+        // samego impl_ (wyciek fd/termios bylby gorszy od pierwotnego problemu).
+        try { restoreSignalHandlers(); } catch (...) {}
+        try { showSystemCursor(); } catch (...) {}
+        try { leaveAlternateScreen(); } catch (...) {}
+        try { disableRawMode(); } catch (...) {}
+        g_activeImpl.store(nullptr);
+        delete impl_;
+        impl_ = nullptr;
+        throw;
+    }
 }
 
 Terminal::~Terminal() {

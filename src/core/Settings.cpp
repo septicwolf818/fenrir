@@ -53,7 +53,7 @@ void load() {
         } else if (key == "taskbar_seconds") {
             active.taskbarSeconds = parseBool(val, active.taskbarSeconds);
         } else if (key == "desktop_name") {
-            active.desktopName = val; // pusta nazwa tez dozwolona (pasek pokaze samo " | ")
+            active.desktopName = val; // pusta -> pasek pokaze nazwe ze startu (fallback w Desktop)
         } else if (key == "cursor_blink") {
             active.cursorBlink = parseBool(val, active.cursorBlink);
         }

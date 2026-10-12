@@ -313,12 +313,16 @@ void Desktop::openDialogWindow(FileDialogMode mode, const std::string& startDir,
     // Fokus wraca do wystawiajacego, ale TYLKO jesli jeszcze istnieje.
     raw->onConfirm = [this, w, requester, onPick = std::move(onPick)](const std::string& path) {
         if (onPick) onPick(path);
-        restoreFocusTo(requester);
+        // cb mogl otworzyc kolejny dialog (np. guardDirty -> openFile) — wtedy
+        // nowe okno ma fokus i nie przywrocilismyby go wystawiajacemu, tylko
+        // wrocilibysmy do starego zrodla, zostawiajac nowy dialog bez fokusa
+        // (ignorowalby klawisze). Fokus cofamy tylko, gdy nikt go nie zabral.
+        if (wm_.focused() == w) restoreFocusTo(requester);
         closePending_.push_back(w);
     };
     raw->onCancel = [this, w, requester, onCancel = std::move(onCancel)]() {
         if (onCancel) onCancel();
-        restoreFocusTo(requester);
+        if (wm_.focused() == w) restoreFocusTo(requester);
         closePending_.push_back(w);
     };
 }
@@ -356,7 +360,9 @@ void Desktop::openDialog(std::u32string title, std::unique_ptr<Dialog> content, 
     // (widget zywy az do powrotu z handleKey; patrz flushPendingCloses).
     raw->onResult = [this, win, requester, cb = std::move(onResult)](int idx) {
         if (cb) cb(idx);
-        restoreFocusTo(requester);
+        // Ten sam wyjatek co w openDialogWindow: cb mogl otworzyc kolejny
+        // dialog — wtedy to on ma fokus i nie wolamy restoreFocusTo.
+        if (wm_.focused() == win) restoreFocusTo(requester);
         closePending_.push_back(win);
     };
 }
@@ -758,7 +764,7 @@ void Desktop::drawTaskBar(Screen& screen) {
 
             int x = leftArrowWidth + (idx - visibleStart) * kTaskHandleW;
             if (x + static_cast<int>(label.size()) < screen.width()) {
-                screen.putText(x, y, std::u32string(label.begin(), label.end()), fg, bg, isActive ? StyleBold : StyleNone);
+                screen.putText(x, y, text::toUtf32(label), fg, bg, isActive ? StyleBold : StyleNone);
             }
         }
 

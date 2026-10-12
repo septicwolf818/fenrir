@@ -24,10 +24,15 @@ public:
         screen.fillRect(bounds_, Cell{U' ', t.statusText, t.statusBg, 0});
         if (bounds_.w <= 0 || bounds_.h <= 0) return;
 
-        screen.putText(bounds_.x, bounds_.y, text::clip(left_, bounds_.w), t.statusText, t.statusBg);
+        // Prawa etykiete rysujemy zawsze przy samej krawedzi paska, wiec lewy
+        // tekst musi jej ustapic miejsca — inaczej dluga podpowiedz wchodzila
+        // pod prawa kolumne i koncowka byla zlepkiem liter (np. "...przLewy").
+        std::u32string r = text::clip(right_, bounds_.w);
+        int leftW = bounds_.w - (r.empty() ? 0 : static_cast<int>(r.size()) + 1);
+        if (leftW < 0) leftW = 0;
+        screen.putText(bounds_.x, bounds_.y, text::clip(left_, leftW), t.statusText, t.statusBg);
 
-        if (!right_.empty()) {
-            std::u32string r = text::clip(right_, bounds_.w);
+        if (!r.empty()) {
             int rx = bounds_.x + bounds_.w - static_cast<int>(r.size());
             if (rx > bounds_.x) screen.putText(rx, bounds_.y, r, t.statusText, t.statusBg, StyleBold);
         }
