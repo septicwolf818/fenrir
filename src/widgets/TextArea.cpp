@@ -23,6 +23,12 @@ void TextArea::rebuildLayout() const {
             layout_.push_back(Seg{li, 0, 0}); // pusta linia = jeden pusty wiersz
             continue;
         }
+        if (!wrap_) {
+            // Bez owijania: cala linia logiczna = jeden wiersz wizualny
+            // (dluzszy niz ekran — rysowanie przewija go poziomo, scrollCol_).
+            layout_.push_back(Seg{li, 0, static_cast<int>(line.size())});
+            continue;
+        }
         int pos = 0;
         const int n = static_cast<int>(line.size());
         while (pos < n) {
@@ -114,6 +120,7 @@ void TextArea::loadFile(const std::string& path) {
     cursorRow_ = 0;
     cursorCol_ = 0;
     scrollRow_ = 0;
+    scrollCol_ = 0;
     goalCol_ = 0;
     dirty_ = false;
     markDirty();
@@ -149,6 +156,7 @@ void TextArea::newFile() {
     cursorRow_ = 0;
     cursorCol_ = 0;
     scrollRow_ = 0;
+    scrollCol_ = 0;
     goalCol_ = 0;
     path_.clear();
     dirty_ = false;
@@ -162,6 +170,7 @@ void TextArea::clearText() {
     cursorRow_ = 0;
     cursorCol_ = 0;
     scrollRow_ = 0;
+    scrollCol_ = 0;
     goalCol_ = 0;
     dirty_ = true;
     markDirty();
@@ -266,6 +275,17 @@ void TextArea::ensureVisible() {
     if (seg < scrollRow_) scrollRow_ = seg;
     if (seg >= scrollRow_ + visible) scrollRow_ = seg - visible + 1;
     scrollRow_ = std::clamp(scrollRow_, 0, std::max(0, static_cast<int>(layout_.size()) - 1));
+
+    // Poziomo: tylko gdy brak owijania (przy owijaniu wiersz nigdy nie
+    // przekracza szerokosci, scrollCol_ zawsze 0).
+    if (wrap_) {
+        scrollCol_ = 0;
+        return;
+    }
+    const int off = visualOffset(); // kolumna kursora w jego wierszu wizualnym
+    if (off < scrollCol_) scrollCol_ = off;
+    if (off >= scrollCol_ + bounds_.w) scrollCol_ = off - bounds_.w + 1;
+    scrollCol_ = std::max(0, scrollCol_);
 }
 
 // --- Klawiatura --------------------------------------------------------------
@@ -280,6 +300,11 @@ KeyEventResult TextArea::handleKey(const KeyEvent& ev) {
         if (onOpenRequested) onOpenRequested();
         return KeyEventResult::Consumed;
     }
+    // Ctrl+E = przelacznik owijania linii (wl. domyslnie / wyl. z przewijaniem poziomym).
+    if (ev.ctrl && ev.key == Key::Char && (ev.character == U'e' || ev.character == U'E')) {
+        toggleWrap();
+        return KeyEventResult::Consumed;
+    }
     switch (ev.key) {
         case Key::Up:    moveVert(-1); return KeyEventResult::Consumed;
         case Key::Down:  moveVert(+1); return KeyEventResult::Consumed;
@@ -289,7 +314,7 @@ KeyEventResult TextArea::handleKey(const KeyEvent& ev) {
             ensureLayout();
             cursorCol_ = layout_[static_cast<std::size_t>(visualRowOf(cursorRow_, cursorCol_))].col0;
             syncGoal();
-            ensureVisible();
+            ensureVisible(); // przy braku owijania przewija tez do kolumny 0
             return KeyEventResult::Consumed;
         }
         case Key::End: { // End = koniec biezacego wiersza wizualnego
@@ -326,9 +351,16 @@ void TextArea::draw(Screen& screen) {
         const Seg& s = layout_[static_cast<std::size_t>(segIdx)];
         const std::u32string& line = lines_[static_cast<std::size_t>(s.line)];
         if (s.len <= 0) continue;
-        const int n = std::min(s.len, bounds_.w);
+        int start = s.col0;
+        int len = s.len;
+        if (!wrap_) { // wiersz dluzszy niz ekran — przesuwamy poczatek o scrollCol_
+            start += scrollCol_;
+            len -= scrollCol_;
+            if (len <= 0) continue;
+        }
+        const int n = std::min(len, bounds_.w);
         screen.putText(bounds_.x, bounds_.y + row,
-                       std::u32string_view(line).substr(static_cast<std::size_t>(s.col0),
+                       std::u32string_view(line).substr(static_cast<std::size_t>(start),
                                                         static_cast<std::size_t>(n)),
                        t.editorText, t.editorBg);
     }
@@ -340,6 +372,8 @@ std::optional<std::pair<int, int>> TextArea::cursorPosition() const {
     const int screenRow = seg - scrollRow_;
     if (screenRow < 0 || screenRow >= bounds_.h || bounds_.w <= 0) return std::nullopt;
     int offset = visualOffset();
+    if (!wrap_) offset -= scrollCol_; // pozycja na ekranie (kolumna moze byc przewiniete)
+    if (offset < 0) offset = 0;
     if (offset >= bounds_.w) offset = bounds_.w - 1; // koniec pelnego wiersza wizualnego
     return std::make_pair(bounds_.x + offset, bounds_.y + screenRow);
 }

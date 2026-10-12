@@ -51,6 +51,9 @@ public:
         });
     }
 
+    // Przelacza owijanie linii (Ctrl+E) — wylaczone = przewijanie poziome dlugich linii.
+    void toggleWrap() { area_.toggleWrap(); }
+
     // --- Widget --------------------------------------------------------------
 
     void draw(Screen& screen) override {
@@ -78,6 +81,10 @@ public:
     bool editable() const override { return area_.editable(); }
 
     std::optional<std::pair<int, int>> cursorPosition() const override { return area_.cursorPosition(); }
+
+    // Minimum tresci: pare wierszy tekstu + pasek statusu, czytelna kolumna.
+    int minWidth() const override { return 20; }
+    int minHeight() const override { return 5; }
 
 private:
     // Jesli plik zmodyfikowany — pytamy, czy kontynuowac; potem `proceed`.

@@ -57,6 +57,8 @@ public:
     }
 
     // Przewija tak, zeby zaznaczony element byl widoczny w viewport bounds_.h.
+    // Poziomo: przewija TYLKO zaznaczony wiersz (jego tekst moze byc dluzszy
+    // niz kolumna) — pozostale wiersze odmeruwaja od poczatku, wiec nic nie giniemy.
     void ensureVisible() {
         const int rows = viewportRows();
         if (rows <= 0 || items_.empty()) return;
@@ -65,6 +67,12 @@ public:
         if (selected_ >= scroll_ + rows) scroll_ = selected_ - rows + 1;
         const int maxScroll = std::max(0, static_cast<int>(items_.size()) - rows);
         scroll_ = std::clamp(scroll_, 0, maxScroll);
+
+        const Item& it = items_[static_cast<std::size_t>(selected_)];
+        const int detailW = static_cast<int>(it.detail.size());
+        const int textW = detailW > 0 ? std::max(0, bounds_.w - detailW - 1) : bounds_.w;
+        const int len = static_cast<int>(it.text.size());
+        scrollX_ = len <= textW ? 0 : len - textW; // koniec zaznaczonego tekstu zawsze widoczny
     }
 
     void draw(Screen& screen) override {
@@ -104,7 +112,12 @@ public:
                 int dx = bounds_.x + bounds_.w - detailW;
                 screen.putText(dx, y + row, text::clip(it.detail, detailW), fg, bg, style);
             }
-            screen.putText(bounds_.x, y + row, text::clip(it.text, textW), fg, bg, style);
+            // Tylko zaznaczony wiersz jest przewiniety poziomo (scrollX_),
+            // reszta wyswietlana od pierwszego znaku.
+            std::u32string_view tv = it.text;
+            const int off = sel ? std::min(scrollX_, std::max(0, static_cast<int>(tv.size()) - 1)) : 0;
+            if (off > 0) tv.remove_prefix(static_cast<std::size_t>(off));
+            screen.putText(bounds_.x, y + row, text::clip(tv, textW), fg, bg, style);
         }
     }
 
@@ -151,6 +164,7 @@ private:
     std::u32string header_;
     int selected_ = 0;
     int scroll_ = 0;
+    int scrollX_ = 0; // przesuniecie poziome TYLKO zaznaczonego wiersza
 };
 
 } // namespace fenrir

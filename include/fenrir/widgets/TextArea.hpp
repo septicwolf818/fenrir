@@ -30,6 +30,22 @@ public:
     // Pozycja kursora: (linia, kolumna), obie 1-based — dla paska statusu.
     std::pair<int, int> cursorLineCol() const { return {cursorRow_ + 1, cursorCol_ + 1}; }
 
+    // OWIJANIE LINII — domyslnie wlaczone. Wylaczone = dlugie linie leca poza
+    // ekran i sa przewijane POZIOMO (scrollCol_ tak jak w LineEdit), wiec
+    // kursor i cala tresc sa osiagalne tez na wąskim oknie.
+    bool wrap() const { return wrap_; }
+    void setWrap(bool on) {
+        if (wrap_ == on) return;
+        wrap_ = on;
+        scrollCol_ = 0;
+        markDirty();
+        ensureVisible();
+    }
+    void toggleWrap() {
+        setWrap(!wrap_);
+        if (onStatus) onStatus(wrap_ ? "Zawijanie linii: wlaczone" : "Zawijanie linii: wylaczone - przewijanie poziome");
+    }
+
     std::function<void(const std::string& message)> onStatus;
     std::function<void()> onSaveRequested; // Ctrl+S
     std::function<void()> onOpenRequested; // Ctrl+O
@@ -61,6 +77,8 @@ private:
 
     int cursorRow_ = 0, cursorCol_ = 0; // pozycja kursora w LINII LOGICZNEJ
     int scrollRow_ = 0;                 // pierwszy widoczny wiersz WIZUALNY
+    int scrollCol_ = 0;                 // pierwsza widoczna kolumna (tylko gdy brak owijania)
+    bool wrap_ = true;                  // owijanie linii (domyslnie wl.)
     int goalCol_ = 0; // "lepka" kolumna wizualna dla ruchu góra/dół (PageUp itp.)
 
     void markDirty() { layoutDirty_ = true; }

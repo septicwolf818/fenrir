@@ -24,6 +24,9 @@ public:
             {U"Otworz... (Ctrl+O)", [raw] { raw->openFile(); }},
             {U"Zapisz (Ctrl+S)", [raw] { raw->save(); }},
             {U"Zapisz jako...", [raw] { raw->saveAs(); }},
+        }},
+        {U"Format", std::vector<MenuItem>{
+            {U"Zawijanie linii (Ctrl+E)", [raw] { raw->toggleWrap(); }},
         }}});
 
         view->pushShortcut({true, Key::Char, U'n'}, [raw] { raw->newFile(); });
