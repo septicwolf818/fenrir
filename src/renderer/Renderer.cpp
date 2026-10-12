@@ -75,7 +75,14 @@ void Renderer::present(const Screen& screen) {
                 haveLastStyle = true;
             }
 
-            text::appendUtf8(out, cur.character == 0 ? U' ' : cur.character);
+            // ESC (0x1B) z danych pliku (np. sekwencje kolorow zapisane
+            // przez Malowanke) NIGDY nie trafia do terminala — zostalby
+            // zinterpretowany jako komenda. Pokazujemy go jako surowy glyph
+            // ␛ (U+241B); pozostale znaki sekwencji ('[', '9', '1'...) ida
+            // normalnie, wiec Edytor WIDZI surowe dane zamiast renderowac kolory.
+            char32_t ch = cur.character == 0 ? U' ' : cur.character;
+            if (ch == 0x1B) ch = U'␛';
+            text::appendUtf8(out, ch);
             previous_[idx] = cur;
 
             lastX = x + 1;
