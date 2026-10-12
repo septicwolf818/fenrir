@@ -18,6 +18,9 @@ public:
     explicit LineEdit(std::u32string initial = {}, std::u32string label = {})
         : value_(std::move(initial)), label_(std::move(label)) {
         editable_ = true; // pole tekstowe zawsze chce kursor
+        // Kursor na KONCU wartosci wstepowej (jak setValue) — bez tego dialog
+        // zapisu mial kursor na 0 i Backspace nic nie kasowal.
+        cursor_ = static_cast<int>(value_.size());
     }
 
     std::function<void(const std::u32string&)> onSubmit; // Enter
