@@ -1,4 +1,5 @@
 #pragma once
+#include <fstream>
 #include <memory>
 #include <string>
 #include <vector>
@@ -12,7 +13,7 @@
 
 namespace fenrir::apps {
 
-// Widok ustawien: lista wierszy (nazwa + bieżaca wartosc jako detail),
+// Widok ustawien: lista wierszy (nazwa + biezaca wartosc jako detail),
 // Enter na wierszu zmienia wartosc. Motyw podmieniany natychmiast
 // (theme::apply — caly UI rysuje z theme::active co tick, wiec zmiana
 // widoczna od razu), kazda zmiana zapisywana do settings.ini.
@@ -31,7 +32,12 @@ public:
         list_.draw(screen);
 
         status_.setBounds(Rect{bounds_.x, bounds_.y + std::max(0, bounds_.h - statusH), bounds_.w, statusH});
-        status_.setText(U"Enter: zmien | Zmiany zapisuja sie od razu", statusRight_);
+        // StatusBar rysuje prawa kolumne NA koncu paska, wiec w waskim oknie
+        // "Zapisano" nachodziloby na dluga podpowiedz — przy wiadomosci po prawej
+        // pokazujemy krotsza instrukcje (12 + 12 <= minWidth 30, nic sie nie naklada).
+        status_.setText(statusRight_.empty() ? U"Enter: zmien | Zmiany zapisuja sie od razu"
+                                             : U"Enter: zmien",
+                        statusRight_);
         status_.draw(screen);
     }
 
@@ -61,26 +67,29 @@ private:
     }
 
     void activateRow(int idx) {
+        bool ok = false; // czy settings.ini faktycznie przyjal nowa wartosc
         switch (idx) {
-            case 0: cycleTheme(); break;
+            case 0: ok = cycleTheme(); break;
             case 1:
                 settings::active.taskbarSeconds = !settings::active.taskbarSeconds;
-                settings::save();
+                ok = saveChecked("taskbar_seconds", settings::active.taskbarSeconds ? "1" : "0");
                 break;
             case 2: editDesktopName(); return; // prompt ma wlasny callback + rebuild
             case 3:
                 settings::active.cursorBlink = !settings::active.cursorBlink;
-                settings::save();
+                ok = saveChecked("cursor_blink", settings::active.cursorBlink ? "1" : "0");
                 break;
             default: return;
         }
         rebuild();
-        statusRight_ = U"Zapisano";
+        statusRight_ = ok ? U"Zapisano" : U"Nie zapisano";
     }
 
-    void cycleTheme() {
+    // Zwraca false, gdy nie ma czego przelaczyc (pusty katalog) albo gdy plik
+    // nie przyjal nowej wartosci — wtedy status pokazuje "Nie zapisano".
+    bool cycleTheme() {
         const auto& cat = theme::catalog();
-        if (cat.empty()) return;
+        if (cat.empty()) return false;
         std::size_t cur = 0;
         for (std::size_t i = 0; i < cat.size(); ++i) {
             if (cat[i].id == settings::active.theme) { cur = i; break; }
@@ -88,7 +97,23 @@ private:
         const theme::NamedTheme& next = cat[(cur + 1) % cat.size()];
         theme::apply(next.id);
         settings::active.theme = next.id;
+        return saveChecked("theme", settings::active.theme);
+    }
+
+    // settings::save() zwraca void i milczy, gdy pliku nie da sie zapisac
+    // (np. brak prawa do ~/.config/fenrir) — wiec sami odczytujemy settings.ini
+    // i porownujemy z wartoscia, ktora pokazuje UI. Tylko wtedy wolamy "Zapisano",
+    // inaczej pasek statusu klamalby.
+    bool saveChecked(const char* key, const std::string& value) {
         settings::save();
+        const std::string file = settings::path(); // lokalna kopia, jak w settings::load()
+        std::ifstream f(file);
+        if (!f) return false;
+        const std::string want = std::string(key) + "=" + value;
+        std::string line;
+        while (std::getline(f, line))
+            if (line == want) return true;
+        return false;
     }
 
     void editDesktopName() {
@@ -100,10 +125,14 @@ private:
                     [this, token](std::optional<std::u32string> v) {
                         if (!token.lock()) return;
                         if (!v) return;
+                        // Pusta nazwa nie dziala: pasek menu i tak wrocilby do
+                        // nazwy ze startu (Desktop::drawMenuBar), a po restarcie
+                        // zostalaby pusta — wiec odrzucamy z komunikatem.
+                        if (v->empty()) { statusRight_ = U"Podaj nazwe"; return; }
                         settings::active.desktopName = text::toUtf8(*v);
-                        settings::save();
                         rebuild();
-                        statusRight_ = U"Zapisano";
+                        statusRight_ = saveChecked("desktop_name", settings::active.desktopName)
+                                           ? U"Zapisano" : U"Nie zapisano";
                     });
     }
 
