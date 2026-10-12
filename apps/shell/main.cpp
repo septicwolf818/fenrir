@@ -12,6 +12,7 @@
 #include "../calculator/CalculatorApp.hpp"
 #include "../settings/SettingsApp.hpp"
 #include "../calendar/CalendarApp.hpp"
+#include "../paint/PaintApp.hpp"
 
 int main() {
     try {
@@ -26,6 +27,7 @@ int main() {
         desktop.apps().registerApp(std::make_unique<fenrir::apps::CalculatorApp>());
         desktop.apps().registerApp(std::make_unique<fenrir::apps::SettingsApp>());
         desktop.apps().registerApp(std::make_unique<fenrir::apps::CalendarApp>());
+        desktop.apps().registerApp(std::make_unique<fenrir::apps::PaintApp>());
         // Kolejne aplikacje dopisujesz tutaj.
 
         return desktop.run();

@@ -787,13 +787,16 @@ void Desktop::drawTaskBar(Screen& screen) {
 }
 
 void Desktop::positionGuiCursor() {
-    if (mode_ == CursorMode::Edit) {
+    // W trybie Edit ORAZ Keyboard kursor GUI podazza za wewnetrzna pozycja
+    // widgetu (np. kursor malowania / zaznaczona komorka palety w Malowance).
+    // W Keyboard wczesniej kursor stawial w oknie — teraz migotanie od razu
+    // pokazuje, gdzie sie edytuje/wybiera. Tryb Desktop = wolny wskaznik (bez zmian).
+    if (mode_ == CursorMode::Edit || mode_ == CursorMode::Keyboard) {
         Window* f = wm_.focused();
         auto pos = (f && !f->minimized()) ? f->content()->cursorPosition() : std::nullopt;
         if (pos) cursor_.moveTo(pos->first, pos->second);
     }
-    // W trybie Desktop/Keyboard kursor stoi tam, gdzie ostatnio ustawiono (lub na pulpicie).
-    // W trybie Edit przemieszczamy go do wewnetrznego kursora edytowalnego widgetu.
+    // W trybie Desktop/WindowMove/Resize kursor stoi tam, gdzie ostatnio ustawiono.
     cursor_.setVisible(cursorBlinkState_);
     cursor_.render(screen_);
 }
