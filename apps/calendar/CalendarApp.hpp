@@ -99,6 +99,11 @@ public:
 
     bool editable() const override { return false; }
 
+    // Okno nie pozwoli sie zmniejszyc ponizej siatki + odstepow (draw i tak
+    // wczesniej odrzuca za wczesne rozmiary — teraz juz tego nie zobaczysz).
+    int minWidth() const override { return kGridW + 2; }
+    int minHeight() const override { return kMinH; }
+
 private:
     static constexpr int kCellW = 4;  // 7 * 4 = 28 kolumn siatki
     static constexpr int kGridW = 7 * kCellW;

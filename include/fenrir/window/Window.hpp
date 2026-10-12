@@ -79,6 +79,11 @@ private:
     static constexpr int kMinWidth = 12;
     static constexpr int kMinHeight = 4;
     static constexpr int kButtonsWidth = 6; // " _  X" ~ szerokosc rezerwowana pod przyciski
+
+    // Minimalny rozmiar OKNA wynikajacy z minimow tresci (minWidth/minHeight
+    // widgetu + ramka/pasek tytulu + ewentualny pasek menu) — patrz Window.cpp.
+    int minWindowWidth() const;
+    int minWindowHeight() const;
 };
 
 } // namespace fenrir

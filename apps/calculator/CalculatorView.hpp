@@ -54,6 +54,10 @@ public:
     // resetEngine() wywolywana z menu aplikacji (setMenuItems) — musi byc publiczna.
     void resetEngine() { engine_.clear(); refreshDisplay(); }
 
+    // Minimum: display (h/4 >= 2) + 5 wierszy przyciskow, 4 kolumny "[7 ]" = 20.
+    int minWidth() const override { return 20; }
+    int minHeight() const override { return 8; }
+
 private:
     CalculatorEngine engine_;
     std::unique_ptr<Label> display_;

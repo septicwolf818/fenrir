@@ -8,6 +8,10 @@ namespace fenrir {
 
 Window::Window(std::string title, Rect bounds, std::unique_ptr<Widget> content, bool hasBorder)
     : title_(std::move(title)), bounds_(bounds), content_(std::move(content)), hasBorder_(hasBorder) {
+    // Okno nie moze powstac mniejsze, niz potrzebuje tresc (preferredBounds
+    // aplikacji bywaja przyciete na malych terminalach).
+    bounds_.w = std::max(bounds_.w, minWindowWidth());
+    bounds_.h = std::max(bounds_.h, minWindowHeight());
     relayoutContent();
 }
 
@@ -24,9 +28,24 @@ void Window::moveBy(int dx, int dy) {
 }
 
 void Window::resizeBy(int dw, int dh) {
-    bounds_.w = std::max(kMinWidth, bounds_.w + dw);
-    bounds_.h = std::max(kMinHeight, bounds_.h + dh);
+    // Podczas resize (F6) obowiazuje tez minimum wynikajace z tresci —
+    // okno nie da sie zeszpecic ponizej minWidth/minHeight widgetu.
+    bounds_.w = std::max(minWindowWidth(), bounds_.w + dw);
+    bounds_.h = std::max(minWindowHeight(), bounds_.h + dh);
     relayoutContent();
+}
+
+int Window::minWindowWidth() const {
+    const int contentMin = content_ ? content_->minWidth() : 0;
+    return std::max(kMinWidth, contentMin + (hasBorder_ ? 2 : 0));
+}
+
+int Window::minWindowHeight() const {
+    // relayoutContent(): contentH = h - 1 - (1 + menu) dla ramki,
+    // czyli h = contentH + 2 + (menu ? 1 : 0); bez ramki h = contentH.
+    const int chrome = hasBorder_ ? 2 + (hasMenuTabs() ? 1 : 0) : 0;
+    const int contentMin = content_ ? content_->minHeight() : 0;
+    return std::max(kMinHeight, contentMin + chrome);
 }
 
 void Window::setFocused(bool f) {
@@ -39,7 +58,11 @@ void Window::maximize(const Rect& area) {
         restoreBounds_ = bounds_;
         maximized_ = true;
     }
-    bounds_ = area;
+    // Na makro-terminalach area bywa mniejsza od minimum tresci — jak
+    // resizeBy, przycinamy do minWindow*, zeby tresc nie byla obcinana.
+    bounds_ = Rect{area.x, area.y,
+                   std::max(area.w, minWindowWidth()),
+                   std::max(area.h, minWindowHeight())};
     relayoutContent();
 }
 

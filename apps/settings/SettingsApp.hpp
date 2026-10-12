@@ -41,6 +41,10 @@ public:
 
     bool editable() const override { return false; }
 
+    // Minimum: naglowek + wiersze ustawien + pasek statusu.
+    int minWidth() const override { return 30; }
+    int minHeight() const override { return 6; }
+
 private:
     void rebuild() {
         std::vector<ListView::Item> items;

@@ -147,6 +147,11 @@ public:
 
     bool isRightActive() const { return rightActive_; }
 
+    // Minimum: dwa panele maja miec sensowna szerokosc (>=14 na panel)
+    // + pasek statusu i kilka wierszy listy.
+    int minWidth() const override { return 30; }
+    int minHeight() const override { return 6; }
+
     // --- Widget --------------------------------------------------------------
 
     void draw(Screen& screen) override {

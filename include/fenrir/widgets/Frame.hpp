@@ -26,6 +26,10 @@ public:
     // Ramka dziedziczyc edytowalnosc dziecka — jezeli to ona jest contentem okna.
     bool editable() const override { return content_ ? content_->editable() : editable_; }
 
+    // Minima tez dziedziczymy po dziecku (+2 w kazdym wymiarze na ramke).
+    int minWidth() const override { return content_ ? content_->minWidth() + 2 : 0; }
+    int minHeight() const override { return content_ ? content_->minHeight() + 2 : 0; }
+
     void draw(Screen& screen) override {
         const auto& t = theme::active;
         if (bounds_.w <= 0 || bounds_.h <= 0) return;

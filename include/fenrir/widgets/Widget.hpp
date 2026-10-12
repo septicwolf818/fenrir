@@ -91,6 +91,13 @@ public:
     // ma sens edycyjny (np. TextArea). std::nullopt = brak własnego kursora.
     virtual std::optional<std::pair<int, int>> cursorPosition() const { return std::nullopt; }
 
+    // Minimalne rozmiary TRESCI (komorki ekranu), ktorych widget potrzebuje,
+    // zeby byl uzyteczny (np. kalendarz: siatka 30x10). Okno dodaje do tego
+    // swoja ramke/pasek tytulu i pilnuje przy resizeBy (F6) oraz przy tworzeniu
+    // — tresc nigdy nie jest przycinana ponizej minimum. Domyslnie 0 = brak.
+    virtual int minWidth() const { return 0; }
+    virtual int minHeight() const { return 0; }
+
     // Token zycia widgetu do bezpiecznych callbackow ASYNCHRONICZNYCH
     // (dialogi otwierane przez AppContext). Callback przechwytuje weak_ptr:
     // jesli okno z tym widgetem zostanie zamkniete zanim dialog zwroci wynik,
