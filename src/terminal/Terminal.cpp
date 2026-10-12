@@ -55,8 +55,10 @@ struct Terminal::Impl {
         if (alternateScreenActive) {
             static constexpr char showCursor[] = "\x1b[?25h";
             static constexpr char leaveAlt[] = "\x1b[?1049l";
-            ::write(STDOUT_FILENO, showCursor, sizeof(showCursor) - 1);
-            ::write(STDOUT_FILENO, leaveAlt, sizeof(leaveAlt) - 1);
+            // Wynik celowo ignorowany (tryb awaryjny, async-signal-safe);
+            // przypisanie wycisza warn_unused_result na glibc.
+            [[maybe_unused]] const ssize_t r1 = ::write(STDOUT_FILENO, showCursor, sizeof(showCursor) - 1);
+            [[maybe_unused]] const ssize_t r2 = ::write(STDOUT_FILENO, leaveAlt, sizeof(leaveAlt) - 1);
         }
         if (rawModeActive) {
             ::tcsetattr(STDIN_FILENO, TCSANOW, &originalTermios);

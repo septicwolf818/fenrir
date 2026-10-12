@@ -1,7 +1,5 @@
 #include "fenrir/input/KeyParser.hpp"
 
-#include <cstdlib>
-
 namespace fenrir {
 
 std::pair<char32_t, int> KeyParser::decodeUtf8(std::string_view data) {
@@ -66,21 +64,35 @@ KeyEvent KeyParser::parseEscapeSequence(std::string_view seq) const {
             // Ctrl+Tab). Dostarczaja to emulatory i keymapy obslugujace
             // modyfikatory; na golym TTY (Linux VC) taka sekwencja po prostu
             // sie nie pojawia i ta sciezka jest martwa — ale kosztuje zero.
+            // Parsujemy cyfry recznie (string_view), bez <string> — na
+            // libstdc++ nie wolno liczyc na transisywne dosylki naglowkow.
             if (num.size() > 3 && num.substr(0, 2) == "27") {
                 auto s1 = num.find(';');
                 auto s2 = (s1 == std::string_view::npos) ? std::string_view::npos
                                                          : num.find(';', s1 + 1);
                 if (s1 != std::string_view::npos && s2 != std::string_view::npos) {
-                    const int mods = std::atoi(std::string(num.substr(s1 + 1, s2 - s1 - 1)).c_str());
-                    const int code = std::atoi(std::string(num.substr(s2 + 1)).c_str());
-                    ev.ctrl = (mods & 4) != 0;
-                    ev.alt = (mods & 2) != 0;
-                    switch (code) {
-                        case 9:  ev.key = Key::Tab; return ev;
-                        case 13: ev.key = Key::Enter; return ev;
-                        case 27: ev.key = Key::Escape; return ev;
-                        case 32: ev.key = Key::Char; ev.character = U' '; return ev;
-                        default: break;
+                    auto digits = [](std::string_view s) -> int {
+                        if (s.empty()) return -1;
+                        int v = 0;
+                        for (char c : s) {
+                            if (c < '0' || c > '9') return -1;
+                            v = v * 10 + (c - '0');
+                            if (v > 99) return -1; // sekwencje CSI sa krotkie
+                        }
+                        return v;
+                    };
+                    const int mods = digits(num.substr(s1 + 1, s2 - s1 - 1));
+                    const int code = digits(num.substr(s2 + 1));
+                    if (mods >= 0 && code >= 0) {
+                        ev.ctrl = (mods & 4) != 0;
+                        ev.alt = (mods & 2) != 0;
+                        switch (code) {
+                            case 9:  ev.key = Key::Tab; return ev;
+                            case 13: ev.key = Key::Enter; return ev;
+                            case 27: ev.key = Key::Escape; return ev;
+                            case 32: ev.key = Key::Char; ev.character = U' '; return ev;
+                            default: break;
+                        }
                     }
                 }
             }
