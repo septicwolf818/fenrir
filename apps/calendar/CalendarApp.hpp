@@ -12,7 +12,7 @@
 namespace fenrir::apps {
 
 // Kalendarz — widok miesiaca na siatce 7 kolumn (poniedzialek pierwszy,
-// jak w polskich kalendarzach). Strzalki Lepwo/Prawo = miesiac, Gora/Dol =
+// jak w polskich kalendarzach). Strzalki Lewo/Prawo = miesiac, Gora/Dol =
 // rok, Home = powrot do dzis. Dzis podswietlone na kolor akcentu.
 // Czysta aplikacja "uzytkownika" — jedyny kontakt ze swiatem zewnetrznym
 // to zegar (time/localtime, dokladnie jak pasek zadan). Zero zarzadzania
@@ -80,7 +80,9 @@ public:
         }
 
         status_.setBounds(Rect{bounds_.x, bounds_.y + bounds_.h - 1, bounds_.w, 1});
-        status_.setText(U"Lewo/Prawo: miesiac | Gora/Dol: rok | Home: dzis");
+        // Tyle co najwyzej 30 znakow — w oknie (min. 30 kolumn) dluzszy tekst
+        // byl przycinany i znikaloby "Home".
+        status_.setText(U"L/P: miesiac | G/D: rok | Home");
         status_.draw(screen);
     }
 
@@ -90,8 +92,8 @@ public:
             case Key::Right:   nextMonth(); return KeyEventResult::Consumed;
             case Key::PageUp:   prevMonth(); return KeyEventResult::Consumed;
             case Key::PageDown: nextMonth(); return KeyEventResult::Consumed;
-            case Key::Up:    --year_; return KeyEventResult::Consumed;
-            case Key::Down:  ++year_; return KeyEventResult::Consumed;
+            case Key::Up:    if (year_ > kMinYear) --year_; return KeyEventResult::Consumed;
+            case Key::Down:  if (year_ < kMaxYear) ++year_; return KeyEventResult::Consumed;
             case Key::Home:  jumpToToday(); return KeyEventResult::Consumed;
             default: return KeyEventResult::Ignored;
         }
@@ -108,6 +110,8 @@ private:
     static constexpr int kCellW = 4;  // 7 * 4 = 28 kolumn siatki
     static constexpr int kGridW = 7 * kCellW;
     static constexpr int kMinH = 10;  // tytul + naglowki + odstep + 6 tyg. + status
+    static constexpr int kMinYear = 1;    // rok 0 i ujemne = absurd, int by sie przepelnil
+    static constexpr int kMaxYear = 9999; // tyle miesie sie w tytule bez zalamywania siatki
 
     void jumpToToday() {
         const time_t now = time(nullptr);
@@ -118,10 +122,12 @@ private:
     }
 
     void prevMonth() {
-        if (--month_ < 1) { month_ = 12; --year_; }
+        if (month_ > 1) { --month_; return; }
+        if (year_ > kMinYear) { month_ = 12; --year_; } // poza zakresem zostajemy
     }
     void nextMonth() {
-        if (++month_ > 12) { month_ = 1; ++year_; }
+        if (month_ < 12) { ++month_; return; }
+        if (year_ < kMaxYear) { month_ = 1; ++year_; } // poza zakresem zostajemy
     }
 
     static std::u32string monthName(int m) {
