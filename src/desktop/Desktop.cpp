@@ -413,10 +413,18 @@ void Desktop::openDialog(std::u32string title, std::unique_ptr<Dialog> content, 
     Dialog* raw = content.get();
 
     // Rozmiar z samego dialogu (message wrap + pole + przyciski), wycentrowany.
+    // UWAGA: Dialog zyje w WEWNATRZ okna z ramka — Window::relayoutContent
+    // zabiera pasek tytulu i dolna ramke (h-2) oraz kolumne z kazdej strony
+    // (w-2). heightForWidth liczy dla szerokosci TRESCI (tak jak draw wrapuje
+    // na bounds.w-2), wiec okno musi dostac te szerokosc + ramke i te
+    // wysokosc + ramke — inaczej komunikat nie miesci sie wcale (byly same
+    // przyciski, bo petla draw puszczala message zanim zdazyla zaczac).
     Rect area = desktopArea();
-    int w = std::min(56, std::max(30, area.w - 6));
-    int h = raw ? raw->heightForWidth(w) : 10;
-    h = std::min(area.h - 2, std::max(5, h));
+    const int w = std::min(56, std::max(30, area.w - 6)); // szerokosc okna (z ramka)
+    const int contentW = w - 2;
+    const int contentH = raw ? raw->heightForWidth(contentW) : 10;
+    int h = contentH + 2; // pasek tytulu + dolna ramka (okno dialogu bez kart)
+    h = std::min(area.h - 2, std::max(7, h));
     Rect bounds{area.x + std::max(0, (area.w - w) / 2),
                 area.y + std::max(0, (area.h - h) / 2), w, h};
 
