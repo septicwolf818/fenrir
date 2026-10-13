@@ -18,7 +18,8 @@ struct KeyEvent {
     bool ctrl = false;      // np. ctrl=true, character=U'S' -> Ctrl+S
     // Alt (meta). Konsola Linux nie ma odrębnego bajtu dla Alt+X — domyślnie
     // (tryb VC_META) wysyła ESC + X, więc KeyParser składa z tego zdarzenie
-    // z alt=true. Jedyne praktyczne combo na gołej TTY: Alt+Tab (ESC+Tab).
+    // z alt=true. Praktyczne combo na gołej TTY: Alt+Tab (ESC+Tab) oraz
+    // Alt+klawisz zespolowy (ESC + cala sekwencja, np. Alt+PgUp = ESC ESC[5~).
     bool alt = false;
 };
 

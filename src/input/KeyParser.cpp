@@ -177,6 +177,13 @@ std::vector<KeyEvent> KeyParser::feed(const char* data, std::size_t len) {
         unsigned char b = static_cast<unsigned char>(data[i]);
 
         if (b == 0x1b) { // ESC - może być samym Escape albo początkiem sekwencji CSI/SS3
+            // Konsola Linux: Alt + klawisz wielobajtowy = ESC prefiksowany
+            // przed CAŁĄ sekwencją (np. Alt+PgUp = 1b 1b 5b 35 7e, bo Prior
+            // i tak zaczyna się od ESC). Zjadamy powtorzone ESC i pamietamy
+            // alt dla zdarzenia z sekwencji ponizej.
+            bool altPref = false;
+            while (i + 1 < len && data[i + 1] == 0x1b) { altPref = true; ++i; }
+
             // Konsola Linux (TERM=linux, gola konsola bez X) wysyła F1-F5 jako
             // ESC [ [ <litera>, czyli z DODATKOWYM '[' i bez cyfr/';' w środku.
             // To nie mieści się w ogólnym schemacie "cyfry/';' aż do bajtu
@@ -193,6 +200,7 @@ std::vector<KeyEvent> KeyParser::feed(const char* data, std::size_t len) {
                     case 'E': ev.key = Key::F5; break;
                     default: ev.key = Key::Unknown; break;
                 }
+                if (altPref) ev.alt = true;
                 out.push_back(ev);
                 i += 4;
                 continue;
@@ -204,15 +212,18 @@ std::vector<KeyEvent> KeyParser::feed(const char* data, std::size_t len) {
                     unsigned char c = static_cast<unsigned char>(data[j]);
                     ++j;
                     if ((c >= '0' && c <= '9') || c == ';') continue;
-                    break; // c to bajt kończący sekwencję (litera albo '~')
+                    break; // c to bajt końcowy sekwencji (litera albo '~')
                 }
                 std::string_view seq(data + i + 1, j - (i + 1));
-                out.push_back(parseEscapeSequence(seq));
+                KeyEvent ev = parseEscapeSequence(seq);
+                if (altPref) ev.alt = true;
+                out.push_back(ev);
                 i = j;
-            } else if (i + 1 < len && data[i + 1] != 0x1b) {
+            } else if (i + 1 < len) {
                 // ESC + znak = Alt+znak. Konsola Linux (VC_META domyslnie
                 // wl.) wysyla wlasnie tak Alt+X — np. Alt+Tab = ESC 0x09.
-                // ESC ESC pomijamy tu celowo — to dwa osobne Escape.
+                // (Po zjedzeniu prefiksow z gory data[i+1] juz nigdy nie jest
+                // ESC, wiec ten oddzial nie lapsuje podwojnych ESC.)
                 unsigned char b2 = static_cast<unsigned char>(data[i + 1]);
                 KeyEvent ev;
                 ev.alt = true;
@@ -237,7 +248,9 @@ std::vector<KeyEvent> KeyParser::feed(const char* data, std::size_t len) {
                 out.push_back(ev);
                 i += adv;
             } else {
-                out.push_back(KeyEvent{Key::Escape, 0, false});
+                KeyEvent ev{Key::Escape, 0, false};
+                if (altPref) ev.alt = true; // np. sam ESC ESC = alt+Escape
+                out.push_back(ev);
                 ++i;
             }
             continue;

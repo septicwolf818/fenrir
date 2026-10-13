@@ -42,10 +42,12 @@ public:
         view->pushShortcut({true, Key::Char, U'y'}, [raw] { raw->toggleSpaces(); });
         view->pushShortcut({true, Key::Char, U'd'}, [raw] { raw->openFolder(); });
         view->pushShortcut({true, Key::Char, U'b'}, [raw] { raw->toggleTreeFocus(); });
-        // Ctrl+PgDn/PgUp = nastepna/poprzednia karta — standard z przegladarek
-        // i editorow (ESC[6;5~ / ESC[5;5~), dziala tez z fokusem w polu tekstu.
-        view->pushShortcut({true, Key::PageDown, std::nullopt}, [raw] { raw->nextTab(); });
-        view->pushShortcut({true, Key::PageUp, std::nullopt}, [raw] { raw->prevTab(); });
+        // Alt+PgUp/PgDn = poprzednia/nastepna karta. Wylacznie gola konsola
+        // Linux: Alt = prefiks ESC, wiec sekwencje sa rozroznialne (takze
+        // Alt+Tab dla okien). Ctrl+PgUp/PgDn na konsoli ma IDENTYCZNE bajty
+        // co PgUp/PgDn (sterowanie tekstem) — wg keymapy kernela.
+        view->pushShortcut({false, Key::PageDown, std::nullopt, true}, [raw] { raw->nextTab(); });
+        view->pushShortcut({false, Key::PageUp, std::nullopt, true}, [raw] { raw->prevTab(); });
 
         return view;
     }

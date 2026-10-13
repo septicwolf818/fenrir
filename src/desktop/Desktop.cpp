@@ -86,6 +86,7 @@ void closeWithConfirm(AppContext& ctx, Window* w, std::function<void()> deferClo
 bool Desktop::matchesShortcuts(const std::vector<std::pair<KeyShortcut, std::function<void()>>>& sc, const KeyEvent& ev) {
     for (auto& [shortcut, _] : sc) {
         if (shortcut.ctrl != ev.ctrl) continue;
+        if (shortcut.alt != ev.alt) continue;
         if (shortcut.key != ev.key) continue;
         // Dla Key::Char porownujemy character — uwaga: terminal wysyla lowercase!
         if (shortcut.key == Key::Char) {
@@ -107,6 +108,7 @@ bool Desktop::matchesShortcuts(const std::vector<std::pair<KeyShortcut, std::fun
 void Desktop::invokeShortcut(const std::vector<std::pair<KeyShortcut, std::function<void()>>>& sc, const KeyEvent& ev) {
     for (auto& [shortcut, cb] : sc) {
         if (shortcut.ctrl != ev.ctrl) continue;
+        if (shortcut.alt != ev.alt) continue;
         if (shortcut.key != ev.key) continue;
         if (shortcut.key == Key::Char) {
             if (!shortcut.character.has_value()) continue;

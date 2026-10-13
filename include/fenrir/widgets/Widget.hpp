@@ -25,6 +25,8 @@ struct KeyShortcut {
     bool ctrl = false;
     Key key = Key::Unknown;
     std::optional<char32_t> character = std::nullopt; // opcjonalny znak (np. U'C' dla Ctrl+C)
+    bool alt = false; // Alt — na golej TTY jedyny modyfikator rozroznialny dla
+                      // klawiszy zespolowych (Ctrl+PgUp ma identyczne bajty co PgUp)
 };
 
 // Result zwracany przez handleKey — Desktop używa go do decydowania o trybie.
