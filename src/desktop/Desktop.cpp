@@ -18,6 +18,20 @@ namespace fenrir {
 
 namespace {
 
+class OpenWithMenu final : public Menu {
+public:
+    using Menu::Menu;
+    std::function<void()> onCancel;
+
+    KeyEventResult handleKey(const KeyEvent& ev) override {
+        if (ev.key == Key::Escape) {
+            if (onCancel) onCancel();
+            return KeyEventResult::Consumed;
+        }
+        return Menu::handleKey(ev);
+    }
+};
+
 void drawBox(Screen& screen, const Rect& r, std::u32string_view title) {
     // Dropdown frame from the theme: blue title bar (titleBg/titleText),
     // gray frame (menuBg/menuText), white interior (surfaceBg/surfaceText).
@@ -307,6 +321,83 @@ void Desktop::launchApp(App& app) {
     mode_ = enterWindowMode(*w);
 }
 
+bool Desktop::launchFile(App& app, const std::string& path) {
+    auto view = app.createFileView(*this, path);
+    if (!view) return false;
+    Rect area = desktopArea();
+    Rect bounds = app.preferredBounds(area);
+    Window* window = wm_.createWindow(app.name(), bounds, std::move(view));
+    window->constrainTo(area);
+    wm_.focus(window);
+    cursor_.moveTo(window->bounds().x + 2, window->bounds().y + 1);
+    cursor_.clamp(screenWidth(), screenHeight());
+    mode_ = enterWindowMode(*window);
+    return true;
+}
+
+void Desktop::loadFileAssociations() {
+    if (fileAssociationsLoaded_) return;
+    fileAssociations_.load(registry_);
+    fileAssociationsLoaded_ = true;
+}
+
+void Desktop::openAssociatedFile(const std::string& path) {
+    loadFileAssociations();
+    const std::string appId = fileAssociations_.appIdForPath(path);
+    App* app = registry_.findById(appId);
+    if (!app || !launchFile(*app, path)) openFileWith(path);
+}
+
+void Desktop::openFileWith(const std::string& path) {
+    loadFileAssociations();
+    const auto apps = registry_.fileApps();
+    if (apps.empty()) {
+        showMessage(U"No installed app can open files.");
+        return;
+    }
+
+    const std::string extension = FileAssociationRegistry::extensionForPath(path);
+    const std::string currentId = fileAssociations_.appIdForPath(path);
+    std::vector<std::u32string> labels;
+    labels.reserve(apps.size());
+    for (const App* app : apps) {
+        std::u32string label = text::toUtf32(app->name());
+        if (app->id() == currentId) label += U" (default)";
+        labels.push_back(std::move(label));
+    }
+
+    const std::u32string title = extension.empty()
+        ? U"Open with"
+        : U"Open with ." + text::toUtf32(extension);
+    const int width = std::min(52, std::max(24, dropdownWidth(labels, title) + 2));
+    const int height = std::min(std::max(6, static_cast<int>(labels.size()) + 3),
+                                std::max(6, desktopArea().h));
+    const Rect area = desktopArea();
+    Rect bounds{area.x + std::max(0, (area.w - width) / 2),
+                area.y + std::max(0, (area.h - height) / 2), width, height};
+
+    Window* requester = wm_.focused();
+    auto menu = std::make_unique<OpenWithMenu>(std::move(labels));
+    OpenWithMenu* raw = menu.get();
+    Window* picker = wm_.createWindow(text::toUtf8(title), bounds, std::move(menu));
+    picker->constrainTo(area);
+    wm_.focus(picker);
+    mode_ = enterWindowMode(*picker);
+
+    raw->onSelect = [this, path, apps, picker](int index) {
+        if (index < 0 || static_cast<std::size_t>(index) >= apps.size()) return;
+        App* selected = apps[static_cast<std::size_t>(index)];
+        const bool saved = fileAssociations_.associateFile(path, selected->id(), registry_);
+        if (!launchFile(*selected, path)) return;
+        closePending_.push_back(picker);
+        if (!saved) showMessage(U"Could not save the file association.");
+    };
+    raw->onCancel = [this, picker, requester] {
+        if (wm_.focused() == picker) restoreFocusTo(requester);
+        closePending_.push_back(picker);
+    };
+}
+
 CursorMode Desktop::enterWindowMode(Window& w) {
     if (!w.content()) return CursorMode::Keyboard;
     return w.content()->editable() ? CursorMode::Edit : CursorMode::Keyboard;
@@ -564,6 +655,16 @@ void Desktop::handleKeyEvent(const KeyEvent& ev) {
     // exit. Without it, the user could get stuck in WindowMove mode, for example,
     // with no way to leave the application.
     if (ev.ctrl && ev.key == Key::Char && ev.character == U'q') { quit(); return; }
+
+    // F12 is the non-destructive escape hatch from apps that consume Esc (most
+    // importantly a nested Fenrir inside the Terminal). Leave the current mode,
+    // but keep every window and its running processes alive.
+    if (ev.key == Key::F12) {
+        closeAppMenu();
+        closeWinMenu();
+        if (mode_ != CursorMode::Desktop) leaveWindowMode();
+        return;
+    }
 
     // --- Desktop menu (F1) has the highest priority ---
     if (appMenu_) {

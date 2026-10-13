@@ -20,6 +20,7 @@ public:
         // Dual-panel model: Ctrl+C/X copy/move TO THE OTHER panel
         // (active = source, other = target) — no clipboard, no pasting.
         view->setMenuTabs({{U"File", std::vector<MenuItem>{
+            {U"Open with... (Ctrl+O)", [raw] { raw->openWithSelected(); }},
             {U"Go to folder... (Ctrl+G)", [raw] { raw->goToFolder(); }},
             {U"Refresh", [raw] { raw->refreshBoth(); }},
         }},
@@ -34,6 +35,7 @@ public:
         }}});
 
         // Shortcuts: registered on the widget — Desktop checks them before handleKey.
+        view->pushShortcut({true, Key::Char, U'o'}, [raw] { raw->openWithSelected(); });
         view->pushShortcut({true, Key::Char, U'g'}, [raw] { raw->goToFolder(); });
         view->pushShortcut({true, Key::Char, U'c'}, [raw] { raw->copySelected(); });
         view->pushShortcut({true, Key::Char, U'x'}, [raw] { raw->moveSelected(); });

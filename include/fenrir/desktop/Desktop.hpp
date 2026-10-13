@@ -6,6 +6,7 @@
 
 #include "fenrir/app/AppContext.hpp"
 #include "fenrir/app/AppRegistry.hpp"
+#include "fenrir/app/FileAssociationRegistry.hpp"
 #include "fenrir/core/Screen.hpp"
 #include "fenrir/cursor/Cursor.hpp"
 #include "fenrir/input/KeyParser.hpp"
@@ -56,6 +57,8 @@ public:
     void openFolder(const std::string& startDir, OnPick onPick, OnCancel onCancel) override;
     void saveFile(const std::string& startDir, const std::string& suggestedName,
                   OnPick onPick, OnCancel onCancel) override;
+    void openAssociatedFile(const std::string& path) override;
+    void openFileWith(const std::string& path) override;
     void openDialog(std::u32string title, std::unique_ptr<Dialog> content,
                     OnDialogResult onResult) override;
     // Asynchronous sources (e.g. the terminal PTY) — polled in tickOnce.
@@ -70,6 +73,8 @@ private:
     Cursor cursor_;
     WindowManager wm_;
     AppRegistry registry_;
+    FileAssociationRegistry fileAssociations_;
+    bool fileAssociationsLoaded_ = false;
 
     std::string desktopName_ = "Fenrir";
     bool running_ = true;
@@ -119,6 +124,7 @@ private:
     void applyWidgetResult(KeyEventResult r, const KeyEvent& ev);
 
     void tickOnce();
+    void loadFileAssociations();
 
     void openAppMenu();
     void closeAppMenu();
@@ -131,6 +137,7 @@ private:
     bool windowAlive(Window* w) const;
     void activateAtCursor();
     void launchApp(App& app);
+    bool launchFile(App& app, const std::string& path);
     void toggleMaximize(Window& w);
     // Enter window-level keyboard navigation or editing mode.
     // Returns the new cursor mode (Keyboard or Edit).

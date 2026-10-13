@@ -16,6 +16,7 @@ add_compile_options(-Wall -Wextra)
 # -> window -> app (App/AppContext/AppRegistry contracts) -> desktop (the
 # framework that ties everything together and implements AppContext).
 add_library(fenrir STATIC
+    src/app/FileAssociationRegistry.cpp
     src/terminal/Terminal.cpp
     src/core/Screen.cpp
     src/core/FileSystem.cpp

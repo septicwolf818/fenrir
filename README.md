@@ -14,11 +14,16 @@ features rather than system administration.
 - Full-screen terminal UI with windowed, keyboard, and text-editing modes.
 - Window movement, resizing, minimization, and maximize/restore.
 - Built-in apps: Text Editor, File Manager, Calculator, Settings, Calendar,
-  Paint, and Terminal.
+  Paint, Terminal, and Photo Viewer.
+- File associations that open files in the selected app and persist globally.
+- Photo Viewer for uncompressed BMP and PNM images, rendered with ANSI colors
+  and a brightness-to-character ramp.
 - Reusable widgets for menus, dialogs, lists, text input, file selection,
   directory trees, tabs, and status bars.
 - A terminal window that starts the user's shell in a pseudoterminal and
   supports a practical VT100/xterm subset.
+- No third-party libraries; the build uses C++20 and the platform's POSIX
+  terminal/PTY interfaces.
 - Persistent desktop settings and per-app preferences under
   `~/.config/fenrir/`.
 
@@ -56,6 +61,7 @@ menu title. App menus also list their available actions.
 | `F5` / `F6` | Move / resize the focused window; use the arrow keys, then `Enter` or `Esc` |
 | `F7` | Toggle maximize/restore for the focused window |
 | `F8` | Minimize the focused window |
+| `F12` | Leave the current app/input mode without closing the window or its processes |
 | Arrow keys | Move the desktop cursor or navigate the focused widget |
 | `Enter` / `Space` | Activate the item under the desktop cursor or the selected widget |
 | `Esc` | Leave the current interaction mode or close a menu/dialog |
@@ -88,7 +94,13 @@ editing/navigation modes; the Terminal app forwards it to the shell instead.
 | `Ctrl+C` / `Ctrl+X` | Copy / move the selection to the other panel |
 | `Ctrl+R` | Rename the selection |
 | `Ctrl+G` | Choose a folder for the active panel |
+| `Ctrl+O` | Choose an app for the selected file and save it as the extension default |
 | `Delete` | Delete the selection |
+
+Press `Enter` on a file to open it with its associated app. Built-in defaults
+send common text/code extensions to Text Editor and BMP/PNM extensions to
+Photo Viewer. Choosing **Open with** stores overrides in
+`~/.config/fenrir/file-associations.ini`.
 
 ### Calculator
 
@@ -111,11 +123,18 @@ Arrow keys move the drawing cursor; printable characters paint, and `Delete`
 erases. `F3` opens the color palette. `Ctrl+N`, `Ctrl+O`, `Ctrl+S`, and
 `Ctrl+Z` create, open, save, and undo.
 
+### Photo Viewer
+
+Open BMP or PNM files (PBM/PGM/PPM). The viewer maps image colors to the 16 ANSI
+colors and luminance to terminal characters. Use arrow keys to pan, `+`/`-` to
+zoom, `F` to fit the image, and `0` for actual size.
+
 ### Terminal
 
 The Terminal app starts `$SHELL` (or `/bin/sh`) in a pseudoterminal. Keys are
-forwarded to the shell; `Alt+Tab`, `F2`, `F8`, and `Ctrl+W` remain Fenrir window
-controls. `Esc` is sent to the shell.
+forwarded to the shell; `Alt+Tab`, `F2`, `F8`, `F12`, and `Ctrl+W` remain Fenrir window
+controls. `Esc` is sent to the shell. Press `F12` to return to the desktop while
+leaving the shell and its foreground program running.
 
 ## Project layout
 

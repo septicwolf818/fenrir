@@ -1,5 +1,6 @@
 #pragma once
 #include <memory>
+#include <string_view>
 #include <vector>
 
 #include "fenrir/app/App.hpp"
@@ -17,6 +18,19 @@ public:
     }
 
     const std::vector<std::unique_ptr<App>>& apps() const { return apps_; }
+
+    App* findById(std::string_view id) const {
+        for (const auto& app : apps_)
+            if (app->id() == id) return app.get();
+        return nullptr;
+    }
+
+    std::vector<App*> fileApps() const {
+        std::vector<App*> result;
+        for (const auto& app : apps_)
+            if (!app->fileExtensions().empty()) result.push_back(app.get());
+        return result;
+    }
 
 private:
     std::vector<std::unique_ptr<App>> apps_;

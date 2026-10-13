@@ -37,6 +37,12 @@ public:
     virtual void saveFile(const std::string& startDir, const std::string& suggestedName,
                            OnPick onPick, OnCancel onCancel = {}) = 0;
 
+    // Open a file using its saved global extension association. If none exists,
+    // the desktop presents the Open With chooser.
+    virtual void openAssociatedFile(const std::string& path) = 0;
+    // Choose an app for this file and save that choice as the extension default.
+    virtual void openFileWith(const std::string& path) = 0;
+
     // Opens a dialog window with a Dialog widget (message / confirmation /
     // prompt). The framework sizes the window, closes it once a result
     // arrives and returns focus to the window that raised it.

@@ -24,12 +24,9 @@ class FileManagerView : public Widget {
 public:
     FileManagerView(AppContext& ctx, std::string startDir)
         : ctx_(ctx), left_(std::move(startDir)), right_(".") { // right panel starts in the current directory (cwd)
-        auto info = [this](const std::string& path) {
-            long long sz = fs::fileSize(path);
-            status("File: " + path + (sz >= 0 ? " (" + std::to_string(sz) + " B)" : ""));
-        };
-        left_.onFileActivate = info;
-        right_.onFileActivate = info;
+        auto open = [this](const std::string& path) { ctx_.openAssociatedFile(path); };
+        left_.onFileActivate = open;
+        right_.onFileActivate = open;
         left_.onStatus = [this](const std::string& m) { status(m); };
         right_.onStatus = [this](const std::string& m) { status(m); };
     }
@@ -158,6 +155,15 @@ public:
     void refreshBoth() {
         reloadBoth();
         status("Both panels refreshed.");
+    }
+
+    void openWithSelected() {
+        DirectoryView& view = active();
+        if (view.empty() || !view.selectedIsFile()) {
+            status("Select a file first.");
+            return;
+        }
+        ctx_.openFileWith(view.selectedPath());
     }
 
     void goToFolder() {

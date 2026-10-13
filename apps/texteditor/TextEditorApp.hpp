@@ -2,6 +2,7 @@
 #include <atomic>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "fenrir/app/App.hpp"
 #include "fenrir/core/FileSystem.hpp"
@@ -12,6 +13,12 @@ namespace fenrir::apps {
 class TextEditorApp : public App {
 public:
     std::string name() const override { return "Text Editor"; }
+    std::string id() const override { return "text-editor"; }
+
+    std::vector<std::string> fileExtensions() const override {
+        return {"txt", "md", "log", "ini", "cfg", "conf", "csv", "json", "xml",
+                "yaml", "yml", "c", "h", "cc", "cpp", "hpp", "py", "sh", "html", "css"};
+    }
 
     std::unique_ptr<Widget> createView(AppContext& ctx) override {
         int n = ++instanceCounter_;
@@ -53,6 +60,10 @@ public:
         view->pushShortcut({false, Key::PageUp, std::nullopt, true}, [raw] { raw->prevTab(); });
 
         return view;
+    }
+
+    std::unique_ptr<Widget> createFileView(AppContext& ctx, const std::string& path) override {
+        return std::make_unique<TextEditorView>(ctx, path);
     }
 
     Rect preferredBounds(const Rect& desktopArea) const override {

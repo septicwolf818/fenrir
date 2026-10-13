@@ -14,6 +14,7 @@
 #include "../calendar/CalendarApp.hpp"
 #include "../paint/PaintApp.hpp"
 #include "../terminal/TerminalApp.hpp"
+#include "../photoviewer/PhotoViewerApp.hpp"
 
 int main() {
     try {
@@ -30,6 +31,7 @@ int main() {
         desktop.apps().registerApp(std::make_unique<fenrir::apps::CalendarApp>());
         desktop.apps().registerApp(std::make_unique<fenrir::apps::PaintApp>());
         desktop.apps().registerApp(std::make_unique<fenrir::apps::TerminalApp>());
+        desktop.apps().registerApp(std::make_unique<fenrir::apps::PhotoViewerApp>());
         // Add more apps here.
 
         return desktop.run();
