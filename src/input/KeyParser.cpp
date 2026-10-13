@@ -57,9 +57,42 @@ KeyEvent KeyParser::parseEscapeSequence(std::string_view seq) const {
                 case 'S': ev.key = Key::F4; return ev;
             }
         }
+        // CSI <ps>;<mods>(A|B|C|D|H|F) — zmodyfikowane strzalki, np. ESC[1;5A
+        // = Ctrl+Up (xterm i wiekszosc emulatorow wysyla to bez potrzeby
+        // modifyOtherKeys). Uzywane m.in. do Ctrl+Up/Down = rok w kalendarzu.
+        if (seq.size() >= 4) {
+            const char last = seq.back();
+            if (last == 'A' || last == 'B' || last == 'C' || last == 'D' ||
+                last == 'H' || last == 'F') {
+                const auto semi = seq.find(';');
+                if (semi != std::string_view::npos) {
+                    int mods = -1;
+                    if (semi + 1 < seq.size() - 1) {
+                        mods = 0;
+                        for (std::size_t k = semi + 1; k + 1 < seq.size(); ++k) {
+                            const char c = seq[k];
+                            if (c < '0' || c > '9') { mods = -1; break; }
+                            mods = mods * 10 + (c - '0');
+                            if (mods > 99) { mods = -1; break; }
+                        }
+                    }
+                    if (mods >= 0) {
+                        ev.ctrl = (mods & 4) != 0;
+                        ev.alt = (mods & 2) != 0;
+                        switch (last) {
+                            case 'A': ev.key = Key::Up; return ev;
+                            case 'B': ev.key = Key::Down; return ev;
+                            case 'C': ev.key = Key::Right; return ev;
+                            case 'D': ev.key = Key::Left; return ev;
+                            case 'H': ev.key = Key::Home; return ev;
+                            case 'F': ev.key = Key::End; return ev;
+                        }
+                    }
+                }
+            }
+        }
         // sekwencje CSI zakończone '~', np. ESC[3~ (Delete), ESC[5~ (PgUp)
-        if (seq.back() == '~') {
-            std::string_view num = seq.substr(1, seq.size() - 2);
+        if (seq.back() == '~') {            std::string_view num = seq.substr(1, seq.size() - 2);
             // modifyOtherKeys / CSI-u: ESC[27;<mods>;<code>~ (np. 27;5;9~ =
             // Ctrl+Tab). Dostarczaja to emulatory i keymapy obslugujace
             // modyfikatory; na golym TTY (Linux VC) taka sekwencja po prostu

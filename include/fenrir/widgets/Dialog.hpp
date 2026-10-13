@@ -13,10 +13,15 @@
 
 namespace fenrir {
 
-// Modalny dialog w oknie: komunikat + przyciski (+ opcjonalne pole tekstowe).
+// Modalny dialog w oknie: komunikat + przyciski (+ pola tekstowe).
 // Zastepuje reczne wynalazki w aplikacjach (o "About", potwierdzenie usuniecia,
 // prompt przemianowania) — aplikacje dostaja gotowy widget i otwieraja go przez
 // AppContext::openDialog(). onResult(idx): idx = numer przycisku, -1 = Esc/anuluj.
+//
+// Pol tekstowych moze byc wiecej niz jedno (addInput) — np. kalendarz pyta
+// o tytul/godziny w jednym okienku. Tab/strzalki przechodza miedzy polami,
+// z ostatniego pola na przyciski (i z powrotem); Enter w polu = zatwierdz
+// (jakby wcisnac OK).
 class Dialog : public Widget {
 public:
     enum class Buttons { Ok, OkCancel, YesNo, YesNoCancel };
@@ -31,21 +36,31 @@ public:
     void setMessage(std::u32string m) { message_ = std::move(m); }
     const std::u32string& message() const { return message_; }
 
-    // Tworzy pole tekstowe (prompt). Zwraca wskaznik dla wygody ustawien callbackow.
-    LineEdit* setInput(std::u32string label = {}, std::u32string initial = {}) {
-        input_ = std::make_unique<LineEdit>(std::move(initial), std::move(label));
-        input_->onSubmit = [this](const std::u32string&) { confirm(0); };
+    // Dodaje pole tekstowe (prompt / formularz). Zwraca wskaznik dla wygody
+    // ustawien callbackow. Fokus startuje na pierwszym dodanym polu.
+    LineEdit* addInput(std::u32string label = {}, std::u32string initial = {}) {
+        inputs_.push_back(std::make_unique<LineEdit>(std::move(initial), std::move(label)));
+        LineEdit* raw = inputs_.back().get();
+        raw->onSubmit = [this](const std::u32string&) { confirm(0); };
         zone_ = Zone::Input;
-        return input_.get();
+        inputIdx_ = 0;
+        return raw;
     }
-    bool hasInput() const { return input_ != nullptr; }
-    LineEdit* input() const { return input_.get(); }
+    // Zgodnosc ze starym API (AppContext::prompt): pierwsze pole.
+    LineEdit* setInput(std::u32string label = {}, std::u32string initial = {}) {
+        return addInput(std::move(label), std::move(initial));
+    }
+    bool hasInput() const { return !inputs_.empty(); }
+    LineEdit* input() { return inputs_.empty() ? nullptr : inputs_.front().get(); }
+    LineEdit* input(std::size_t i) { return i < inputs_.size() ? inputs_[i].get() : nullptr; }
+    std::size_t inputCount() const { return inputs_.size(); }
 
     // Wysokosc dialogu dla danej szerokosci — do rozmiarowania okna przez Desktop.
     int heightForWidth(int w) const {
         const int inner = std::max(1, w - 2);
         const int msgLines = static_cast<int>(text::wrap(message_, inner).size());
-        return 1 + msgLines + (hasInput() ? 1 : 0) + 1 + 1 + 1; // pad + tekst + pole + odstep + przyciski + pad
+        const int ins = static_cast<int>(inputs_.size());
+        return 1 + msgLines + ins + 1 + 1 + 1; // pad + tekst + pola + odstep + przyciski + pad
     }
 
     bool editable() const override { return hasInput(); }
@@ -63,10 +78,12 @@ public:
             ++y;
         }
 
-        if (input_) {
-            input_->setBounds(Rect{bounds_.x + 1, y, std::max(1, bounds_.w - 2), 1});
-            input_->setFocused(focused_ && zone_ == Zone::Input);
-            input_->draw(screen);
+        for (std::size_t i = 0; i < inputs_.size(); ++i) {
+            if (y >= bounds_.y + bounds_.h - 2) break;
+            auto& in = inputs_[i];
+            in->setBounds(Rect{bounds_.x + 1, y, std::max(1, bounds_.w - 2), 1});
+            in->setFocused(focused_ && zone_ == Zone::Input && i == inputIdx_);
+            in->draw(screen);
             ++y;
         }
 
@@ -77,7 +94,8 @@ public:
     }
 
     std::optional<std::pair<int, int>> cursorPosition() const override {
-        if (input_ && zone_ == Zone::Input) return input_->cursorPosition();
+        if (zone_ == Zone::Input && inputIdx_ < inputs_.size())
+            return inputs_[inputIdx_]->cursorPosition();
         return std::nullopt;
     }
 
@@ -87,30 +105,47 @@ public:
             fire(-1);
             return KeyEventResult::Activated;
         }
-        // Tab (jesli dojdzie) = przelaczanie strefy.
-        if (ev.key == Key::Tab && input_) {
-            zone_ = (zone_ == Zone::Input) ? Zone::Buttons : Zone::Input;
-            return KeyEventResult::Consumed;
+        // Tab = przelaczanie stref: pole -> kolejne pole -> przyciski -> pole...
+        if (ev.key == Key::Tab && hasInput()) {
+            if (zone_ == Zone::Buttons) {
+                zone_ = Zone::Input;
+                inputIdx_ = 0;
+            } else if (inputIdx_ + 1 < inputs_.size()) {
+                ++inputIdx_;
+            } else {
+                zone_ = Zone::Buttons;
+            }
+            return zone_ == Zone::Input ? KeyEventResult::EnteredEdit : KeyEventResult::Consumed;
         }
 
-        if (input_ && zone_ == Zone::Input) {
-            if (ev.key == Key::Up || ev.key == Key::Down) {
-                zone_ = Zone::Buttons;
+        if (zone_ == Zone::Input) {
+            // Up/Down = miedzy polami (z krajow na przyciski i z powrotem).
+            if (ev.key == Key::Up) {
+                if (inputIdx_ > 0) --inputIdx_;
+                else zone_ = Zone::Buttons;
                 return KeyEventResult::Consumed;
             }
-            return input_->handleKey(ev);
+            if (ev.key == Key::Down) {
+                if (inputIdx_ + 1 < inputs_.size()) ++inputIdx_;
+                else zone_ = Zone::Buttons;
+                return KeyEventResult::Consumed;
+            }
+            KeyEventResult r = inputs_[inputIdx_]->handleKey(ev);
+            return r == KeyEventResult::Ignored ? KeyEventResult::Consumed : r;
         }
 
-        // Strefa przyciskow: strzalke gore na pierwszym przycisku wraca do pola.
-        if (input_ && ev.key == Key::Up && panel_->selectedIndex() == 0) {
+        // Strefa przyciskow: strzalka gore na pierwszym przycisku wraca do
+        // ostatniego pola (dla jednego pola — do niego, jak dawniej).
+        if (hasInput() && ev.key == Key::Up && panel_->selectedIndex() == 0) {
             zone_ = Zone::Input;
+            inputIdx_ = inputs_.size() - 1;
             return KeyEventResult::Consumed;
         }
         return panel_->handleKey(ev);
     }
 
     bool activate() override {
-        if (input_ && zone_ == Zone::Input) { confirm(0); return true; }
+        if (zone_ == Zone::Input) { confirm(0); return true; }
         return panel_->activate();
     }
 
@@ -153,7 +188,8 @@ private:
 
     std::u32string message_;
     Buttons buttons_;
-    std::unique_ptr<LineEdit> input_;
+    std::vector<std::unique_ptr<LineEdit>> inputs_;
+    std::size_t inputIdx_ = 0;
     std::unique_ptr<Panel> panel_;
     Zone zone_ = Zone::Buttons;
 };
