@@ -24,11 +24,13 @@ struct CalEvent {
     int y = 0, m = 1, d = 1;
     int startMin = 0, endMin = 0;
     std::string title;
+    int id = -1; // klucz w Prefs ("e<id>"), -1 = jeszcze nie zapisane
 };
 
 // Kalendarz — trzy widoki na tym samym kursorze daty (y/m/d + godzina):
 //   Miesiac — siatka 7 kolumn (poniedzialek pierwszy), dzis i kursor
-//             podswietlone, dni z zdarzeniami oznaczone '*'.
+//             podswietlone, dni z zdarzeniami oznaczone '*', a pod siatka
+//             agenda kursora (czasy i tytuly zdarzen wybranego dnia).
 //   Tydzien — 7 kolumn (pon..nd) + lewa kolumna godzin (00:..23:),
 //             zdarzenia rysowane jako bloki na planie dnia.
 //   Dzien   — to samo, jedna kolumna na pelnej szerokosci.
@@ -36,8 +38,9 @@ struct CalEvent {
 // miesiaca, a w widokach tygodnia/dnia L/P = dzien, G/D = przewijanie
 // godzin. PgUp/PgDn = miesiac/tydzien/7 dni, Home = dzis, Esc = powrot do
 // miesiaca. Ctrl+Up/Down = rok. Enter: z miesiaca otwiera widok dnia,
-// z widokow dnia/tygodnia tworzy zdarzenie. Ctrl+N = nowe zdarzenie,
-// Ctrl+T = tydzien, Ctrl+D = dzien (menu: F2).
+// z widokow dnia/tygodnia edytuje zdarzenie pod kursorem (a gdy go brak —
+// tworzy nowe). Delete: usuwa zdarzenie pod kursorem (z potwierdzeniem).
+// Ctrl+N = nowe zdarzenie, Ctrl+T = tydzien, Ctrl+D = dzien (menu: F2).
 // Zdarzenia trwale w ~/.config/fenrir/apps/calendar.conf (Prefs).
 class CalendarView : public Widget {
 public:
@@ -50,6 +53,8 @@ public:
 
     void setView(View v) { view_ = v; }
     void newEvent();
+    void eventDialog(const CalEvent* existing);
+    void confirmDelete(const CalEvent& e);
 
     void draw(Screen& screen) override {
         const auto& t = theme::active;
@@ -68,9 +73,9 @@ public:
         } else if (view_ == View::Month) {
             status_.setText(U"Ent:dzien N:zdarz PgUp/Dn:mies");
         } else if (view_ == View::Week) {
-            status_.setText(U"Ent:zdarz PgUp/Dn:tydz Esc:mies");
+            status_.setText(U"Ent:edyt/dodaj Del:usun PgUp/Dn:tydz");
         } else {
-            status_.setText(U"Ent:zdarz PgUp/Dn:7d Esc:mies");
+            status_.setText(U"Ent:edyt/dodaj Del:usun PgUp/Dn:7d");
         }
         status_.draw(screen);
     }
@@ -84,10 +89,15 @@ public:
 
         switch (ev.key) {
             case Key::Home: jumpToToday(); return KeyEventResult::Consumed;
-            case Key::Enter:
-                if (view_ == View::Month) view_ = View::Day; // do widoku kursora
-                else newEvent();
+            case Key::Enter: {
+                if (view_ == View::Month) { view_ = View::Day; return KeyEventResult::Consumed; }
+                // Pod kursorem zdarzenie? Edytuj je; w przeciwnym razie nowe.
+                if (const CalEvent* e = eventAt(year_, month_, curD_, hourCur_))
+                    eventDialog(e);
+                else
+                    newEvent();
                 return KeyEventResult::Consumed;
+            }
             case Key::Escape:
                 if (view_ != View::Month) { view_ = View::Month; return KeyEventResult::Consumed; }
                 return KeyEventResult::Ignored; // z miesiaca Esc = globalne
@@ -102,6 +112,7 @@ public:
                 case Key::Down:    moveCursor(7);  return KeyEventResult::Consumed;
                 case Key::PageUp:   prevMonth(); return KeyEventResult::Consumed;
                 case Key::PageDown: nextMonth(); return KeyEventResult::Consumed;
+                case Key::Delete:  return KeyEventResult::Consumed; // brak kontekstu godziny
                 default: return KeyEventResult::Ignored;
             }
         }
@@ -113,6 +124,10 @@ public:
             case Key::Down:    hourCur_ = std::min(23, hourCur_ + 1); return KeyEventResult::Consumed;
             case Key::PageUp:   moveCursor(-7); return KeyEventResult::Consumed;
             case Key::PageDown: moveCursor(7);  return KeyEventResult::Consumed;
+            case Key::Delete: {
+                if (const CalEvent* e = eventAt(year_, month_, curD_, hourCur_)) confirmDelete(*e);
+                return KeyEventResult::Consumed;
+            }
             default: return KeyEventResult::Ignored;
         }
     }
@@ -186,21 +201,42 @@ private:
         events_.clear();
         for (int i = 0; i < n; ++i) {
             CalEvent e;
-            if (parseEvent(p.get("e" + std::to_string(i)), e)) events_.push_back(e);
+            if (parseEvent(p.get("e" + std::to_string(i)), e)) {
+                e.id = i;
+                events_.push_back(e);
+            }
         }
     }
 
-    void addEvent(const CalEvent& e) {
+    void addEvent(CalEvent e) {
         auto& p = prefs::forApp("calendar");
         const int id = p.getInt("next_id", 0);
         p.set("e" + std::to_string(id), fmtEvent(e));
         p.setInt("next_id", id + 1);
-        events_.push_back(e);
+        e.id = id;
+        events_.push_back(std::move(e));
+    }
+
+    void updateEvent(const CalEvent& e) {
+        if (e.id < 0) return;
+        prefs::forApp("calendar").set("e" + std::to_string(e.id), fmtEvent(e));
+        for (auto& v : events_)
+            if (v.id == e.id) { v = e; break; }
+    }
+
+    void deleteEvent(int id) {
+        prefs::forApp("calendar").set("e" + std::to_string(id), ""); // set("") kasuje klucz
+        std::erase_if(events_, [id](const CalEvent& v) { return v.id == id; });
     }
 
     // --- Zapytanie o zdarzenie (Ctrl+N / Enter z widoku dnia/tygodnia) ------
 
-    void clearDrafts() { draftTitle_.clear(); draftStart_.clear(); draftEnd_.clear(); }
+    void clearDrafts() {
+        draftTitle_.clear();
+        draftStart_.clear();
+        draftEnd_.clear();
+        draftEditId_ = -1; // -1 = tryb tworzenia, >=0 = tryb edycji danego id
+    }
 
     // --- Rysowanie: widok miesiaca ------------------------------------------
 
@@ -267,6 +303,16 @@ private:
                 ++day;
             }
             ++y;
+        }
+
+        // Agenda kursora: jeden wiersz miedzy siatka a statusem — czasy
+        // i tytuly zdarzen wybranego dnia (gdy brak zdarzen, wiersz zostaje pusty).
+        const int statusY = bounds_.y + bounds_.h - 1;
+        if (y < statusY) {
+            const std::u32string ag = dayAgenda();
+            if (!ag.empty())
+                screen.putText(bounds_.x, y, text::clip(ag, bounds_.w),
+                               t.highlightText, t.windowBg, StyleBold);
         }
     }
 
@@ -390,6 +436,23 @@ private:
         return false;
     }
 
+    // Zdarzenia kursora dnia posortowane po starcie: "HH:MM tytul  HH:MM tytul".
+    std::u32string dayAgenda() const {
+        std::vector<const CalEvent*> list;
+        for (const auto& e : events_)
+            if (e.y == year_ && e.m == month_ && e.d == curD_) list.push_back(&e);
+        if (list.empty()) return {};
+        std::sort(list.begin(), list.end(),
+                  [](const CalEvent* a, const CalEvent* b) { return a->startMin < b->startMin; });
+        std::u32string s;
+        for (std::size_t i = 0; i < list.size(); ++i) {
+            if (i) s += U"  ";
+            s += text::toUtf32(hmStr(list[i]->startMin)) + U" " + text::toUtf32(list[i]->title);
+            if (s.size() > 400) break; // i tak przetnie clip() przy rysowaniu
+        }
+        return s;
+    }
+
     // Przesuwa godziny widoczne tak, zeby kursor godziny byl widoczny.
     void syncScroll(int avail) {
         if (avail < 1) { hourScroll_ = 0; return; }
@@ -505,31 +568,47 @@ private:
     int hourScroll_ = 0;  // pierwszy widoczny wiersz godziny
     std::vector<CalEvent> events_;
     std::string draftTitle_, draftStart_, draftEnd_; // zachowane po bledzie walidacji
+    int draftEditId_ = -1;                           // id edycji z tych szkicow (-1 = tworzenie)
     std::string statusMsg_;                          // przelotowy komunikat (np. "Dodano: ...")
     StatusBar status_;
 };
 
 inline const char32_t* CalendarView::kDni[7] = {U"pon", U"wt", U"śr", U"czw", U"pt", U"sob", U"nd"};
 
-inline void CalendarView::newEvent() {
+inline void CalendarView::newEvent() { eventDialog(nullptr); }
+
+// Wspolny formularz tworzenia (existing = nullptr) i edycji zdarzenia.
+// Szkice po bledzie walidacji sa przywracane tylko, gdy pasuja do trybu
+// (draftEditId_), zeby szkic edycji nie wskoczyl przy nowym zdarzeniu.
+inline void CalendarView::eventDialog(const CalEvent* existing) {
+    const int editId = existing ? existing->id : -1;
+    if (draftEditId_ != editId) clearDrafts();
     const auto token = lifetimeToken();
     if (draftStart_.empty()) {
-        // Start = kursor godziny (w widokach dnia/tygodnia) lub teraz;
-        // koniec = godzine pozniej (maks. 23:59).
-        const int sm = hourCur_ * 60;
-        draftStart_ = hmStr(sm);
-        draftEnd_ = hmStr(std::min(sm + 60, 23 * 60 + 59));
+        if (existing) {
+            draftTitle_ = existing->title;
+            draftStart_ = hmStr(existing->startMin);
+            draftEnd_ = hmStr(existing->endMin);
+        } else {
+            // Start = kursor godziny (w widokach dnia/tygodnia), koniec godzine pozniej.
+            const int sm = hourCur_ * 60;
+            draftStart_ = hmStr(sm);
+            draftEnd_ = hmStr(std::min(sm + 60, 23 * 60 + 59));
+        }
     }
+    const int dy = existing ? existing->y : year_;
+    const int dm = existing ? existing->m : month_;
+    const int dd = existing ? existing->d : curD_;
     char buf[32];
-    std::snprintf(buf, sizeof(buf), "Data: %02d.%02d.%04d", curD_, month_, year_);
+    std::snprintf(buf, sizeof(buf), "Data: %02d.%02d.%04d", dd, dm, dy);
     auto dlg = std::make_unique<Dialog>(text::toUtf32(std::string(buf)),
                                         Dialog::Buttons::OkCancel);
     dlg->addInput(U"Tytul: ", text::toUtf32(draftTitle_));
     dlg->addInput(U"Start: ", text::toUtf32(draftStart_));
     dlg->addInput(U"Koniec: ", text::toUtf32(draftEnd_));
     Dialog* raw = dlg.get();
-    ctx_.openDialog(U"Zdarzenie", std::move(dlg),
-                    [this, token, raw](int idx) {
+    ctx_.openDialog(editId >= 0 ? U"Edytuj zdarzenie" : U"Zdarzenie", std::move(dlg),
+                    [this, token, raw, editId, dy, dm, dd](int idx) {
         if (!token.lock()) return;
         if (idx != 0) { clearDrafts(); return; } // Anuluj/Esc — czysty start
         const std::string title = text::toUtf8(raw->input(0)->value());
@@ -537,23 +616,43 @@ inline void CalendarView::newEvent() {
         const std::string eTxt = text::toUtf8(raw->input(2)->value());
         int sm = 0, em = 0;
         if (title.empty()) {
-            draftTitle_.clear(); draftStart_ = sTxt; draftEnd_ = eTxt;
+            draftTitle_.clear(); draftStart_ = sTxt; draftEnd_ = eTxt; draftEditId_ = editId;
             ctx_.showMessage(U"Podaj tytul zdarzenia.");
             return;
         }
         if (!parseHm(sTxt, sm) || !parseHm(eTxt, em)) {
-            draftTitle_ = title; draftStart_ = sTxt; draftEnd_ = eTxt;
+            draftTitle_ = title; draftStart_ = sTxt; draftEnd_ = eTxt; draftEditId_ = editId;
             ctx_.showMessage(U"Godzina w formacie HH:MM (00:00-23:59).");
             return;
         }
         if (em <= sm) {
-            draftTitle_ = title; draftStart_ = sTxt; draftEnd_ = eTxt;
+            draftTitle_ = title; draftStart_ = sTxt; draftEnd_ = eTxt; draftEditId_ = editId;
             ctx_.showMessage(U"Koniec musi byc pozniej niz start.");
             return;
         }
         clearDrafts();
-        addEvent(CalEvent{year_, month_, curD_, sm, em, title});
-        statusMsg_ = "Dodano: " + title;
+        if (editId >= 0) {
+            updateEvent(CalEvent{dy, dm, dd, sm, em, title, editId});
+            statusMsg_ = "Edytowano: " + title;
+        } else {
+            addEvent(CalEvent{dy, dm, dd, sm, em, title});
+            statusMsg_ = "Dodano: " + title;
+        }
+    });
+}
+
+// Usuwanie zawsze przez potwierdzenie — Delete byl zbyt latwy do przypadkowego
+// wcisniecia przy przewijaniu godzin.
+inline void CalendarView::confirmDelete(const CalEvent& e) {
+    const auto token = lifetimeToken();
+    const int id = e.id;
+    const std::string title = e.title;
+    ctx_.confirm(U"Usunac zdarzenie: " + text::toUtf32(title) + U"?",
+                 [this, token, id, title](bool ok) {
+        if (!token.lock()) return;
+        if (!ok) return;
+        deleteEvent(id);
+        statusMsg_ = "Usunieto: " + title;
     });
 }
 
