@@ -7,10 +7,9 @@ namespace fenrir {
 DirectoryListing::DirectoryListing(std::string startDir) { loadDir(std::move(startDir)); }
 
 void DirectoryListing::loadDir(const std::string& dir) {
-    // Normalizacja do sciezki bezwzglednej: panele startuja tez z "." lub
-    // sciezek wzglednych (Ctrl+G), a parent() sciezki wzglednej bez '/'
-    // zwraca siebie same — bez tego nawigacja "w gore" sie zapada i panel
-    // utyka w jednym katalogu.
+    // Normalize to an absolute path: panels may start at "." or a relative
+    // path (Ctrl+G), and parent() returns the same relative path when it has no '/'.
+    // Without this guard, parent navigation repeats forever and the panel gets stuck.
     dir_ = fs::absolute(dir);
     entries_.clear();
     error_.clear();

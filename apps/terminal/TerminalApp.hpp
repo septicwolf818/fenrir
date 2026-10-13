@@ -1,12 +1,12 @@
 #pragma once
-// Terminal — podstawowy emulator terminala w oknie Fenrira.
-// Uruchamia prawdziwa powloke ($SHELL lub /bin/sh) w pseudoterminalu (forkpty)
-// i rysuje jej wyjscie w siatce komórek. Obslugiwany podzestaw VT100/xterm:
-// pozycjonowanie kursora, czyszczenie/edycja linii, regiony przewijania,
-// ekran alternatywny (1049), kursor sprzezny (h/l), SGR 16/256 kolorów,
-// odwrocone video, UTF-8. Tlumaczenie klawiszy na sekwencje xterm.
-// Wyj z terminala: Alt+Tab / F8 / F2 (Esc idzie do powloki — wyjatek od
-// ogólnej zasady rezerwacji Esc, udokumentowany w appce).
+// Terminal — basic terminal emulator in a Fenrir window.
+// Runs a real shell ($SHELL or /bin/sh) in a pseudoterminal (forkpty)
+// and draws its output in a cell grid. Supported VT100/xterm subset:
+// cursor positioning, line clearing/editing, scrolling regions,
+// alternate screen (1049), application cursor mode (h/l), SGR 16/256 colors,
+// reverse video, UTF-8. Key translation to xterm sequences.
+// Alt+Tab switches windows; Esc is forwarded to the shell (an exception to
+// the general Esc reservation rule, documented in this app).
 #include <algorithm>
 #include <cerrno>
 #include <csignal>
@@ -34,18 +34,18 @@
 
 namespace fenrir::apps {
 
-// --- Siatka wirtualna + podzestaw VT100/xterm -------------------------------
+// --- Virtual grid + VT100/xterm subset --------------------------------------
 
 struct VtCell {
     char32_t ch = U' ';
     Color fg = colors::White;
     Color bg = colors::Black;
-    uint8_t style = StyleNone; // bit 7 (wewnętrzny) = reverse video
+    uint8_t style = StyleNone; // bit 7 (internal) = reverse video
 };
 
 class VtScreen {
 public:
-    // Bit reverse video — przechowywany w style komórki, odczytywany przy rysowaniu.
+    // Reverse-video bit — stored in the cell style, read when drawing.
     static constexpr uint8_t kReverse = 0x80;
 
     void resize(int w, int h) {
@@ -80,18 +80,22 @@ public:
                 case St::Utf8: utf8(b); break;
                 case St::Esc: esc(b); break;
                 case St::Csi: csi(b); break;
-                case St::Osc: // tytuł okna — pomijamy do BEL lub ST
+                case St::CsiIgnore:
+                    if (b == 0x1b) state_ = St::Esc;
+                    else if (b >= 0x40 && b <= 0x7e) state_ = St::Ground;
+                    break;
+                case St::Osc: // window title — skip until BEL or ST
                     if (b == 0x07) state_ = St::Ground;
                     else if (b == 0x1b) state_ = St::OscEsc;
                     break;
                 case St::OscEsc: state_ = (b == '\\') ? St::Ground : St::Osc; break;
-                case St::Charset: state_ = St::Ground; break; // wybór zestawu znaków — ignoruj
+                case St::Charset: state_ = St::Ground; break; // character set selection — ignore
             }
         }
     }
 
 private:
-    enum class St { Ground, Utf8, Esc, Csi, Osc, OscEsc, Charset };
+    enum class St { Ground, Utf8, Esc, Csi, CsiIgnore, Osc, OscEsc, Charset };
 
     std::vector<VtCell>& buf() { return altOn_ ? altGrid_ : grid_; }
     const std::vector<VtCell>& buf() const { return altOn_ ? altGrid_ : grid_; }
@@ -107,7 +111,7 @@ private:
             case '\t': cx_ = std::min(w_ - 1, ((cx_ / 8) + 1) * 8); return;
             default: break;
         }
-        if (b < 0x20 || b == 0x7f) return; // C0 / DEL — ignoruj
+        if (b < 0x20 || b == 0x7f) return; // C0 / DEL — ignore
         if (b < 0x80) {
             put(static_cast<char32_t>(b));
             return;
@@ -116,12 +120,12 @@ private:
         if ((b & 0xe0) == 0xc0) { utf8Cp_ = b & 0x1f; utf8Left_ = 1; }
         else if ((b & 0xf0) == 0xe0) { utf8Cp_ = b & 0x0f; utf8Left_ = 2; }
         else if ((b & 0xf8) == 0xf0) { utf8Cp_ = b & 0x07; utf8Left_ = 3; }
-        else return; // sam continuation — zignoruj
+        else return; // continuation byte alone — ignore
         state_ = St::Utf8;
     }
 
     void utf8(unsigned char b) {
-        if ((b & 0xc0) != 0x80) { // przerwana sekwencja — powrót do Ground
+        if ((b & 0xc0) != 0x80) { // interrupted sequence — return to Ground
             state_ = St::Ground;
             ground(b);
             return;
@@ -145,26 +149,31 @@ private:
             case 'D': index_(); break;        // IND
             case 'E': cx_ = 0; index_(); break; // NEL
             case 'c': hardReset(); break;     // RIS
-            default: break; // '=', '>', 'H', 'Z' — ignoruj
+            default: break; // '=', '>', 'H', 'Z' — ignore
         }
     }
 
     void csi(unsigned char b) {
-        if (b == '?') { priv_ = true; return; } // prefiks prywatny (DECSET/DECRST)
+        if (b == '?') { priv_ = true; return; } // private prefix (DECSET/DECRST)
         if (b >= '0' && b <= '9') {
             param_ = std::min(param_ * 10 + (b - '0'), 9999);
             hasParam_ = true;
             return;
         }
         if (b == ';') {
+            if (params_.size() >= kMaxCsiParams) { state_ = St::CsiIgnore; return; }
             params_.push_back(hasParam_ ? param_ : 0);
             param_ = 0;
             hasParam_ = false;
             return;
         }
-        if (b >= 0x20 && b <= 0x2f) return; // bajty pośrednie — ignoruj
-        if (b < 0x40 || b > 0x7e) return;   // nieznany bajt — przerwij sekwencję
+        if (b >= 0x20 && b <= 0x2f) return; // intermediate bytes — ignore
+        if (b < 0x40 || b > 0x7e) {
+            state_ = (b == 0x1b) ? St::Esc : St::Ground;
+            return;
+        }
         if (hasParam_) {
+            if (params_.size() >= kMaxCsiParams) { state_ = St::Ground; return; }
             params_.push_back(param_);
             param_ = 0;
             hasParam_ = false;
@@ -173,7 +182,7 @@ private:
         execCsi(static_cast<char>(b));
     }
 
-    // Parametr (brak → domyślny). 0 jest znaczące (np. ED 0), więc bez podmiany.
+    // Parameter (missing → default). 0 is significant (e.g. ED 0), so don't replace it.
     int pnum(std::size_t i, int def) const { return i < params_.size() ? params_[i] : def; }
 
     void execCsi(char f) {
@@ -201,7 +210,7 @@ private:
             case 'T': for (int i = 0; i < n; ++i) scrollDown_(); break;
             case 'd': cy_ = std::clamp(pnum(0, 1) - 1, 0, h_ - 1); break;
             case 'm': sgr(); break;
-            case 'r': // DECSTBM — region przewijania
+            case 'r': // DECSTBM — scrolling region
                 if (priv_) break;
                 top_ = std::clamp(pnum(0, 1) - 1, 0, h_ - 1);
                 bot_ = std::clamp(pnum(1, h_) - 1, top_, h_ - 1);
@@ -209,7 +218,7 @@ private:
                 cy_ = top_;
                 break;
             case 'h': case 'l': mode(f == 'h'); break;
-            default: break; // 'c','n','t' itd. — ignoruj (bez odpowiedzi)
+            default: break; // 'c','n','t', etc. — ignore (no response)
         }
     }
 
@@ -217,11 +226,11 @@ private:
         if (!priv_ || params_.empty()) return;
         for (const int v : params_) {
             switch (v) {
-                case 1: appCursor_ = on; break;   // DECCKM — strzałki aplikacyjne
+                case 1: appCursor_ = on; break;   // DECCKM — application cursor keys
                 case 25: cursorVisible_ = on; break; // DECTCEM
                 case 47: case 1047: alt(on, false); break;
-                case 1049: alt(on, true); break;  // xterm: alt + zapis kursora
-                default: break; // mysz (1000+), bracketed paste (2004) — ignoruj
+                case 1049: alt(on, true); break;  // xterm: alt + save cursor
+                default: break; // mouse (1000+), bracketed paste (2004) — ignore
             }
         }
     }
@@ -252,7 +261,7 @@ private:
 
     void put(char32_t c) {
         if (cy_ < 0 || cy_ >= h_) return;
-        if (cx_ >= w_) { // deferred wrap uproszczony do natychmiastowego
+        if (cx_ >= w_) { // deferred wrap simplified to immediate wrap
             cx_ = 0;
             index_();
         }
@@ -413,10 +422,10 @@ private:
                     *target = map256(params_[i + 2]);
                     i += 2;
                 } else if (i + 4 < params_.size() && params_[i + 1] == 2) {
-                    i += 4; // truecolor — pomijamy (brak wsparcia)
+                    i += 4; // truecolor — skipped (not supported)
                 }
             }
-            // 3/5/8/9 itd. — ignoruj
+            // 3/5/8/9, etc. — ignore
         }
     }
 
@@ -486,11 +495,12 @@ private:
     int param_ = 0;
     bool hasParam_ = false;
     bool priv_ = false;
+    static constexpr std::size_t kMaxCsiParams = 16;
     uint32_t utf8Cp_ = 0;
     int utf8Left_ = 0;
 };
 
-// --- Proces w pseudoterminalu -------------------------------------------------
+// --- Pseudoterminal process --------------------------------------------------
 
 class PtyProcess {
 public:
@@ -506,7 +516,7 @@ public:
             err = std::strerror(errno);
             return false;
         }
-        if (pid_ == 0) { // potomek: slave jest juz stdin/stdout/stderr
+        if (pid_ == 0) { // child: slave is now stdin/stdout/stderr
             ::setenv("TERM", "xterm", 1);
             const char* sh = ::getenv("SHELL");
             if (!sh || !*sh) sh = "/bin/sh";
@@ -514,7 +524,12 @@ public:
             ::_exit(127);
         }
         const int fl = ::fcntl(fd_, F_GETFL, 0);
-        ::fcntl(fd_, F_SETFL, fl | O_NONBLOCK);
+        if (fl < 0 || ::fcntl(fd_, F_SETFL, fl | O_NONBLOCK) < 0) {
+            const int e = errno;
+            terminate();
+            err = std::strerror(e);
+            return false;
+        }
         return true;
     }
 
@@ -535,12 +550,14 @@ public:
         struct winsize ws {};
         ws.ws_row = static_cast<unsigned short>(std::max(1, rows));
         ws.ws_col = static_cast<unsigned short>(std::max(1, cols));
-        ::ioctl(fd_, TIOCSWINSZ, &ws); // jadro wysyla SIGWINCH do grupy potomka
+        ::ioctl(fd_, TIOCSWINSZ, &ws); // kernel sends SIGWINCH to the child process group
     }
 
-    // >0: bajty, 0: EAGAIN (brak danych), -1: EOF/błąd (slave zamknięty)
+    // >0: bytes, 0: EAGAIN (no data), -1: EOF/error (slave closed)
     long readSome(char* buf, int cap) {
-        const ssize_t n = ::read(fd_, buf, static_cast<std::size_t>(cap));
+        ssize_t n;
+        do { n = ::read(fd_, buf, static_cast<std::size_t>(cap)); }
+        while (n < 0 && errno == EINTR);
         if (n > 0) return static_cast<long>(n);
         if (n == 0) return -1;
         if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;
@@ -559,8 +576,10 @@ public:
                 out_.erase(0, static_cast<std::size_t>(n));
                 continue;
             }
+            if (n == 0) return;
+            if (n < 0 && errno == EINTR) continue;
             if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return;
-            out_.clear(); // inny blad — porzucamy niezapisane bajty
+            out_.clear(); // other error — discard unwritten bytes
             return;
         }
     }
@@ -569,9 +588,13 @@ public:
         if (pid_ > 0) {
             ::kill(pid_, SIGHUP);
             int st = 0;
-            if (::waitpid(pid_, &st, WNOHANG) == 0) {
+            pid_t r;
+            do { r = ::waitpid(pid_, &st, WNOHANG); }
+            while (r < 0 && errno == EINTR);
+            if (r == 0) {
                 ::kill(pid_, SIGKILL);
-                ::waitpid(pid_, &st, 0);
+                do { r = ::waitpid(pid_, &st, 0); }
+                while (r < 0 && errno == EINTR);
             }
             pid_ = -1;
         }
@@ -581,10 +604,10 @@ public:
 private:
     pid_t pid_ = -1;
     int fd_ = -1;
-    std::string out_; // zablokowany zapis — dopisywany po odblokowaniu
+    std::string out_; // pending output — flushed when writable
 };
 
-// --- Tlumaczenie klawiszy na sekwencje xterm ----------------------------------
+// --- Translate keys to xterm sequences --------------------------------------
 
 inline std::string encodeKey(const KeyEvent& ev, bool appCursor) {
     std::string seq;
@@ -641,14 +664,14 @@ inline std::string encodeKey(const KeyEvent& ev, bool appCursor) {
     return seq;
 }
 
-// --- Widok terminala -----------------------------------------------------------
+// --- Terminal view -----------------------------------------------------------
 
 class TerminalView final : public Widget {
 public:
     explicit TerminalView(AppContext& ctx) : ctx_(ctx) {}
 
     ~TerminalView() override {
-        // Zrodlo fd musi zejsc ZWROT przed zamknieciem mastera.
+        // The fd source must be removed BEFORE closing the master.
         if (pty_.fd() >= 0) ctx_.removeFdSource(pty_.fd());
         pty_.terminate();
     }
@@ -681,30 +704,34 @@ public:
         }
         if (exited_) {
             if (!failMsg_.empty()) {
-                std::u32string msg = U" [Nie mozna uruchomic powloki: " + text::toUtf32(failMsg_) + U"] ";
+                std::u32string msg = U" [Failed to spawn shell: " + text::toUtf32(failMsg_) + U"] ";
                 screen.putText(bounds_.x, bounds_.y + bounds_.h - 1, msg,
                                colors::Black, colors::Red, StyleBold);
             } else {
                 std::u32string msg =
-                    U" [Proces zakonczyl dzialanie (kod " + text::toUtf32(std::to_string(exitCode_)) + U")] ";
+                    U" [Process exited (code " + text::toUtf32(std::to_string(exitCode_)) + U")] ";
                 screen.putText(bounds_.x, bounds_.y + bounds_.h - 1, msg,
                                colors::Black, colors::Yellow, StyleBold);
             }
         }
     }
 
-    // Edit: wszystkie klawisze (łącznie ze strzałkami i Esc) trafiaja do powloki.
+    // Edit: all keys (including arrows and Esc) are forwarded to the shell.
     bool editable() const override { return true; }
-    // Brak stanu do zapisania — Ctrl+W zamyka bez potwierdzenia.
+    // Nothing to save — Ctrl+W closes without confirmation.
     bool dirty() const override { return false; }
     int minWidth() const override { return 24; }
     int minHeight() const override { return 4; }
 
-    // Kursor GUI podąża za kursorem powloki (swieci na wierszu wyjścia).
+    // GUI cursor follows the shell cursor (visible on the output row).
     std::optional<std::pair<int, int>> cursorPosition() const override {
-        if (!spawned_ || exited_ || !vt_.cursorVisible()) return std::nullopt;
-        return std::make_pair(bounds_.x + vt_.cursorX(), bounds_.y + vt_.cursorY());
+        if (!spawned_ || exited_ || !vt_.cursorVisible() || bounds_.w <= 0 || bounds_.h <= 0)
+            return std::nullopt;
+        return std::make_pair(bounds_.x + std::clamp(vt_.cursorX(), 0, bounds_.w - 1),
+                              bounds_.y + std::clamp(vt_.cursorY(), 0, bounds_.h - 1));
     }
+
+    bool wantsGuiCursor() const override { return spawned_ && !exited_ && vt_.cursorVisible(); }
 
 private:
     void spawn() {
@@ -731,16 +758,20 @@ private:
                 vt_.feed(buf, static_cast<std::size_t>(n));
                 continue;
             }
-            if (n == 0) return; // EAGAIN — brak danych
-            // Slave zamknięty — powloka konczy prace; WNOHANG, zeby nie zawiesic
-            // gdy potomek zyje bez slave (daemonizacja).
+            if (n == 0) return; // EAGAIN — no data
+            // Slave closed — shell has exited; use WNOHANG to avoid hanging
+            // if the child remains alive without the slave (daemonization).
             int st = 0;
-            const pid_t r = (pty_.pid() > 0) ? ::waitpid(pty_.pid(), &st, WNOHANG) : 0;
+            pid_t r = 0;
+            if (pty_.pid() > 0) {
+                do { r = ::waitpid(pty_.pid(), &st, WNOHANG); }
+                while (r < 0 && errno == EINTR);
+            }
             if (r == pty_.pid()) {
                 exitCode_ = WIFEXITED(st) ? WEXITSTATUS(st) : (WIFSIGNALED(st) ? 128 + WTERMSIG(st) : -1);
                 pty_.forgetChild();
             } else {
-                exitCode_ = -1; // kod nieznany — dtor sprzątnie proces
+                exitCode_ = -1; // unknown exit code — destructor will clean up the process
             }
             exited_ = true;
             if (pty_.fd() >= 0) ctx_.removeFdSource(pty_.fd());
@@ -758,7 +789,7 @@ private:
     std::string failMsg_;
 };
 
-// --- Aplikacja -----------------------------------------------------------------
+// --- Application -------------------------------------------------------------
 
 class TerminalApp final : public App {
 public:

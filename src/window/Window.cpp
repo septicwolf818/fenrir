@@ -9,8 +9,8 @@ namespace fenrir {
 
 Window::Window(std::string title, Rect bounds, std::unique_ptr<Widget> content, bool hasBorder)
     : title_(std::move(title)), bounds_(bounds), content_(std::move(content)), hasBorder_(hasBorder) {
-    // Okno nie moze powstac mniejsze, niz potrzebuje tresc (preferredBounds
-    // aplikacji bywaja przyciete na malych terminalach).
+    // A window cannot be created smaller than what the content needs (app
+    // preferredBounds are often clipped on small terminals).
     bounds_.w = std::max(bounds_.w, minWindowWidth());
     bounds_.h = std::max(bounds_.h, minWindowHeight());
     relayoutContent();
@@ -29,10 +29,20 @@ void Window::moveBy(int dx, int dy) {
 }
 
 void Window::resizeBy(int dw, int dh) {
-    // Podczas resize (F6) obowiazuje tez minimum wynikajace z tresci —
-    // okno nie da sie zeszpecic ponizej minWidth/minHeight widgetu.
+    // During resize (F6) the content-derived minimum also applies —
+    // the window cannot be shrunk below the widget's minWidth/minHeight.
     bounds_.w = std::max(minWindowWidth(), bounds_.w + dw);
     bounds_.h = std::max(minWindowHeight(), bounds_.h + dh);
+    relayoutContent();
+}
+
+void Window::constrainTo(const Rect& area) {
+    const int maxW = std::max(1, area.w);
+    const int maxH = std::max(1, area.h);
+    bounds_.w = std::clamp(bounds_.w, 1, maxW);
+    bounds_.h = std::clamp(bounds_.h, 1, maxH);
+    bounds_.x = std::clamp(bounds_.x, area.x, area.x + maxW - bounds_.w);
+    bounds_.y = std::clamp(bounds_.y, area.y, area.y + maxH - bounds_.h);
     relayoutContent();
 }
 
@@ -42,8 +52,8 @@ int Window::minWindowWidth() const {
 }
 
 int Window::minWindowHeight() const {
-    // relayoutContent(): contentH = h - 1 - (1 + menu) dla ramki,
-    // czyli h = contentH + 2 + (menu ? 1 : 0); bez ramki h = contentH.
+    // relayoutContent(): contentH = h - 1 - (1 + menu) with a frame,
+    // i.e. h = contentH + 2 + (menu ? 1 : 0); without a frame h = contentH.
     const int chrome = hasBorder_ ? 2 + (hasMenuTabs() ? 1 : 0) : 0;
     const int contentMin = content_ ? content_->minHeight() : 0;
     return std::max(kMinHeight, contentMin + chrome);
@@ -59,8 +69,8 @@ void Window::maximize(const Rect& area) {
         restoreBounds_ = bounds_;
         maximized_ = true;
     }
-    // Na makro-terminalach area bywa mniejsza od minimum tresci — jak
-    // resizeBy, przycinamy do minWindow*, zeby tresc nie byla obcinana.
+    // On macro-terminals area can be smaller than the content minimum — as in
+    // resizeBy, we clamp to minWindow* so the content is not cut off.
     bounds_ = Rect{area.x, area.y,
                    std::max(area.w, minWindowWidth()),
                    std::max(area.h, minWindowHeight())};
@@ -84,18 +94,18 @@ bool Window::onMenuRow(int x, int y) const {
 
 bool Window::onBorder(int x, int y) const {
     if (!hasBorder_) return false;
-    const int topRows = 1 + (hasMenuTabs() ? 1 : 0); // tytul (+ pasek menu) = gorа
+    const int topRows = 1 + (hasMenuTabs() ? 1 : 0); // title (+ menu bar) = top
     const int y0 = bounds_.y;
-    // Boki ponizej gory (do wiersza nad dolnym) lub caly dolny wiersz.
+    // Sides below the top (down to the row above the bottom) or the whole bottom row.
     const bool side = (x == bounds_.x || x == bounds_.x + bounds_.w - 1)
                    && y >= y0 + topRows && y < y0 + bounds_.h - 1;
     const bool bottom = y == y0 + bounds_.h - 1 && x >= bounds_.x && x <= bounds_.x + bounds_.w - 1;
     return side || bottom;
 }
 
-// Wspolna geometria paska menu — uzywana i w draw(), i w hit-testach,
-// zeby rysowanie i klikanie sie zgadzaly co do celi.
-// Pasek menu = WLASNY wiersz pod paskiem tytulu (kласyczne okno: tytul / menu / tresc).
+// Shared menu bar geometry - used both in draw() and in hit tests, so drawing
+// and clicking agree on the targets.
+// Menu bar = ITS OWN row under the title bar (classic window: title / menu / content).
 
 Window::MenuStrip Window::menuStrip() const {
     MenuStrip out;
@@ -103,7 +113,7 @@ Window::MenuStrip Window::menuStrip() const {
     const auto& tabs = content_->menuTabs();
     if (tabs.empty()) return out;
 
-    // Logiczne offsety kart (bez scrolla): " Etykieta " — 2 spacje + tekst.
+    // Logical tab offsets (no scroll): " Label " — 2 spaces + text.
     int total = 0;
     out.tabs.reserve(tabs.size());
     for (const auto& tab : tabs) {
@@ -112,17 +122,17 @@ Window::MenuStrip Window::menuStrip() const {
         total += labW;
     }
 
-    const int inner = bounds_.w - 2; // miedzy ramkami okna
+    const int inner = bounds_.w - 2; // between the window frames
     const int x0 = bounds_.x + 1;
     if (total <= inner) {
-        // Miesci sie — bez przyciskow i scrolla (jak wczesniej).
+        // Fits — no buttons and no scrolling (as before).
         out.tabAreaX0 = x0;
         out.tabAreaX1 = x0 + inner;
         return out;
     }
 
-    // Przepełnienie: '<' przy lewej krawedzi wnetrza, '>' przy prawej,
-    // karty miedzy nimi (przewijane poziomo).
+    // Overflow: '<' at the left edge of the interior, '>' at the right,
+    // tabs between them (scrolled horizontally).
     out.leftBtnX = x0;
     out.rightBtnX = x0 + inner - 1;
     out.tabAreaX0 = x0 + 1;
@@ -139,12 +149,12 @@ void Window::scrollMenuTabs(int dir) {
     const int vis = strip.tabAreaX1 - strip.tabAreaX0;
     int ns = strip.scroll;
     if (dir > 0) {
-        // Do przodu: do poczatku pierwszej karty wystajacej za prawa krawedz.
+        // Forward: to the start of the first tab sticking out past the right edge.
         for (const auto& [off, tw] : strip.tabs) {
             if (off + tw > strip.scroll + vis) { ns = off; break; }
         }
     } else {
-        // Do tylu: do poczatku ostatniej karty ukrytej za lewa krawedzia.
+        // Backward: to the start of the last tab hidden behind the left edge.
         int lastHidden = -1;
         for (const auto& [off, tw] : strip.tabs) {
             (void)tw;
@@ -177,7 +187,7 @@ int Window::menuTabIndexAt(int x, int y) const {
     const auto strip = menuStrip();
     for (std::size_t i = 0; i < strip.tabs.size(); ++i) {
         const int ax = strip.tabAreaX0 + strip.tabs[i].first - strip.scroll;
-        // Karta klikalna tylko w widocznym zakresie (komorki <> sa przyciskami).
+        // Tab clickable only within the visible range (the <> cells are buttons).
         if (x >= ax && x < ax + strip.tabs[i].second &&
             x >= strip.tabAreaX0 && x < strip.tabAreaX1)
             return static_cast<int>(i);
@@ -186,7 +196,7 @@ int Window::menuTabIndexAt(int x, int y) const {
 }
 
 TitleBarZone Window::titleBarZoneAt(int x, int y) const {
-    // Pasek menu (wlasny wiersz): przyciski <> przy przepełnieniu, karta = dropdown.
+    // Menu bar (its own row): <> buttons on overflow, tab = dropdown.
     if (onMenuRow(x, y)) {
         const auto strip = menuStrip();
         if (strip.leftBtnX >= 0 && x == strip.leftBtnX) return TitleBarZone::MenuScrollLeft;
@@ -204,7 +214,7 @@ TitleBarZone Window::titleBarZoneAt(int x, int y) const {
         }
         return TitleBarZone::Drag;
     }
-    // Krawedzie boczne/dolna (bez gory) = tryb Resize przy kliknieciu.
+    // Side/bottom edges (not the top) = Resize mode on click.
     if (onBorder(x, y)) return TitleBarZone::Border;
     return TitleBarZone::None;
 }
@@ -212,7 +222,7 @@ TitleBarZone Window::titleBarZoneAt(int x, int y) const {
 void Window::relayoutContent() {
     if (!content_) return;
     if (hasBorder_) {
-        // Tresc zaczyna sie POD paskiem tytulu (i pod paskiem menu, jesli jest).
+        // Content starts BELOW the title bar (and below the menu bar, if present).
         int contentY = bounds_.y + 1 + (hasMenuTabs() ? 1 : 0);
         int contentH = std::max(0, bounds_.y + bounds_.h - 1 - contentY);
         content_->setBounds(Rect{bounds_.x + 1, contentY, bounds_.w - 2, contentH});
@@ -227,10 +237,10 @@ KeyEventResult Window::handleKey(const KeyEvent& ev) {
 }
 
 void Window::draw(Screen& screen) {
-    // Paleta z motywu (theme::active):
-    //   Border: bialy (focused) / szary (unfocused)
-    //   Pasek tytulu: niebieski (titleBg/titleText)
-    //   Tlo tresci: windowBg/windowText
+    // Palette from the theme (theme::active):
+    //   Border: white (focused) / gray (unfocused)
+    //   Title bar: blue (titleBg/titleText)
+    //   Content background: windowBg/windowText
     const auto& t = theme::active;
     const Color border = focused_ ? t.border : t.borderInactive;
     const Color titleBg = t.titleBg;
@@ -239,9 +249,9 @@ void Window::draw(Screen& screen) {
     const Color contentFg = t.windowText;
 
     if (minimized_) {
-        // Zminimalizowane okno = tylko pasek tytulowy, bez tresci - widoczne
-        // jako "zakladka" na pulpicie (pelny widok jest tez w pasku stanu).
-        // toUtf32, bo std::u32string(bajty) daje mojibake dla liter spoza ASCII.
+        // A minimized window = title bar only, no content - visible as a
+        // "tab" on the desktop (the full view is also in the status bar).
+        // toUtf32, because std::u32string(bytes) mangles non-ASCII letters.
         std::u32string bar = U"[_] " + text::toUtf32(title_);
         screen.putText(bounds_.x, bounds_.y, bar, border, t.desktopBg);
         return;
@@ -258,23 +268,23 @@ void Window::draw(Screen& screen) {
         for (int x = x0; x < x0 + w; ++x)
             screen.set(x, y, Cell{U' ', border, t.desktopBg, 0});
 
-    screen.set(x0, y0, Cell{'+', border, t.desktopBg, 0});
-    screen.set(x0 + w - 1, y0, Cell{'+', border, t.desktopBg, 0});
-    screen.set(x0, y0 + h - 1, Cell{'+', border, t.desktopBg, 0});
-    screen.set(x0 + w - 1, y0 + h - 1, Cell{'+', border, t.desktopBg, 0});
+    screen.set(x0, y0, Cell{U'┌', border, t.desktopBg, 0});
+    screen.set(x0 + w - 1, y0, Cell{U'┐', border, t.desktopBg, 0});
+    screen.set(x0, y0 + h - 1, Cell{U'└', border, t.desktopBg, 0});
+    screen.set(x0 + w - 1, y0 + h - 1, Cell{U'┘', border, t.desktopBg, 0});
     for (int x = x0 + 1; x < x0 + w - 1; ++x) {
-        screen.set(x, y0, Cell{'-', border, t.desktopBg, 0});
-        screen.set(x, y0 + h - 1, Cell{'-', border, t.desktopBg, 0});
+        screen.set(x, y0, Cell{U'─', border, t.desktopBg, 0});
+        screen.set(x, y0 + h - 1, Cell{U'─', border, t.desktopBg, 0});
     }
     for (int y = y0 + 1; y < y0 + h - 1; ++y) {
-        screen.set(x0, y, Cell{'|', border, t.desktopBg, 0});
-        screen.set(x0 + w - 1, y, Cell{'|', border, t.desktopBg, 0});
+        screen.set(x0, y, Cell{U'│', border, t.desktopBg, 0});
+        screen.set(x0 + w - 1, y, Cell{U'│', border, t.desktopBg, 0});
     }
 
-    // Pasek tytulowy (wiersz 1): nazwa okna po lewej, przyciski [_] [ ] [X] po prawej.
-    // Win95: niebieskie tlo, biały tekst.
+    // Title bar (row 1): window name on the left, [-] [+] [X] controls on the right.
+    // Win95: blue background, white text.
     if (w >= kMinWidth) {
-        // Tło paska tytułu
+        // Title bar background
         for (int x = x0 + 1; x < x0 + w - 1; ++x)
             screen.set(x, y0, Cell{' ', titleFg, titleBg, StyleBold});
 
@@ -286,23 +296,23 @@ void Window::draw(Screen& screen) {
         if (static_cast<int>(titleText.size()) > maxTitle) titleText.resize(static_cast<std::size_t>(maxTitle));
         screen.putText(x0 + 1, y0, titleText, titleFg, titleBg, StyleBold);
 
-        // Przyciski [_] [ ] [X] - hit-testowane przez titleBarZoneAt().
-        screen.set(x0 + w - 4, y0, Cell{'_', titleFg, titleBg, StyleBold});
-        screen.set(x0 + w - 3, y0, Cell{static_cast<char32_t>(maximized_ ? U'/' : U' '), titleFg, titleBg, StyleBold});
-        screen.set(x0 + w - 2, y0, Cell{'x', t.closeText, t.closeBg, StyleBold});
+        // [-] [+]/[=] [X] controls — hit-tested by titleBarZoneAt().
+        screen.set(x0 + w - 4, y0, Cell{'-', titleFg, titleBg, StyleBold});
+        screen.set(x0 + w - 3, y0, Cell{static_cast<char32_t>(maximized_ ? U'=' : U'+'), titleFg, titleBg, StyleBold});
+        screen.set(x0 + w - 2, y0, Cell{'X', t.closeText, t.closeBg, StyleBold});
     }
 
-    // Pasek menu (wiersz 2, WLASNY — jak w systemach okienkowych: tytul / menu / tresc).
-    // Celowo inna barwa niz niebieski pasek tytulu — menuBg tlo, menuText tekst.
+    // Menu bar (row 2, ITS OWN - as in windowing systems: title / menu / content).
+    // Deliberately a different color than the blue title bar - menuBg background, menuText text.
     if (hasMenuTabs()) {
         int ym = y0 + 1;
         const Color menuBg = t.menuBg;
         const Color menuFg = t.menuText;
-        // puste miejsca menu: White/Gray — czytelne, kursor zawsze widoczny
+        // Empty menu cells: White/Gray - legible, cursor always visible
         for (int x = x0 + 1; x < x0 + w - 1; ++x)
             screen.set(x, ym, Cell{' ', menuFg, menuBg, StyleBold});
 
-        // Przy przepełnieniu karty sie przewijaja — <> na krawędziach wnetrza.
+        // On overflow the tabs scroll - <> at the interior edges.
         const auto strip = menuStrip();
         const auto& tabs = content_->menuTabs();
         for (std::size_t i = 0; i < strip.tabs.size(); ++i) {
@@ -310,7 +320,7 @@ void Window::draw(Screen& screen) {
             lab += tabs[i].first;
             lab += U' ';
             const int ax = strip.tabAreaX0 + strip.tabs[i].first - strip.scroll;
-            // Etykieta rysowana tylko w widocznym zakresie kart (przyciecie).
+            // Label drawn only within the visible tab range (clipping).
             for (std::size_t c = 0; c < lab.size(); ++c) {
                 const int cx = ax + static_cast<int>(c);
                 if (cx >= strip.tabAreaX0 && cx < strip.tabAreaX1)
@@ -323,7 +333,7 @@ void Window::draw(Screen& screen) {
         }
     }
 
-    // Tło tresci — Win95: Gray bg, White fg (spójne z pozostałymi powierzchniami Gray).
+    // Content background - Win95: Gray bg, White fg (consistent with the other Gray surfaces).
     for (int y = y0 + (hasMenuTabs() ? 2 : 1); y < y0 + h - 1; ++y)
         for (int x = x0 + 1; x < x0 + w - 1; ++x)
             screen.set(x, y, Cell{U' ', contentFg, contentBg, 0});

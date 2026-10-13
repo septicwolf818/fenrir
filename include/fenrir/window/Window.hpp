@@ -8,9 +8,9 @@
 
 namespace fenrir {
 
-// Trzy "przyciski" w prawym gornym rogu paska tytulu, w kolejnosci od lewej:
-// [_] minimalizuj, [ ] maksymalizuj/przywroc, [X] zamknij. Framework (Desktop)
-// hit-testuje wg tych stalych, zeby wiedziec co zrobic po Enter/Space pod kursorem.
+// Three "buttons" in the top-right corner of the title bar, left to right:
+// [_] minimize, [ ] maximize/restore, [X] close. The framework (Desktop)
+// hit-tests them via these constants to know what to do on Enter/Space under the cursor.
 enum class TitleBarZone { None, Drag, MinimizeButton, MaximizeButton, CloseButton, MenuTab,
                           MenuScrollLeft, MenuScrollRight, Border };
 
@@ -25,6 +25,9 @@ public:
     void moveBy(int dx, int dy);
     void resizeBy(int dw, int dh);
     void moveTo(int x, int y);
+    // Keep the window inside the usable desktop. If the terminal is smaller
+    // than the content minimum, clip the window instead of letting it overflow.
+    void constrainTo(const Rect& area);
 
     bool focused() const { return focused_; }
     void setFocused(bool f);
@@ -36,39 +39,39 @@ public:
     void setMinimized(bool m) { minimized_ = m; }
 
     bool maximized() const { return maximized_; }
-    // area = obszar pulpitu (pod paskiem menu, nad paskiem stanu) do wypelnienia.
+    // area = desktop area (below the menu bar, above the status bar) to fill.
     void maximize(const Rect& area);
-    void restore(); // cofa maximize() do poprzednich granic
+    void restore(); // undoes maximize() back to the previous bounds
 
     bool contains(int x, int y) const { return visibleBounds().contains(x, y); }
     Rect visibleBounds() const { return minimized_ ? Rect{bounds_.x, bounds_.y, bounds_.w, 1} : bounds_; }
     bool onTitleBar(int x, int y) const;
-    // Wiersz paska menu (wlasny wiersz pod paskiem tytulu, jak w systemach okienkowych).
+    // Menu bar row (its own row under the title bar, as in windowing systems).
     bool onMenuRow(int x, int y) const;
-    // Krawedzie okna: boki i dol — BEZ gory (tytul/menu maja wlasne strefy).
-    // Klik wirtualnym kursorem na krawedzi otwiera tryb Resize.
+    // Window edges: sides and bottom - NOT the top (title/menu have their own zones).
+    // A virtual-cursor click on an edge enters Resize mode.
     bool onBorder(int x, int y) const;
-    // Ktora strefa paska tytulu jest pod (x,y) - do obslugi kursora GUI.
+    // Which title bar zone is under (x,y) - for GUI cursor handling.
     TitleBarZone titleBarZoneAt(int x, int y) const;
-    // Ktorej karcie menu odpowiada pozycja (x,y) paska tytulu; -1 = zadnej.
+    // Which menu tab position (x,y) in the title bar maps to; -1 = none.
     int menuTabIndexAt(int x, int y) const;
-    // Czy pasek tytulu tego okna zawiera karty menu (do szybkiego sprawdzenia).
+    // Whether this window's title bar has menu tabs (quick check).
     bool hasMenuTabs() const { return content_ && content_->menuTabs().size() > 0; }
-    // Przesuwa pasek menu o jedna karte (przyciski <> przy przepełnieniu).
+    // Scrolls the menu bar by one tab (<> buttons on overflow).
     void scrollMenuTabs(int dir);
-    // Ustawia scroll tak, zeby karta byla widoczna (otwieranie dropdownu).
+    // Scrolls so the tab is visible (opening a dropdown).
     void ensureMenuTabVisible(int tab);
-    // Ekranowa kolumna karty menu — do umieszczenia dropdownu (Desktop).
+    // Screen column of a menu tab - for placing the dropdown (Desktop).
     int menuTabScreenX(int tab) const;
 
     Widget* content() { return content_.get(); }
     const Widget* content() const { return content_.get(); }
 
     void draw(Screen& screen);
-    // Deleguje klawisz do widgetu-zawartosci; zwraca KeyEventResult.
+    // Delegates the key to the content widget; returns a KeyEventResult.
     KeyEventResult handleKey(const KeyEvent& ev);
 
-    // Przelicza granice widgetu-zawartosci wzgledem wnetrza okna (pod ramka/tytulem).
+    // Recomputes the content widget's bounds relative to the window interior (under the frame/title).
     void relayoutContent();
 
 private:
@@ -81,27 +84,27 @@ private:
     int zOrder_ = 0;
     bool minimized_ = false;
     bool maximized_ = false;
-    int menuScrollX_ = 0; // przewijanie paska menu przy przepełnieniu (kolumny)
+    int menuScrollX_ = 0; // menu bar scrolling on overflow (columns)
 
-    // Pasek menu z obsluga przewijania: gdy karty nie mieszcza sie w wierszu,
-    // rysowane sa przyciski <> na krawędziach, a karty przewija menuScrollX_.
+    // Menu bar with scrolling: when tabs don't fit in the row,
+    // <> buttons are drawn at the edges, and tabs scroll via menuScrollX_.
     struct MenuStrip {
-        std::vector<std::pair<int,int>> tabs; // logiczne {offset od tabAreaX0, szerokosc}
-        int leftBtnX = -1; // kolumna '<' na ekranie; -1 = brak przyciskow
-        int rightBtnX = -1;  // kolumna '>'
-        int tabAreaX0 = 0;   // widoczny zakres kart (miedzy przyciskami)
+        std::vector<std::pair<int,int>> tabs; // logical {offset from tabAreaX0, width}
+        int leftBtnX = -1; // screen column of '<'; -1 = no buttons
+        int rightBtnX = -1;  // column of '>'
+        int tabAreaX0 = 0;   // visible tab range (between the buttons)
         int tabAreaX1 = 0;
-        int scroll = 0;      // sklamlowany scroll (kolumny)
+        int scroll = 0;      // clamped scroll (columns)
         int maxScroll = 0;
     };
     MenuStrip menuStrip() const;
 
     static constexpr int kMinWidth = 12;
     static constexpr int kMinHeight = 4;
-    static constexpr int kButtonsWidth = 6; // " _  X" ~ szerokosc rezerwowana pod przyciski
+    static constexpr int kButtonsWidth = 6; // " _  X" ~ width reserved for the buttons
 
-    // Minimalny rozmiar OKNA wynikajacy z minimow tresci (minWidth/minHeight
-    // widgetu + ramka/pasek tytulu + ewentualny pasek menu) — patrz Window.cpp.
+    // Minimum window SIZE derived from the content minimums (the widget's
+    // minWidth/minHeight + frame/title bar + optional menu bar) - see Window.cpp.
     int minWindowWidth() const;
     int minWindowHeight() const;
 };

@@ -8,13 +8,13 @@
 
 namespace fenrir {
 
-// Wyrownanie tekstu wewnetrznej szerokosci Labela.
+// Text alignment within the Label's width.
 enum class LabelAlign { Left, Center, Right };
 
-// Tekst (statyczny lub zmieniany w locie przez setText()). Tlo wypelnia
-// caly prostokat Labela; tekst jest wyrownany wg align_ (domyślnie Left)
-// i przyciety do szerokosci (dlugie teksty nie wychodza poza widget).
-// Kolory: domyslne z motywu, nadpisywalne konstruktorem/setterami.
+// Text (static or changed on the fly via setText()). The background fills the
+// whole Label rectangle; the text is aligned per align_ (default Left) and
+// clipped to the width (long text does not spill past the widget).
+// Colors: theme defaults, overridable via the constructor/setters.
 class Label : public Widget {
 public:
     explicit Label(std::u32string text,

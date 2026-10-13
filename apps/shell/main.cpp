@@ -1,8 +1,8 @@
-// "den" (wilcza nora) - shell Fenrira. Jedyna odpowiedzialnosc tego pliku:
-// zarejestrowac dostepne aplikacje w Desktop i uruchomic petle glowna.
-// Zeby dodac wlasna aplikacje: napisz klase implementujaca fenrir::App
-// (patrz apps/texteditor/TextEditorApp.hpp i apps/filemanager/FileManagerApp.hpp
-// jako przyklady) i dopisz ponizej jedna linijke registerApp(...).
+// "den" (wolf's den) — Fenrir's shell. This file is only responsible for
+// registering available apps with the Desktop and starting the main loop.
+// To add your own app, write a class implementing fenrir::App
+// (see apps/texteditor/TextEditorApp.hpp and apps/filemanager/FileManagerApp.hpp
+// for examples) and add one registerApp(...) line below.
 
 #include <cstdio>
 
@@ -18,9 +18,9 @@
 int main() {
     try {
         fenrir::Desktop desktop;
-        // Nazwa pulpitu: ustawienia z ~/.config/fenrir/settings.ini (ladowane
-        // w konstruktorze Desktop). Zapis domyslny — fallback gdyby plik nie
-        // istnial lub nazwa byla pusta.
+        // Desktop name: settings from ~/.config/fenrir/settings.ini (loaded
+        // by the Desktop constructor). Default value, used if the file does not
+        // exist or the name is empty.
         desktop.setDesktopName("Fenrir");
 
         desktop.apps().registerApp(std::make_unique<fenrir::apps::TextEditorApp>());
@@ -30,11 +30,11 @@ int main() {
         desktop.apps().registerApp(std::make_unique<fenrir::apps::CalendarApp>());
         desktop.apps().registerApp(std::make_unique<fenrir::apps::PaintApp>());
         desktop.apps().registerApp(std::make_unique<fenrir::apps::TerminalApp>());
-        // Kolejne aplikacje dopisujesz tutaj.
+        // Add more apps here.
 
         return desktop.run();
     } catch (const std::exception& e) {
-        std::fprintf(stderr, "Blad: %s\n", e.what());
+        std::fprintf(stderr, "Error: %s\n", e.what());
         return 1;
     }
 }

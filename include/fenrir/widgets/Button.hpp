@@ -9,9 +9,9 @@
 
 namespace fenrir {
 
-// Przycisk. Kolory z motywu (buttonBg/buttonText, na aktywnym buttonTextHot).
-// Obsluguje Enter/Space wprost i przez wirtualny activate() — kontenery (Panel)
-// aktywuja go bez wiedzy o typie.
+// Button. Colors from the theme (buttonBg/buttonText, buttonTextHot when active).
+// Handles Enter/Space directly and through the virtual activate() — containers (Panel)
+// activate it without knowing its type.
 class Button : public Widget {
 public:
     explicit Button(std::u32string label) : label_(std::move(label)) {}
@@ -29,7 +29,7 @@ public:
 
         screen.fillRect(bounds_, Cell{U' ', fg, bg, 0});
 
-        // Etykieta przycieta do szerokosci — dlugie teksty nie wychodza poza prostokat.
+        // Label clipped to the width — long text does not spill past the rectangle.
         std::u32string label = text::clip(label_, std::max(0, bounds_.w - 4));
         std::u32string text = U"[ " + label + U" ]";
         if (static_cast<int>(text.size()) > bounds_.w) text = text::clip(text, bounds_.w);

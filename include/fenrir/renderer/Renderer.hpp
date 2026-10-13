@@ -6,15 +6,15 @@
 
 namespace fenrir {
 
-// Renderer trzyma własną kopię ostatnio wysłanej zawartości ekranu
-// ("front buffer") i przy każdym present() wysyła do terminala TYLKO
-// komórki, które się zmieniły od poprzedniej klatki.
+// Renderer keeps its own copy of the last screen content sent
+// ("front buffer") and on every present() sends to the terminal ONLY
+// the cells that changed since the previous frame.
 class Renderer {
 public:
     explicit Renderer(Terminal& terminal);
 
     void present(const Screen& screen);
-    void forceFullRedraw(); // np. po zmianie rozmiaru terminala
+    void forceFullRedraw(); // e.g. after a terminal resize
 
 private:
     Terminal& terminal_;

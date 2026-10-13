@@ -2,21 +2,21 @@
 
 namespace fenrir::theme {
 
-// Katalog motywow. Kazdy motyw to pelna paleta ról (Theme) + stabilne id
-// (klucz w ustawieniach) + nazwa wyswietlana. Kolejnosc = kolejnosc cykla
-// w aplikacji Ustawienia (Enter na wierszu "Motyw").
+// Theme catalog. Each theme is a full palette of roles (Theme) + a stable id
+// (settings key) + a display name. Order = cycling order in the
+// Settings application (Enter on the "Theme" row).
 //
-// Wszystkie kolory SA z palety ANSI 16 (Linux TTY, zero truecolor) —
-// renderer wysyla indeks bezposrednio jako SGR.
+// All colors ARE from the 16-color ANSI palette (Linux TTY, no truecolor) —
+// the renderer sends the index directly as SGR.
 
 const std::vector<NamedTheme>& catalog() {
     static const std::vector<NamedTheme> cats = {
-        // Klasyczny — domyslny, szary pulpit i niebieskie paski (jak stare
-        // okienkowe systemy, na ktorych wzorowal sie projekt od poczatku).
-        {"classic", "Klasyczny", Theme{}},
+        // Classic — default, gray desktop and blue bars (like the old
+        // windowed systems the project was modeled on from the start).
+        {"classic", "Classic", Theme{}},
 
-        // Północ — ciemny, granatowo-cyjanowy "nocny" motyw.
-        {"midnight", "Północ", Theme{
+        // Midnight — dark, navy-cyan "night" theme.
+        {"midnight", "Midnight", Theme{
             .desktopBg = colors::Black, .desktopText = colors::BrightCyan,
             .menuBarBg = colors::Blue, .menuBarText = colors::BrightWhite,
             .taskbarBg = colors::Black, .taskbarText = colors::Cyan,
@@ -28,7 +28,7 @@ const std::vector<NamedTheme>& catalog() {
             .menuBg = colors::Blue, .menuText = colors::BrightWhite,
             .accentBg = colors::Blue, .accentText = colors::BrightYellow,
             .surfaceBg = colors::Black, .surfaceText = colors::BrightCyan,
-            .dimText = colors::Cyan, // przyciemniony Cyan czytelny na czerni
+            .dimText = colors::Cyan, // dimmed Cyan, readable on black
             .headerBg = colors::Blue, .headerText = colors::BrightYellow,
             .buttonBg = colors::Blue, .buttonText = colors::Cyan,
             .buttonTextHot = colors::BrightYellow,
@@ -38,8 +38,8 @@ const std::vector<NamedTheme>& catalog() {
             .errorText = colors::BrightRed,
         }},
 
-        // Bursztyn — monochromatyczny motyw "starego monitora bursztynowego".
-        {"amber", "Bursztyn", Theme{
+        // Amber — monochrome "old amber monitor" theme.
+        {"amber", "Amber", Theme{
             .desktopBg = colors::Black, .desktopText = colors::Yellow,
             .menuBarBg = colors::Black, .menuBarText = colors::BrightYellow,
             .taskbarBg = colors::Black, .taskbarText = colors::Yellow,
@@ -61,8 +61,8 @@ const std::vector<NamedTheme>& catalog() {
             .errorText = colors::BrightRed,
         }},
 
-        // Leśny — zielony terminal, czarne tlo + zielone ramki i naglowki.
-        {"forest", "Leśny", Theme{
+        // Forest — green terminal, black background + green frames and headers.
+        {"forest", "Forest", Theme{
             .desktopBg = colors::Black, .desktopText = colors::Green,
             .menuBarBg = colors::Green, .menuBarText = colors::Black,
             .taskbarBg = colors::Black, .taskbarText = colors::Green,
@@ -84,8 +84,8 @@ const std::vector<NamedTheme>& catalog() {
             .errorText = colors::BrightRed,
         }},
 
-        // Wysoki kontrast — czern/biel + zolte akcenty (czytelnosc przede wszystkim).
-        {"contrast", "Wysoki kontrast", Theme{
+        // High contrast — black/white + yellow accents (readability first).
+        {"contrast", "High Contrast", Theme{
             .desktopBg = colors::Black, .desktopText = colors::BrightWhite,
             .menuBarBg = colors::Black, .menuBarText = colors::BrightYellow,
             .taskbarBg = colors::Black, .taskbarText = colors::BrightWhite,

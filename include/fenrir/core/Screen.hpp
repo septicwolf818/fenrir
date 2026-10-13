@@ -6,10 +6,10 @@
 
 namespace fenrir {
 
-// Screen to "back buffer": co klatkę czyścimy go i wszystko (Windowy,
-// Widgety, Cursor) rysuje się TU, komórka po komórce. Renderer dopiero
-// potem porównuje to z tym, co ostatnio wysłał do terminala (jego
-// prywatny "front buffer") i wysyła tylko różnice.
+// Screen is the "back buffer": we clear it every frame and everything (Windows,
+// Widgets, Cursor) draws HERE, cell by cell. The Renderer then
+// compares it against what it last sent to the terminal (its
+// private "front buffer") and sends only the differences.
 class Screen {
 public:
     Screen(int width, int height);
@@ -22,13 +22,13 @@ public:
     void set(int x, int y, const Cell& cell);
     const Cell& at(int x, int y) const;
 
-    // Wypelnia prostokat podana komorka (przycity do ekranu).
+    // Fills a rectangle with the given cell (clipped to the screen).
     void fillRect(const Rect& r, const Cell& cell);
 
-    // Wygodne rysowanie tekstu jednym wywołaniem; przycina do granic ekranu.
+    // Convenient single-call text drawing; clipped to the screen bounds.
     void putText(int x, int y, std::u32string_view text, Color fg, Color bg, uint8_t style = 0);
 
-    // Ramka ASCII o podanych znakach (rog / poziom / pion).
+    // ASCII frame with the given characters (corner / horizontal / vertical).
     void drawBorder(const Rect& r, char32_t corner, char32_t hEdge, char32_t vEdge, Color fg, Color bg);
 
     const std::vector<Cell>& cells() const { return cells_; }

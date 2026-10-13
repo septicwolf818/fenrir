@@ -33,13 +33,13 @@ std::pair<char32_t, int> KeyParser::decodeUtf8(std::string_view data) {
         char32_t cp = ((b0 & 0x07) << 18) | (c1 << 12) | (c2 << 6) | c3;
         return {cp, 4};
     }
-    return {b0, 1}; // niepoprawny UTF-8 - traktujemy bajt jak jest
+    return {b0, 1}; // invalid UTF-8 - treat the byte as-is
 }
 
 KeyEvent KeyParser::parseEscapeSequence(std::string_view seq) const {
-    // seq nie zawiera wiodącego ESC (0x1b) - jest już zdjęty przez feed().
+    // seq does not include the leading ESC (0x1b) - it was already stripped by feed().
     KeyEvent ev;
-    if (seq.empty()) { ev.key = Key::Escape; return ev; } // sam ESC
+    if (seq.empty()) { ev.key = Key::Escape; return ev; } // bare ESC
 
     if (seq[0] == '[' || seq[0] == 'O') {
         if (seq.size() >= 2) {
@@ -57,9 +57,9 @@ KeyEvent KeyParser::parseEscapeSequence(std::string_view seq) const {
                 case 'S': ev.key = Key::F4; return ev;
             }
         }
-        // CSI <ps>;<mods>(A|B|C|D|H|F) — zmodyfikowane strzalki, np. ESC[1;5A
-        // = Ctrl+Up (xterm i wiekszosc emulatorow wysyla to bez potrzeby
-        // modifyOtherKeys). Uzywane m.in. do Ctrl+Up/Down = rok w kalendarzu.
+        // CSI <ps>;<mods>(A|B|C|D|H|F) — modified arrows, e.g. ESC[1;5A
+        // = Ctrl+Up (xterm and most emulators send this without needing
+        // modifyOtherKeys). Used among others for Ctrl+Up/Down = year in the calendar.
         if (seq.size() >= 4) {
             const char last = seq.back();
             if (last == 'A' || last == 'B' || last == 'C' || last == 'D' ||
@@ -91,25 +91,25 @@ KeyEvent KeyParser::parseEscapeSequence(std::string_view seq) const {
                 }
             }
         }
-        // sekwencje CSI zakończone '~', np. ESC[3~ (Delete), ESC[5~ (PgUp)
+        // CSI sequences ending in '~', e.g. ESC[3~ (Delete), ESC[5~ (PgUp)
         if (seq.back() == '~') {
             std::string_view num = seq.substr(1, seq.size() - 2);
-            // Parsujemy cyfry recznie (string_view), bez <string> — na
-            // libstdc++ nie wolno liczyc na transisywne dosylki naglowkow.
+            // We parse digits manually (string_view), without <string> — on
+            // libstdc++ we must not rely on transitive header includes.
             auto digits = [](std::string_view s) -> int {
                 if (s.empty()) return -1;
                 int v = 0;
                 for (char c : s) {
                     if (c < '0' || c > '9') return -1;
                     v = v * 10 + (c - '0');
-                    if (v > 99) return -1; // sekwencje CSI sa krotkie
+                    if (v > 99) return -1; // CSI sequences are short
                 }
                 return v;
             };
-            // modifyOtherKeys / CSI-u: ESC[27;<mods>;<code>~ (np. 27;5;9~ =
-            // Ctrl+Tab). Dostarczaja to emulatory i keymapy obslugujace
-            // modyfikatory; na golym TTY (Linux VC) taka sekwencja po prostu
-            // sie nie pojawia i ta sciezka jest martwa — ale kosztuje zero.
+            // modifyOtherKeys / CSI-u: ESC[27;<mods>;<code>~ (e.g. 27;5;9~ =
+            // Ctrl+Tab). Supplied by emulators and keymaps that support
+            // modifiers; on a bare TTY (Linux VC) such a sequence simply
+            // never appears and this path is dead — but it costs zero.
             if (num.size() > 3 && num.substr(0, 2) == "27") {
                 auto s1 = num.find(';');
                 auto s2 = (s1 == std::string_view::npos) ? std::string_view::npos
@@ -130,10 +130,10 @@ KeyEvent KeyParser::parseEscapeSequence(std::string_view seq) const {
                     }
                 }
             }
-            // Zmodyfikowane klawisze '~': ESC[5;5~ = Ctrl+PgUp, ESC[6;5~ =
-            // Ctrl+PgDn (xterm i wiekszosc emulatorow dosyla tak PgUp/PgDn/
-            // Home/End z modyfikatorem). Bez modyfikatora num jest czysto
-            // numeryczny i ten blok sie nie wlacza.
+            // Modified '~' keys: ESC[5;5~ = Ctrl+PgUp, ESC[6;5~ =
+            // Ctrl+PgDn (xterm and most emulators likewise send PgUp/PgDn/
+            // Home/End with a modifier). Without a modifier num is purely
+            // numeric and this block does not engage.
             std::string_view code = num;
             const auto msemi = num.find(';');
             if (msemi != std::string_view::npos) {
@@ -143,7 +143,7 @@ KeyEvent KeyParser::parseEscapeSequence(std::string_view seq) const {
                     ev.alt = (mods & 2) != 0;
                     code = num.substr(0, msemi);
                 } else {
-                    return ev; // nieznana kombinacja — nie udajemy znanych klawiszy
+                    return ev; // unknown combination — don't fake known keys
                 }
             }
             if (code == "1" || code == "7") ev.key = Key::Home;
@@ -176,19 +176,19 @@ std::vector<KeyEvent> KeyParser::feed(const char* data, std::size_t len) {
     while (i < len) {
         unsigned char b = static_cast<unsigned char>(data[i]);
 
-        if (b == 0x1b) { // ESC - może być samym Escape albo początkiem sekwencji CSI/SS3
-            // Konsola Linux: Alt + klawisz wielobajtowy = ESC prefiksowany
-            // przed CAŁĄ sekwencją (np. Alt+PgUp = 1b 1b 5b 35 7e, bo Prior
-            // i tak zaczyna się od ESC). Zjadamy powtorzone ESC i pamietamy
-            // alt dla zdarzenia z sekwencji ponizej.
+        if (b == 0x1b) { // ESC - may be a lone Escape or the start of a CSI/SS3 sequence
+            // Linux console: Alt + multi-byte key = ESC prefixed
+            // before the WHOLE sequence (e.g. Alt+PgUp = 1b 1b 5b 35 7e, since Prior
+            // itself starts with ESC). We swallow the repeated ESC and remember
+            // alt for the event from the sequence below.
             bool altPref = false;
             while (i + 1 < len && data[i + 1] == 0x1b) { altPref = true; ++i; }
 
-            // Konsola Linux (TERM=linux, gola konsola bez X) wysyła F1-F5 jako
-            // ESC [ [ <litera>, czyli z DODATKOWYM '[' i bez cyfr/';' w środku.
-            // To nie mieści się w ogólnym schemacie "cyfry/';' aż do bajtu
-            // koncowego" ponizej (ten drugi '[' zostalby błędnie uznany za
-            // bajt koncowy), więc obsługujemy to jako specjalny przypadek.
+            // The Linux console (TERM=linux, bare console without X) sends F1-F5 as
+            // ESC [ [ <letter>, i.e. with an EXTRA '[' and no digits/';' inside.
+            // This does not fit the general "digits/';' up to the final byte"
+            // scheme below (the second '[' would be wrongly taken as the
+            // final byte), so we handle it as a special case.
             if (i + 3 < len && data[i + 1] == '[' && data[i + 2] == '[') {
                 char c = data[i + 3];
                 KeyEvent ev;
@@ -212,7 +212,7 @@ std::vector<KeyEvent> KeyParser::feed(const char* data, std::size_t len) {
                     unsigned char c = static_cast<unsigned char>(data[j]);
                     ++j;
                     if ((c >= '0' && c <= '9') || c == ';') continue;
-                    break; // c to bajt końcowy sekwencji (litera albo '~')
+                    break; // c is the sequence's final byte (letter or '~')
                 }
                 std::string_view seq(data + i + 1, j - (i + 1));
                 KeyEvent ev = parseEscapeSequence(seq);
@@ -220,10 +220,10 @@ std::vector<KeyEvent> KeyParser::feed(const char* data, std::size_t len) {
                 out.push_back(ev);
                 i = j;
             } else if (i + 1 < len) {
-                // ESC + znak = Alt+znak. Konsola Linux (VC_META domyslnie
-                // wl.) wysyla wlasnie tak Alt+X — np. Alt+Tab = ESC 0x09.
-                // (Po zjedzeniu prefiksow z gory data[i+1] juz nigdy nie jest
-                // ESC, wiec ten oddzial nie lapsuje podwojnych ESC.)
+                // ESC + char = Alt+char. The Linux console (VC_META on by
+                // default) sends Alt+X exactly this way - e.g. Alt+Tab = ESC 0x09.
+                // (After swallowing the prefixes above data[i+1] is never
+                // ESC anymore, so this branch never swallows doubled ESCs.)
                 unsigned char b2 = static_cast<unsigned char>(data[i + 1]);
                 KeyEvent ev;
                 ev.alt = true;
@@ -237,7 +237,7 @@ std::vector<KeyEvent> KeyParser::feed(const char* data, std::size_t len) {
                 } else if (b2 < 0x20) {
                     ev.key = Key::Char;
                     ev.ctrl = true;
-                    ev.character = static_cast<char32_t>(b2 + 0x60); // Alt+Ctrl+litera
+                    ev.character = static_cast<char32_t>(b2 + 0x60); // Alt+Ctrl+letter
                 } else {
                     auto [cp, consumed] = decodeUtf8(std::string_view(data + i + 1, len - (i + 1)));
                     if (consumed <= 0) consumed = 1;
@@ -249,7 +249,7 @@ std::vector<KeyEvent> KeyParser::feed(const char* data, std::size_t len) {
                 i += adv;
             } else {
                 KeyEvent ev{Key::Escape, 0, false};
-                if (altPref) ev.alt = true; // np. sam ESC ESC = alt+Escape
+                if (altPref) ev.alt = true; // e.g. bare ESC ESC = alt+Escape
                 out.push_back(ev);
                 ++i;
             }
@@ -260,11 +260,11 @@ std::vector<KeyEvent> KeyParser::feed(const char* data, std::size_t len) {
         if (b == '\t') { out.push_back(KeyEvent{Key::Tab, 0, false}); ++i; continue; }
         if (b == 0x7f || b == 0x08) { out.push_back(KeyEvent{Key::Backspace, 0, false}); ++i; continue; }
 
-        if (b < 0x20) { // pozostałe znaki kontrolne -> Ctrl+litera
+        if (b < 0x20) { // other control characters -> Ctrl+letter
             KeyEvent ev;
             ev.key = Key::Char;
             ev.ctrl = true;
-            ev.character = static_cast<char32_t>(b + 0x60); // Ctrl+A(1)->'a' itd.
+            ev.character = static_cast<char32_t>(b + 0x60); // Ctrl+A(1)->'a' etc.
             out.push_back(ev);
             ++i;
             continue;

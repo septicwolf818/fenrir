@@ -13,14 +13,14 @@
 
 namespace fenrir::apps {
 
-// Widok kalkulatora. Uzywa TYLKO frameworkowych widgetow:
-//  - Label na display (kolory z motywu: pole tekstowe)
-//  - Panel jako kontener 20 Buttonow (Panel NAWIGUJE i HIGHLIGHT-uje dzieci)
+// Calculator view. Uses ONLY framework widgets:
+//  - Label for the display (colors from the theme: text field)
+//  - Panel as the container for the 20 buttons (Panel NAVIGATES and HIGHLIGHTS the children)
 //
-// Panel obsluguje: strzalki nawigacji, Enter/Space aktywacja, podswietlanie.
-// CalculatorView tylko: obsluga cyfr/operatorow z klawiatury (bezposrednio na silnik).
-// Ctrl+C = Clear jest zarejestrowany jako SKROT w CalculatorApp (Desktop
-// wywoluje skróty przed widgetem — handleKey nie powtarza tej obslugi).
+// Panel handles: arrow-key navigation, Enter/Space activation, highlighting.
+// CalculatorView only: keyboard digit/operator handling (straight onto the engine).
+// Ctrl+C = Clear is registered as a SHORTCUT in CalculatorApp (Desktop runs the
+// shortcuts before the widget — handleKey does not repeat that handling).
 
 class CalculatorView : public Widget {
 public:
@@ -32,7 +32,7 @@ public:
     }
 
     void draw(Screen& screen) override {
-        // Kolory z bieżącego motywu — theme::apply podmienia active w locie.
+        // Colors from the current theme — theme::apply swaps active on the fly.
         display_->setColors(theme::active.fieldText, theme::active.fieldBg);
         Rect displayRect{bounds_.x, bounds_.y, bounds_.w, std::max(0, bounds_.h / 4)};
         display_->setBounds(displayRect);
@@ -41,25 +41,25 @@ public:
         Rect panelRect{bounds_.x, displayRect.y + displayRect.h, bounds_.w,
                        std::max(0, bounds_.h - displayRect.h)};
         panel_.setBounds(panelRect);
-        panel_.draw(screen); // Panel sam obsluguje relayout + highlight dzieci
+        panel_.draw(screen); // Panel handles relayout + child highlighting itself
     }
 
     KeyEventResult handleKey(const KeyEvent& ev) override {
-        // Direct char input -> silnik licznikowy (nie nawigacja przyciskow).
-        if (ev.key == Key::Char && !ev.ctrl) {
+        // Direct char input -> the engine (no button navigation).
+        if (ev.key == Key::Char && !ev.ctrl && !ev.alt) {
             if (handleDirectChar(ev.character)) return KeyEventResult::Consumed;
         }
 
-        // Pozostale klawisze -> panel obsluguje nawigacje (strzalki, Enter).
+        // Remaining keys -> the panel handles navigation (arrows, Enter).
         return panel_.handleKey(ev);
     }
 
-    // resetEngine() wywolywana z menu aplikacji (setMenuTabs) — musi byc publiczna.
+    // resetEngine() is called from the app menu (setMenuTabs) — must be public.
     void resetEngine() { engine_.clear(); refreshDisplay(); }
 
-    // Minimum: display (h/4 >= 2) + 5 wierszy przyciskow; kolumna musi zmiescic
-    // "[ 7 ]" = 5 komorek -> 4*5 + 2*pad(1) = 22.
-    int minWidth() const override { return 22; }
+    // Minimum: each column fits the widest label, "[ x^2 ]" (7 cells),
+    // plus the panel's two padding cells.
+    int minWidth() const override { return 30; }
     int minHeight() const override { return 8; }
 
 private:
@@ -96,9 +96,9 @@ private:
             U"0",   U".",   U"x^2", U"=",
         };
 
-        // Naturalna siatka 4-kolumnowa — domyślne span=1 dla każdego przycisku.
-        // Bez wymuszania szerokich spanów, które łamią ograniczenia Panel (np. "0"
-        // na 2 kolumny = wiersz 5 ma 5 slotów > 4 → "=" odpada do wiersza 6).
+        // Natural 4-column grid — default span=1 for every button.
+        // Without forcing wide spans, which break Panel constraints (e.g. "0"
+        // across 2 columns = row 5 has 5 slots > 4 → "=" drops to row 6).
 
         for (int i = 0; i < 20; ++i) {
             auto b = std::make_unique<Button>(spec[i]);

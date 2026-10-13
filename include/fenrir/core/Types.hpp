@@ -3,9 +3,9 @@
 
 namespace fenrir {
 
-// Kolor = indeks 0..15 w palecie ANSI. Linux TTY: wylacznie 16 kolorow,
-// zaden truecolor (38;2;R;G;B) — renderer wysyla bezposrednio kod SGR.
-// Funkcje przypisujace nazwe do numeru (30-37/90-97 itd.) sa w Rendererze.
+// Color = index 0..15 in the ANSI palette. Linux TTY: 16 colors only,
+// no truecolor (38;2;R;G;B) — the renderer sends the SGR code directly.
+// Functions mapping names to numbers (30-37/90-97 etc.) live in the Renderer.
 struct Color {
     uint8_t index = 0;
     constexpr bool operator==(const Color& o) const { return index == o.index; }
@@ -21,7 +21,7 @@ inline constexpr Color Yellow{3};
 inline constexpr Color Blue{4};
 inline constexpr Color Magenta{5};
 inline constexpr Color Cyan{6};
-inline constexpr Color White{7}; // "off-white" (jasnoszary)
+inline constexpr Color White{7}; // "off-white" (light gray)
 // ANSI 8-15 (bright)
 inline constexpr Color Gray{8};
 inline constexpr Color BrightRed{9};

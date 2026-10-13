@@ -18,25 +18,25 @@
 
 namespace fenrir::apps {
 
-// Malowanka — rysowanie znakami po siatce (jak klasyczne Painty w terminalu).
-// Kursor malowania porusza sie strzalkami; kazdy znak maluje sie w kursorze
-// zapamientywanym jako pedzel (Spacja powtarza pedzel, Del/gumka kasuje).
-// Ctrl+Z cofa (stos operacji), Ctrl+S/O/N zapis/wczytanie/nowy.
+// Paint — character drawing on a grid (like classic terminal Paint apps).
+// The paint cursor moves with the arrow keys; each character is drawn at the
+// cursor position and remembered as the brush (Space repeats the brush, Del/eraser clears).
+// Ctrl+Z undoes (operation stack), Ctrl+S/O/N save/load/new.
 //
-// KOLORY: kazda komorka ma swoj fg/bg z palety 16 ANSI (0-15) albo kolor
-// domyslny z motywu (255 = "jak tlo edytora"). F3 otwiera palete 16x16
-// (kolumny = fg, wiersze = bg, komorki rysowane znakiem polprzezroczystym ▒),
-// strzalki wybieraja, Enter ustawia pedzel. Zapis: inline SGR tylko przy
-// zmianie koloru — rysunek bez kolorow zapisuje sie jako czysty tekst.
+// COLORS: every cell has its own fg/bg from the 16-color ANSI palette (0-15) or
+// the theme's default color (255 = "like the editor background"). F3 opens a 16x16
+// palette (columns = fg, rows = bg, cells drawn with a half-shade ▒),
+// arrows select, Enter sets the brush. Saving: inline SGR only on
+// color change — a drawing without colors is saved as plain text.
 //
-// Model (rows_) moze byc wiekszy niz widoczny obszar — wtedy scrollujemy sie
-// za kursorem (jak TextArea). Model NIE kurczy sie przy zmniejszaniu okna,
-// wiec rysunek przezywa resize w obie strony.
+// The model (rows_) can be larger than the visible area — then we scroll
+// to follow the cursor (like TextArea). The model does NOT shrink when the
+// window shrinks, so the drawing survives resizes in both directions.
 class PaintView : public Widget {
 public:
     explicit PaintView(AppContext& ctx) : ctx_(ctx) { rows_.assign(1, std::vector<Px>{}); }
 
-    // --- Operacje z menu / skrotow (App montuje callbacki) --------------------
+    // --- Operations from menu / shortcuts (App wires up the callbacks) --------------------
 
     void newCanvas() {
         guardDirty([this] {
@@ -45,9 +45,9 @@ public:
             undo_.clear();
             path_.clear();
             dirty_ = false;
-            statusMsg_.clear();
+            status_.clearMessage();
             palOpen_ = false;
-            brush_ = Brush{}; // pedzel wraca do kolorow domyslnych
+            brush_ = Brush{}; // the brush returns to the default colors
         });
     }
 
@@ -70,27 +70,29 @@ public:
     void saveAs() {
         const std::string startDir = path_.empty() ? fs::homeDir() : fs::parent(path_);
         const auto token = lifetimeToken();
-        ctx_.saveFile(startDir, "obrazek.txt", [this, token](const std::string& picked) {
+        ctx_.saveFile(startDir, "image.txt", [this, token](const std::string& picked) {
             if (!token.lock()) return;
-            path_ = picked;
-            writeTo(picked);
+            if (writeTo(picked)) path_ = picked;
         });
     }
 
     void undoLast() {
-        if (undo_.empty()) { statusMsg_ = "Nic do cofniecia."; return; }
+        if (undo_.empty()) { status_.setMessage(U"Nothing to undo."); return; }
         const PaintOp u = undo_.back();
         undo_.pop_back();
         if (u.y < static_cast<int>(rows_.size()) && u.x < static_cast<int>(rows_[u.y].size())) {
-            rows_[u.y][u.x] = u.px; // przywraca znak OBA kolory
-            dirty_ = true;
+            rows_[u.y][u.x] = u.px; // restores the character AND both colors
         }
+        if (rows_.size() > u.rowCount) rows_.resize(u.rowCount);
+        else if (u.y < static_cast<int>(rows_.size()) &&
+                 rows_[u.y].size() > u.rowLength) rows_[u.y].resize(u.rowLength);
+        dirty_ = true;
         curY_ = u.y;
         curX_ = u.x;
-        statusMsg_.clear();
+        status_.clearMessage();
     }
 
-    // Otwiera palete kolorow (menu Edycja). Stan F3 tez przez to przechodzi.
+    // Opens the color palette (Edit menu). The F3 state also goes through here.
     void showPalette() {
         if (palOpen_) return;
         palFg_ = brush_.fg == kDefColor ? 7 : brush_.fg;
@@ -104,17 +106,17 @@ public:
         const auto& t = theme::active;
         if (bounds_.w <= 0 || bounds_.h <= 0) return;
         const int viewW = bounds_.w;
-        const int viewH = std::max(1, bounds_.h - 1); // ostatni wiersz = status
+        const int viewH = std::max(1, bounds_.h - 1); // last row = status
 
         ensureVisible(viewW, viewH);
 
-        // Tlo powierzchni rysowania.
+        // Drawing surface background.
         screen.fillRect(Rect{bounds_.x, bounds_.y, viewW, viewH},
                         Cell{U' ', t.editorText, t.editorBg, 0});
 
         for (int r = 0; r < viewH; ++r) {
             const int row = scrollY_ + r;
-            if (row >= static_cast<int>(rows_.size())) break; // model jest spojny — dalej puste
+            if (row >= static_cast<int>(rows_.size())) break; // model is consistent — empty beyond this
             const std::vector<Px>& line = rows_[row];
             const int end = std::min(scrollX_ + viewW, static_cast<int>(line.size()));
             for (int c = scrollX_; c < end; ++c) {
@@ -124,8 +126,8 @@ public:
             }
         }
 
-        // Wlasny kursor malowania (odwrocone WYBRANE kolory) — widoczny w kazdym
-        // trybie, nie tylko Edit (GUI cursor Desktop stoi w innym miejscu).
+        // Custom paint cursor (the SELECTED colors swapped) — visible in every
+        // mode, not just Edit (the Desktop GUI cursor lives elsewhere).
         if (!palOpen_ && curY_ >= scrollY_ && curY_ < scrollY_ + viewH &&
             curX_ >= scrollX_ && curX_ < scrollX_ + viewW) {
             const Px p = cellAt(curY_, curX_);
@@ -133,35 +135,30 @@ public:
                        Cell{p.ch, resolve(p.bg, t.editorBg), resolve(p.fg, t.editorText), StyleBold});
         }
 
-        // Paleta NAD cala trescia — zaznaczenie sledzi migajacy kursor GUI
-        // (Desktop::positionGuiCursor odczytuje cursorPosition()).
+        // Palette ABOVE all content — the selection follows the blinking GUI cursor
+        // (Desktop::positionGuiCursor reads cursorPosition()).
         if (palOpen_) drawPalette(screen, viewH);
 
         status_.setBounds(Rect{bounds_.x, bounds_.y + viewH, bounds_.w, 1});
-        std::u32string left;
-        if (!statusMsg_.empty()) {
-            left = text::toUtf32(statusMsg_);
-        } else if (palOpen_) {
-            left = U"Paleta: strzalki | Enter=ok | Esc=zamknij";
-        } else {
-            left = U"Strzalki=ruch | Znak=maluj | Del=gumka | F3=kolory";
-        }
+        std::u32string left = palOpen_
+            ? U"Palette: arrows | Enter=ok | Esc=close"
+            : U"Arrows=move | Char=paint | Del=eraser | F3=colors";
         std::u32string right;
         if (palOpen_) {
             right = text::toUtf32("fg:" + std::to_string(palFg_) + " bg:" + std::to_string(palBg_));
         } else {
             right = text::toUtf32(std::to_string(curX_ + 1) + ":" + std::to_string(curY_ + 1));
         }
-        // StatusBar rysuje prawa etykiete przy samej krawedzi — bez tego podpowiedz
-        // i pozycja kursora nachodza na siebie (widac wtedy zlepek liter).
+        // StatusBar draws the right label at the very edge — without this the hint
+        // and the cursor position would overlap (you'd see a jumble of letters).
         left = text::clip(left, std::max(0, bounds_.w - static_cast<int>(right.size()) - 1));
         status_.setText(std::move(left), std::move(right));
         status_.draw(screen);
     }
 
     KeyEventResult handleKey(const KeyEvent& ev) override {
-        // F3 przełącza palete; gdy otwarta — wszystko idzie do palety
-        // (tez ctrl+znaki, zeby nie malowac pod spodem).
+        // F3 toggles the palette; when open — everything goes to the palette
+        // (including ctrl+chars, so we don't paint underneath).
         if (ev.key == Key::F3) {
             if (palOpen_) {
                 palOpen_ = false;
@@ -172,23 +169,25 @@ public:
         }
         if (palOpen_) return handlePaletteKey(ev);
 
-        // Skróty (Ctrl+S/O/N/Z) Desktop obsluguje PRZED widgetem — tutaj
-        // tylko przechwytujemy ctrl+znak, zeby nie trafil do pedzla.
-        if (ev.key == Key::Char && ev.ctrl) return KeyEventResult::Consumed;
+        // Shortcuts (Ctrl+S/O/N/Z) are handled by the Desktop BEFORE the widget;
+        // modified characters should never reach the brush as painted text.
+        if (ev.key == Key::Char && (ev.ctrl || ev.alt)) return KeyEventResult::Consumed;
 
         const int viewH = std::max(1, bounds_.h - 1);
         const int viewW = std::max(1, bounds_.w);
-        const int maxY = std::max({1, static_cast<int>(rows_.size()), viewH}) - 1;
+        // Like horizontal movement, keep one append position beyond the model.
+        // Otherwise painting the last visible row makes Down permanently stop.
+        const int maxY = std::max(viewH - 1, static_cast<int>(rows_.size()));
 
         switch (ev.key) {
             case Key::Up:    curY_ = std::max(0, curY_ - 1); return KeyEventResult::Consumed;
             case Key::Down:  curY_ = std::min(curY_ + 1, maxY); return KeyEventResult::Consumed;
             case Key::Left:  curX_ = std::max(0, curX_ - 1); return KeyEventResult::Consumed;
             case Key::Right: {
-                // Swobodnie w prawo — tak jak w dol niezalezne od rysowanych
-                // znakow: az do konca widoku albo do konca wiersza (pozycja
-                // "za znakiem" pozwala dopisywac dalej). Bez cofania: gdy
-                // kursor wszedl tu z dluzszego wiersza (Down), nie wraca.
+                // Free movement right — like downward, independent of the drawn
+                // characters: up to the end of the view or the end of the row (the
+                // position "past the last character" allows appending). No retreating: when
+                // the cursor entered here from a longer row (Down), it doesn't go back.
                 const int maxX = std::max(rowLength(curY_), viewW - 1);
                 if (curX_ < maxX) ++curX_;
                 return KeyEventResult::Consumed;
@@ -199,12 +198,12 @@ public:
             case Key::End:   curX_ = rowLength(curY_); return KeyEventResult::Consumed;
             case Key::Backspace:
             case Key::Delete:
-                paint(curY_, curX_, Px{}); // gumka = komorka domyslna
+                paint(curY_, curX_, Px{}); // eraser = default cell
                 return KeyEventResult::Consumed;
             case Key::Char: {
-                if (ev.character < 32) return KeyEventResult::Consumed; // nie malujemy sterowania
+                if (ev.character < 32) return KeyEventResult::Consumed; // control characters are not painted
                 if (ev.character == U' ') {
-                    paint(curY_, curX_, Px{brush_.ch, brush_.fg, brush_.bg}); // Spacja = powtorz pedzel
+                    paint(curY_, curX_, Px{brush_.ch, brush_.fg, brush_.bg}); // Space repeats the brush
                 } else {
                     paint(curY_, curX_, Px{ev.character, brush_.fg, brush_.bg});
                     brush_.ch = ev.character;
@@ -212,42 +211,42 @@ public:
                 return KeyEventResult::Consumed;
             }
             default:
-                return KeyEventResult::Ignored; // Esc/Tab: fallbacki Desktop
+                return KeyEventResult::Ignored; // Esc/Tab: Desktop fallbacks
         }
     }
 
-    bool editable() const override { return true; } // znaki od razu maluja (tryb Edit)
+    bool editable() const override { return true; } // characters paint immediately (Edit mode)
 
-    // Niezapisane zmiany rysunku — Desktop pyta o potwierdzenie, zanim zamknie
-    // okno z brudna trescia. Czyszcza: Nowy (guardDirty), udane wczytanie
-    // (loadFrom) i udany zapis (writeTo).
+    // Unsaved drawing changes — the Desktop asks for confirmation before closing
+    // a window with a dirty canvas. Cleared by: New (guardDirty), a successful
+    // load (loadFrom) and a successful save (writeTo).
     bool dirty() const override { return dirty_; }
 
     std::optional<std::pair<int, int>> cursorPosition() const override {
         const int viewH = std::max(1, bounds_.h - 1);
         if (palOpen_) {
-            // Migajacy kursor GUI zaznacza wybrana komorke palety.
+            // The blinking GUI cursor marks the selected palette cell.
             const auto [px, py] = palOrigin(viewH);
             const int x = px + palFg_;
             const int y = py + palBg_;
             if (x >= bounds_.x && x < bounds_.x + bounds_.w &&
                 y >= bounds_.y && y < bounds_.y + viewH)
                 return std::pair<int, int>{x, y};
-            return std::nullopt; // defensywnie (paleta wycieta) — status pokazuje fg/bg
+            return std::nullopt; // defensive (palette clipped) — the status shows fg/bg
         }
         if (curY_ < scrollY_ || curY_ >= scrollY_ + viewH ||
             curX_ < scrollX_ || curX_ >= scrollX_ + bounds_.w) return std::nullopt;
         return std::pair<int, int>{bounds_.x + curX_ - scrollX_, bounds_.y + curY_ - scrollY_};
     }
 
-    // Minimum: czytelna powierzchnia rysowania + pasek statusu.
+    // Minimum: a usable drawing surface + status bar.
     int minWidth() const override { return 20; }
     int minHeight() const override { return 6; }
 
 private:
-    // Kolor domyslny = kolor z motywu (255 > 15, wiec nigdy nie wchodzi do SGR).
+    // Default color = theme color (255 > 15, so it never appears in SGR).
     static constexpr uint8_t kDefColor = 255;
-    static constexpr int kPalSize = 16;  // paleta 16x16 kombinacji fg x bg
+    static constexpr int kPalSize = 16;  // 16x16 palette of fg x bg combinations
     static constexpr int kPalLast = 15;
 
     struct Px {
@@ -255,7 +254,7 @@ private:
         uint8_t fg = kDefColor;
         uint8_t bg = kDefColor;
         bool operator==(const Px& o) const { return ch == o.ch && fg == o.fg && bg == o.bg; }
-        // Komorka czysto "pusta" — do obcinania koncow wierszy przy zapisie.
+        // A purely "empty" cell — used to trim row ends when saving.
         bool isDefault() const { return ch == U' ' && fg == kDefColor && bg == kDefColor; }
     };
 
@@ -265,20 +264,26 @@ private:
         uint8_t bg = kDefColor;
     };
 
-    struct PaintOp { int y; int x; Px px; };
+    struct PaintOp {
+        int y;
+        int x;
+        Px px;
+        std::size_t rowCount;
+        std::size_t rowLength;
+    };
 
     static Color resolve(uint8_t c, Color def) {
         return c == kDefColor ? def : Color{c};
     }
 
-    // Komorka w modelu; puste pola = domyslna (spacja, kolory motywu).
+    // A cell in the model; empty positions use the default (space, theme colors).
     Px cellAt(int y, int x) const {
         if (y < 0 || y >= static_cast<int>(rows_.size())) return Px{};
         const std::vector<Px>& line = rows_[y];
         return x < static_cast<int>(line.size()) ? line[x] : Px{};
     }
 
-    // Dlugosc wiersza = najdalsza pozycja, na jaka moze wejsc kursor (append).
+    // Row length = the furthest position the cursor can reach (append position).
     int rowLength(int y) const {
         if (y < 0 || y >= static_cast<int>(rows_.size())) return 0;
         return static_cast<int>(rows_[y].size());
@@ -286,16 +291,18 @@ private:
 
     void paint(int y, int x, const Px& val) {
         if (y < 0 || x < 0) return;
-        const Px old = cellAt(y, x); // brak pola = komorka domyslna
-        if (old == val) return; // nic sie nie zmienia — nie rozciagamy wiersza
+        const Px old = cellAt(y, x); // a missing position is a default cell
+        if (old == val) return; // nothing changes — do not extend the row
+        const std::size_t oldRowCount = rows_.size();
+        const std::size_t oldRowLength = y < static_cast<int>(rows_.size())
+            ? rows_[y].size() : 0;
         if (y >= static_cast<int>(rows_.size())) rows_.resize(static_cast<std::size_t>(y) + 1);
         std::vector<Px>& line = rows_[y];
         if (x >= static_cast<int>(line.size())) line.resize(static_cast<std::size_t>(x) + 1);
-        undo_.push_back({y, x, old});
+        undo_.push_back({y, x, old, oldRowCount, oldRowLength});
         if (undo_.size() > 1000) undo_.erase(undo_.begin());
         line[x] = val;
         dirty_ = true;
-        statusMsg_.clear();
     }
 
     void ensureVisible(int viewW, int viewH) {
@@ -307,13 +314,13 @@ private:
         scrollX_ = std::max(0, scrollX_);
     }
 
-    // --- Paleta 16x16 ----------------------------------------------------------
+    // --- 16x16 palette ----------------------------------------------------------
 
-    // Punkt poczatkowy palety (wycentrowana w obszarze rysowania).
-    // Gdy okno jest za niskie na 16 wierszy — przesuwamy ja w gore, zeby
-    // wybrany wiersz bg zawsze byl widoczny (jak scroll za kursorem).
+    // Palette origin (centered in the drawing area). In small windows, scroll
+    // the palette so the selected cell remains visible in either direction.
     std::pair<int, int> palOrigin(int viewH) const {
-        const int px = bounds_.x + std::max(0, (bounds_.w - kPalSize) / 2);
+        const int xOffset = std::min(palFg_, std::max(0, kPalSize - bounds_.w));
+        const int px = bounds_.x + std::max(0, (bounds_.w - kPalSize) / 2) - xOffset;
         int py = bounds_.y + std::max(0, (viewH - kPalSize) / 2);
         if (viewH < kPalSize) py = bounds_.y - std::min(palBg_, kPalSize - viewH);
         return {px, py};
@@ -322,18 +329,19 @@ private:
     void drawPalette(Screen& screen, int viewH) const {
         const auto& t = theme::active;
         const auto [px, py] = palOrigin(viewH);
-        const int w = std::min(kPalSize, bounds_.x + bounds_.w - px);
-        const int y0 = std::max(py, bounds_.y); // wycinek palety widoczny w oknie
+        const int x0 = std::max(px, bounds_.x);
+        const int x1 = std::min(px + kPalSize, bounds_.x + bounds_.w);
+        const int y0 = std::max(py, bounds_.y); // visible portion of the palette
         const int y1 = std::min(py + kPalSize, bounds_.y + viewH);
-        if (w <= 0 || y1 <= y0) return;
-        screen.fillRect(Rect{px, y0, w, y1 - y0}, Cell{U' ', t.surfaceText, t.surfaceBg, 0});
+        if (x1 <= x0 || y1 <= y0) return;
+        screen.fillRect(Rect{x0, y0, x1 - x0, y1 - y0}, Cell{U' ', t.surfaceText, t.surfaceBg, 0});
         for (int bg = 0; bg < kPalSize; ++bg) {
             for (int fg = 0; fg < kPalSize; ++fg) {
                 const int x = px + fg;
                 const int y = py + bg;
                 if (x < bounds_.x || x >= bounds_.x + bounds_.w) continue;
                 if (y < bounds_.y || y >= bounds_.y + viewH) continue;
-                // Komorki polprzezroczystym blokiem — widac oba skladniki pary.
+                // Draw cells with a half-shade block so both colors are visible.
                 screen.set(x, y, Cell{U'▒',
                                       Color{static_cast<uint8_t>(fg)},
                                       Color{static_cast<uint8_t>(bg)}, 0});
@@ -351,21 +359,21 @@ private:
             case Key::End:     palFg_ = kPalLast; return KeyEventResult::Consumed;
             case Key::PageUp:  palBg_ = 0; return KeyEventResult::Consumed;
             case Key::PageDown: palBg_ = kPalLast; return KeyEventResult::Consumed;
-            case Key::Enter:   // zatwierdz — pedzel dostaje wybrana pare kolorow
+            case Key::Enter:   // confirm — apply the selected color pair to the brush
                 brush_.fg = static_cast<uint8_t>(palFg_);
                 brush_.bg = static_cast<uint8_t>(palBg_);
                 palOpen_ = false;
-                statusMsg_.clear();
+                status_.clearMessage();
                 return KeyEventResult::Consumed;
-            case Key::Escape:  // anuluj — pedzel bez zmian
+            case Key::Escape:  // cancel — leave the brush unchanged
                 palOpen_ = false;
                 return KeyEventResult::Consumed;
             default:
-                return KeyEventResult::Consumed; // paleta otwarta — nic pod spodem
+                return KeyEventResult::Consumed; // palette open — nothing underneath
         }
     }
 
-    // --- Zapis / wczytywanie (inline SGR, tylko przy zmianie koloru) ------------
+    // --- Save / load (inline SGR, only when the color changes) ------------
 
     static std::string fgCode(uint8_t c) {
         if (c == kDefColor) return "39";
@@ -376,12 +384,12 @@ private:
         return std::to_string(c < 8 ? 40 + c : 100 + (c - 8));
     }
 
-    // Zapis: koncowe komorki domyslne obcinamy; kolory jako SGR tylko gdy sie
-    // zmieniaja — rysunek bez kolorow wychodzi jako czysty tekst (zgodny ze
-    // starymi plikami). Kolorowa spacja na koncu to ART — nie jest obcinana.
-    void writeTo(const std::string& path) {
+    // Save: trim trailing default cells; emit colors as SGR only when they
+    // change, so drawings without colors are saved as plain text (compatible
+    // with older files). A colored trailing space is ART and is not trimmed.
+    bool writeTo(const std::string& path) {
         std::ofstream f(path, std::ios::trunc);
-        if (!f) { statusMsg_ = "Nie mozna zapisac: " + path; return; }
+        if (!f) { status_.setMessage(text::toUtf32("Cannot save: " + path)); return false; }
         for (const auto& line : rows_) {
             std::size_t end = line.size();
             while (end > 0 && line[end - 1].isDefault()) --end;
@@ -409,14 +417,17 @@ private:
             if (cFg != kDefColor || cBg != kDefColor) out += "\x1b[0m";
             f << out << '\n';
         }
-        if (!f) { statusMsg_ = "Blad zapisu: " + path; return; }
+        f.flush();
+        f.close();
+        if (!f) { status_.setMessage(text::toUtf32("Save failed: " + path)); return false; }
         dirty_ = false;
-        statusMsg_ = "Zapisano: " + fs::nameOf(path);
+        status_.setMessage(text::toUtf32("Saved: " + fs::nameOf(path)));
+        return true;
     }
 
-    // Parsuje jeden wiersz pliku: fragmenty tekstu + sekwencje SGR.
-    // Obslugiwane: 0 (reset), 30-37/90-97 (fg), 40-47/100-107 (bg), 39/49.
-    // Pozostale kody (pogrubienia itp.) ignorowane; znaki bez SGR = kolor domyslny.
+    // Parse one file row: text fragments plus SGR sequences.
+    // Supported: 0 (reset), 30-37/90-97 (fg), 40-47/100-107 (bg), 39/49.
+    // Other codes (bold, etc.) are ignored; characters without SGR use the default color.
     static std::vector<Px> parseLine(const std::string& raw) {
         std::vector<Px> row;
         uint8_t fg = kDefColor;
@@ -434,11 +445,11 @@ private:
             if (i + 1 < raw.size() && raw[i + 1] == '[') {
                 std::size_t j = i + 2;
                 while (j < raw.size() && raw[j] != 'm') ++j;
-                if (j >= raw.size()) break; // niekompletna sekwencja — koniec wiersza
+                if (j >= raw.size()) break; // incomplete sequence — end of row
                 applySgr(raw.substr(i + 2, j - (i + 2)), fg, bg);
                 i = j + 1;
             } else {
-                ++i; // sam ESC (stary plik) — pomin
+                ++i; // bare ESC (legacy file) — skip it
             }
         }
         return row;
@@ -455,7 +466,7 @@ private:
             for (char c : tok) {
                 if (c >= '0' && c <= '9') { code = code * 10 + (c - '0'); any = true; }
             }
-            if (!any) code = 0; // pusty parametr = domyslny (jak w terminalu)
+            if (!any) code = 0; // empty parameter = default (as in a terminal)
             if (code == 0) { fg = kDefColor; bg = kDefColor; }
             else if (code >= 30 && code <= 37) fg = static_cast<uint8_t>(code - 30);
             else if (code >= 90 && code <= 97) fg = static_cast<uint8_t>(code - 90 + 8);
@@ -470,7 +481,7 @@ private:
 
     void loadFrom(const std::string& path) {
         std::ifstream f(path);
-        if (!f) { statusMsg_ = "Nie mozna otworzyc: " + path; return; }
+        if (!f) { status_.setMessage(text::toUtf32("Cannot open: " + path)); return; }
         rows_.clear();
         std::string line;
         while (std::getline(f, line)) {
@@ -483,14 +494,14 @@ private:
         path_ = path;
         dirty_ = false;
         palOpen_ = false;
-        statusMsg_ = "Wczytano: " + fs::nameOf(path);
+        status_.setMessage(text::toUtf32("Loaded: " + fs::nameOf(path)));
     }
 
-    // Jak w Edytorze: brudny plik -> pytamy przed zgubieniem zmian.
+    // As in the editor: ask before discarding changes to a modified file.
     void guardDirty(std::function<void()> proceed) {
         if (!dirty_) { proceed(); return; }
         const auto token = lifetimeToken();
-        ctx_.confirm(U"Niezapisane zmiany. Kontynuowac?",
+        ctx_.confirm(U"Unsaved changes. Continue?",
                      [token, proceed = std::move(proceed)](bool ok) {
                          if (!token.lock()) return;
                          if (ok) proceed();
@@ -498,36 +509,35 @@ private:
     }
 
     AppContext& ctx_;
-    std::vector<std::vector<Px>> rows_; // model rysunku (moze przewyzszac widok)
-    std::vector<PaintOp> undo_;         // stos cofania, cap 1000
-    int curX_ = 0, curY_ = 0;           // kursor malowania (wspolrzedne modelu)
-    int scrollX_ = 0, scrollY_ = 0;     // przesuniecie widoku za kursorem
-    Brush brush_;                       // pedzel: znak + para kolorow
-    bool palOpen_ = false;              // paleta otwarta?
-    int palFg_ = 7, palBg_ = 0;         // wybrana kolumna/wiersz palety (0..15)
+    std::vector<std::vector<Px>> rows_; // drawing model (may exceed the visible area)
+    std::vector<PaintOp> undo_;         // undo stack, capped at 1000
+    int curX_ = 0, curY_ = 0;           // paint cursor (model coordinates)
+    int scrollX_ = 0, scrollY_ = 0;     // view offset following the cursor
+    Brush brush_;                       // brush: character + color pair
+    bool palOpen_ = false;              // is the palette open?
+    int palFg_ = 7, palBg_ = 0;         // selected palette column/row (0..15)
     bool dirty_ = false;
-    std::string path_;                  // "" = jeszcze nie zapisywany
-    std::string statusMsg_;
+    std::string path_;                  // "" = not saved yet
     StatusBar status_;
 };
 
 class PaintApp : public App {
 public:
-    std::string name() const override { return "Malowanka"; }
+    std::string name() const override { return "Paint"; }
 
     std::unique_ptr<Widget> createView(AppContext& ctx) override {
         auto view = std::make_unique<PaintView>(ctx);
         PaintView* raw = view.get();
 
-        view->setMenuTabs({{U"Plik", std::vector<MenuItem>{
-            {U"Nowy (Ctrl+N)", [raw] { raw->newCanvas(); }},
-            {U"Otworz... (Ctrl+O)", [raw] { raw->openFile(); }},
-            {U"Zapisz (Ctrl+S)", [raw] { raw->save(); }},
-            {U"Zapisz jako...", [raw] { raw->saveAs(); }},
+        view->setMenuTabs({{U"File", std::vector<MenuItem>{
+            {U"New (Ctrl+N)", [raw] { raw->newCanvas(); }},
+            {U"Open... (Ctrl+O)", [raw] { raw->openFile(); }},
+            {U"Save (Ctrl+S)", [raw] { raw->save(); }},
+            {U"Save As...", [raw] { raw->saveAs(); }},
         }},
-        {U"Edycja", std::vector<MenuItem>{
-            {U"Cofnij (Ctrl+Z)", [raw] { raw->undoLast(); }},
-            {U"Kolory (F3)", [raw] { raw->showPalette(); }},
+        {U"Edit", std::vector<MenuItem>{
+            {U"Undo (Ctrl+Z)", [raw] { raw->undoLast(); }},
+            {U"Colors (F3)", [raw] { raw->showPalette(); }},
         }}});
 
         view->pushShortcut({true, Key::Char, U'n'}, [raw] { raw->newCanvas(); });
@@ -539,12 +549,15 @@ public:
     }
 
     Rect preferredBounds(const Rect& desktopArea) const override {
-        int w = std::min(60, std::max(30, desktopArea.w - 6));
-        // Wysokosc 20 = paleta 16 wierszy + pasek statusu + ramka i pasek menu
-        // okna (tresc = h - 3 => h = 20, gdy paleta ma sie cala zmiescic).
-        // Sciete tez do obszaru pulpitu - zwykle okno, nie "na caly pulpit".
-        int h = std::min(20, std::max(8, desktopArea.h - 4));
-        return Rect{desktopArea.x + 5, desktopArea.y + 2, w, h};
+        int w = std::min(60, std::max(22, desktopArea.w - 6));
+        // Height 20 = 16 palette rows + status bar + window border and menu bar
+        // (content = h - 3, so h = 20 fits the full palette).
+        // Keep the regular window centered and avoid unnecessary overflow on
+        // narrow/short terminals. Window chrome adds 2 columns and 3 rows.
+        int h = std::min(20, std::max(9, desktopArea.h - 4));
+        const int x = desktopArea.x + std::max(0, (desktopArea.w - w) / 2);
+        const int y = desktopArea.y + std::max(0, (desktopArea.h - h) / 2);
+        return Rect{x, y, w, h};
     }
 };
 

@@ -3,30 +3,30 @@
 
 namespace fenrir::settings {
 
-// Ustawienia pulpitu, trwale zapisywane w ~/.config/fenrir/settings.ini
-// (prosty format key=value). Desktop laduje je przy starcie i stosuje:
-// motyw (theme::apply), nazwe pulpitu, zegar na pasku zadan, migajacy kursor.
-// Aplikacja Ustawienia zmienia te wartosci i zapisuje — kolejny start
-// przywraca wybor uzytkownika.
+// Desktop settings, persistently stored in ~/.config/fenrir/settings.ini
+// (simple key=value format). Desktop loads them at startup and applies them:
+// theme (theme::apply), desktop name, taskbar clock, blinking cursor.
+// The Settings application changes these values and saves them - the next
+// start restores the user's choice.
 struct Settings {
-    std::string theme = "classic"; // id z theme::catalog()
-    bool taskbarSeconds = false;   // zegar na pasku zadan ze sekundami
-    std::string desktopName = "Fenrir"; // nazwa w pasku menu (prawa strona)
-    bool cursorBlink = true;       // migajacy kursor GUI
+    std::string theme = "classic"; // id from theme::catalog()
+    bool taskbarSeconds = false;   // taskbar clock shows seconds
+    std::string desktopName = "Fenrir"; // name in the menu bar (right side)
+    bool cursorBlink = true;       // blinking GUI cursor
 };
 
-// Biezace ustawienia (ladowane raz przez Desktop przy starcie).
+// Active settings (loaded once by Desktop at startup).
 inline Settings active{};
 
-// Sciezka pliku ustawien: $HOME/.config/fenrir/settings.ini
+// Path to the settings file: $HOME/.config/fenrir/settings.ini
 std::string path();
 
-// Wczytuje ustawienia z pliku; brak pliku = wartosci domyslne.
-// Nieznane klucze/blersze wiersze sa ignorowane; nieznane id motywu
-// wraca do "classic".
+// Loads settings from the file; no file = default values.
+// Unknown keys/garbled lines are ignored; an unknown theme id
+// falls back to "classic".
 void load();
 
-// Zapisuje biezace ustawienia do pliku (tworzy katalogi rodzicielskie).
+// Saves the current settings to the file (creating parent directories).
 void save();
 
 } // namespace fenrir::settings

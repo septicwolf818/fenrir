@@ -11,10 +11,10 @@ endif()
 
 add_compile_options(-Wall -Wextra)
 
-# --- biblioteka fenrir ----------------------------------------------------
-# Warstwy (od dolu): terminal -> core/input/renderer/cursor -> widgets ->
-# window -> app (kontrakt App/AppContext/AppRegistry) -> desktop (framework
-# spinajacy wszystko, implementuje tez AppContext).
+# --- fenrir library --------------------------------------------------------
+# Layers from the bottom up: terminal -> core/input/renderer/cursor -> widgets
+# -> window -> app (App/AppContext/AppRegistry contracts) -> desktop (the
+# framework that ties everything together and implements AppContext).
 add_library(fenrir STATIC
     src/terminal/Terminal.cpp
     src/core/Screen.cpp
@@ -37,7 +37,7 @@ target_include_directories(fenrir PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# forkpty (terminal) — libutil na Linuksie; na macOS jest w libc.
+# forkpty (terminal) — link libutil on Linux; it is part of libc on macOS.
 if(UNIX AND NOT APPLE)
     target_link_libraries(fenrir PUBLIC util)
 endif()
@@ -45,8 +45,8 @@ endif()
 
 
 # --- shell: den ------------------------------------------------------------
-# To jedyny plik "aplikacyjny" ktory NIE jest App-em - laczy Desktop z
-# zarejestrowanymi aplikacjami (patrz apps/shell/main.cpp).
+# This is the only application-level file that is not an App implementation;
+# it connects Desktop to the registered apps (see apps/shell/main.cpp).
 add_executable(fenrir_desktop
     apps/shell/main.cpp
 )

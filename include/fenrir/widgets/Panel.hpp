@@ -8,11 +8,11 @@
 
 namespace fenrir {
 
-// Smart container: rozklada dzieci w siatce i NAWIGUJE miedzy nimi.
-// Panel sam zarzadza selectedChild_ — strzalki przesuwa zaznaczenie,
-// Enter/Space aktywuje wybrany widget przez wirtualny Widget::activate()
-// (zadnych dynamic_cast na konkretny typ — kontener nie zna dzieci).
-// Apps tylko dodaja dzieci i nie musza recznie obslugiwac nawigacji.
+// Smart container: lays children out in a grid and NAVIGATES between them.
+// Panel manages selectedChild_ itself — arrows move the selection,
+// Enter/Space activates the selected widget via the virtual Widget::activate()
+// (no dynamic_cast to a concrete type — the container doesn't know its children).
+// Apps only add children and never have to handle navigation manually.
 
 class Panel : public Widget {
 public:
@@ -21,7 +21,7 @@ public:
 
     void addChild(std::unique_ptr<Widget> w) {
         children_.push_back(std::move(w));
-        childSpans_.push_back(1); // domyslnie 1 kolumna
+        childSpans_.push_back(1); // 1 column by default
     }
 
     void addChildSpan(std::unique_ptr<Widget> w, int span) {
@@ -31,7 +31,7 @@ public:
 
     const std::vector<std::unique_ptr<Widget>>& children() const { return children_; }
 
-    // Aktualny indeks zaznaczonego dziecka (-1 = brak). Panel sam go obsluguje.
+    // Index of the selected child (-1 = none). Panel manages it itself.
     int selectedIndex() const { return selectedChild_; }
     void setSelectedIndex(int idx) { selectedChild_ = idx; }
 
@@ -42,11 +42,11 @@ public:
         int availW = std::max(0, bounds_.w - 2 * pad_);
         int cellW = std::max(1, (availW - gap_ * (cols_ - 1)) / cols_);
 
-        // Budujemy wiersze dynamicznie: kazdy child zjada "span" slotow w biezacym wierszu.
+        // Build rows dynamically: each child consumes "span" slots in the current row.
         int curCol = 0, curRow = 0;
         for (int i = 0; i < n; ++i) {
             int span = static_cast<int>(childSpans_[static_cast<std::size_t>(i)]);
-            // Jesli child nie miesci sie w biezacym wierszu -> nowy wiersz.
+            // If the child doesn't fit in the current row -> new row.
             if (curCol + span > cols_) {
                 curRow++;
                 curCol = 0;
@@ -58,9 +58,9 @@ public:
         int rows = curRow + 1;
         int cellH = std::max(1, (availH - gap_ * (rows - 1)) / rows);
 
-        // Drugi przebieg: bound + zapamietanie (wiersz, kolumna) kazdego dziecka —
-        // te indeksy obsluuguja potem nawigacje gore/dol (najblizsza kolumna
-        // w sasiednim wierszu), tak tez przy mieszanych spanach.
+        // Second pass: bounds + record (row, column) of each child —
+        // these indices later drive up/down navigation (closest column
+        // in the neighboring row), including with mixed spans.
         childRow_.assign(static_cast<std::size_t>(n), 0);
         childCol_.assign(static_cast<std::size_t>(n), 0);
         curCol = 0;
@@ -86,14 +86,14 @@ public:
         for (std::size_t i = 0; i < children_.size(); ++i) {
             const bool sel = static_cast<int>(i) == selectedChild_;
             children_[i]->setHighlighted(sel);
-            // Fokus okna trafia tylko do zaznaczonego dziecka — pozostale
-            // wiedza, ze ich okno nie jest aktywne (poprawne stany hot/disable).
+            // Window focus goes only to the selected child — the others
+            // know their window is not active (correct hot/disabled states).
             children_[i]->setFocused(sel && focused_);
         }
         for (auto& c : children_) c->draw(screen);
     }
 
-    // Nawigacja wewnatrz Panelu: strzalki przesuwaja selectedChild_ po siatce.
+    // Navigation inside the Panel: arrows move selectedChild_ across the grid.
     KeyEventResult handleKey(const KeyEvent& ev) override {
         relayout();
         int n = static_cast<int>(children_.size());
@@ -130,8 +130,8 @@ private:
         }
     }
 
-    // Lewo/Prawo: kolejny/wczesniejszy element wzgledem liniowej kolejnosci
-    // (z owijaniem), przeskakujacy elementy niezaznaczalne (np. etykiety).
+    // Left/Right: move to the next/previous selectable child in linear order,
+    // wrapping at the ends and skipping non-selectable children (such as labels).
     void moveHorizontal(int dir, int n) {
         int idx = selectedChild_ < 0 ? 0 : selectedChild_;
         for (int step = 0; step < n; ++step) {
@@ -140,7 +140,7 @@ private:
         }
     }
 
-    // Gora/Dol: sasiedni wiersz, kolumna najblizsza biezacej.
+    // Up/Down: move to the adjacent row and the closest column.
     void moveVertical(int dir, int n) {
         if (static_cast<int>(childRow_.size()) != n) { moveHorizontal(dir, n); return; }
         const int curRow = childRow_[static_cast<std::size_t>(selectedChild_)];
@@ -159,11 +159,11 @@ private:
             }
             if (best >= 0) { selectedChild_ = best; return; }
         }
-        // Brak sasiedniego wiersza — nic nie zmieniamy.
+        // No adjacent row — leave the selection unchanged.
     }
 
-    // Przekazuje klawis wybranemu dziecku; Ignored wraca bez zmian (moga go
-    // obsluzyc zewnetrzne kontenery / Desktop).
+    // Forward the key to the selected child. Ignored bubbles up unchanged so
+    // outer containers or Desktop can handle it.
     KeyEventResult delegate(const KeyEvent& ev, int n) {
         if (selectedChild_ >= 0 && static_cast<std::size_t>(selectedChild_) < children_.size())
             return children_[static_cast<std::size_t>(selectedChild_)]->handleKey(ev);
@@ -174,9 +174,9 @@ private:
     int cols_, pad_, gap_;
     std::vector<std::unique_ptr<Widget>> children_;
     std::vector<int> childSpans_;
-    std::vector<int> childRow_; // wypelniane przez relayout()
-    std::vector<int> childCol_; // wypelniane przez relayout()
-    int selectedChild_ = 0;     // pierwszy child jest zaznaczony od startu
+    std::vector<int> childRow_; // populated by relayout()
+    std::vector<int> childCol_; // populated by relayout()
+    int selectedChild_ = 0;     // the first child is selected initially
 };
 
 } // namespace fenrir

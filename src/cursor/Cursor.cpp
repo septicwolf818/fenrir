@@ -15,7 +15,7 @@ void Cursor::render(Screen& screen) const {
 
     Cell c = screen.at(x_, y_);
     std::swap(c.fg, c.bg);
-    // Ustaw StyleBold — bez tego render porównuje komórkę z previous_ i widzi "żadna zmiana".
+    // Set StyleBold — without it the renderer compares the cell with previous_ and sees "no change".
     c.style |= StyleBold;
     screen.set(x_, y_, c);
 }

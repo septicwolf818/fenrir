@@ -8,29 +8,29 @@
 
 namespace fenrir {
 
-// Wielowierszowy edytor tekstu z OWIJANIEM LINII (word wrap). Bufor trzyma
-// LOGICZNE linie (std::u32string, pelne Unicode); layout zamienia je na
-// WIERSZE WIZUALNE o szerokosci bounds_.w — lamane na ostatnim slowie w oknie,
-// twardy lam dla slow dluzszych niz ekran. Kursor i przewijanie operuja na
-// wierszach wizualnych, wiec dlugie linie sa w pelni widoczne i edytowalne.
+// Multiline text editor with word wrapping. The buffer stores LOGICAL lines
+// (std::u32string, full Unicode); layout converts them to VISUAL ROWS of width
+// bounds_.w, wrapping at the last word that fits and hard-wrapping words wider
+// than the screen. The cursor and scrolling operate on visual rows, so long
+// lines remain fully visible and editable.
 class TextArea : public Widget {
 public:
     TextArea();
 
     void loadFile(const std::string& path);
     void saveFile(const std::string& path);
-    void saveToCurrentPath(); // zapisuje tam, skad wczytano / dokad zapisano ostatnio
+    void saveToCurrentPath(); // Save to the path used for the last load or save.
 
-    void newFile();   // utworz nowy pusty dokument
-    void clearText(); // czyści cały tekst
+    void newFile();   // Create a new empty document.
+    void clearText(); // Clear all text.
 
-    // Wstawianie przy Tab: znak tabulatora ('\t', domyslnie) albo spacje
-    // (odstep do kolejnej kolumny 4). Ustawiane z preferencji aplikacji
-    // edytora; ktorykolwiek tryb — Tab JEST wstawiany (nie przelacza okien).
+    // Tab insertion: a tab character ('\t' by default) or spaces (up to the next
+    // multiple-of-4 column). Set from the editor's application preferences;
+    // in either mode, Tab IS inserted (it does not switch windows).
     void setInsertsSpaces(bool on) { insertsSpaces_ = on; }
     bool insertsSpaces() const { return insertsSpaces_; }
 
-    // Numery linii (gutter po lewej) — przelaczane z menu/shortcutu.
+    // Line numbers (left gutter), toggled from the menu or a shortcut.
     void setShowLineNumbers(bool on) {
         if (lineNumbers_ == on) return;
         lineNumbers_ = on;
@@ -41,12 +41,12 @@ public:
     const std::string& path() const { return path_; }
     bool dirty() const override { return dirty_; }
 
-    // Pozycja kursora: (linia, kolumna), obie 1-based — dla paska statusu.
+    // Cursor position (line, column), both 1-based — for the status bar.
     std::pair<int, int> cursorLineCol() const { return {cursorRow_ + 1, cursorCol_ + 1}; }
 
-    // OWIJANIE LINII — domyslnie wlaczone. Wylaczone = dlugie linie leca poza
-    // ekran i sa przewijane POZIOMO (scrollCol_ tak jak w LineEdit), wiec
-    // kursor i cala tresc sa osiagalne tez na wąskim oknie.
+    // Word wrapping is enabled by default. When disabled, long lines extend
+    // beyond the screen and scroll HORIZONTALLY (scrollCol_, as in LineEdit),
+    // keeping the cursor and all content accessible even in a narrow window.
     bool wrap() const { return wrap_; }
     void setWrap(bool on) {
         if (wrap_ == on) return;
@@ -57,7 +57,7 @@ public:
     }
     void toggleWrap() {
         setWrap(!wrap_);
-        if (onStatus) onStatus(wrap_ ? "Zawijanie linii: wlaczone" : "Zawijanie linii: wylaczone - przewijanie poziome");
+        if (onStatus) onStatus(wrap_ ? "Line wrapping: enabled" : "Line wrapping: disabled - horizontal scrolling");
     }
 
     std::function<void(const std::string& message)> onStatus;
@@ -69,10 +69,10 @@ public:
     std::optional<std::pair<int, int>> cursorPosition() const override;
 
 private:
-    // Jeden wiersz wizualny: fragment linii logicznej `line` od kolumny `col0`
-    // o dlugosci `len`. Segmenty sa ciagle — kazdy znak linii wystepuje
-    // dokladnie raz w layoutcie (spacja lamiaca zostaje na koncu wiersza),
-    // wiec mapowanie kolumna logica <-> wizualna jest trywialne.
+    // One visual row: a segment of logical line `line`, starting at column `col0`
+    // and having length `len`. Segments are contiguous — each line character
+    // appears exactly once in the layout (a wrapping space stays at the end of
+    // the row), so mapping between logical and visual columns is straightforward.
     struct Seg {
         int line;
         int col0;
@@ -81,37 +81,37 @@ private:
 
     std::vector<std::u32string> lines_{std::u32string()};
     mutable std::vector<Seg> layout_;
-    // Stan layoutu "mutable": cursorPosition() jest const, a layout liczymy
-    // leniwie (tez przy odczycie pozycji kursora).
-    mutable int layoutW_ = 0; // szerokosc, dla ktorej zbudowano layout
+    // Mutable layout state: cursorPosition() is const, and the layout is computed
+    // lazily (including when reading the cursor position).
+    mutable int layoutW_ = 0; // Width used to build the layout.
     mutable bool layoutDirty_ = true;
 
     std::string path_;
     bool dirty_ = false;
 
-    int cursorRow_ = 0, cursorCol_ = 0; // pozycja kursora w LINII LOGICZNEJ
-    int scrollRow_ = 0;                 // pierwszy widoczny wiersz WIZUALNY
-    int scrollCol_ = 0;                 // pierwsza widoczna kolumna (tylko gdy brak owijania)
-    bool wrap_ = true;                  // owijanie linii (domyslnie wl.)
-    bool insertsSpaces_ = false;        // Tab wstawia spacje zamiast '\t'
-    bool lineNumbers_ = false;          // gutter z numerami linii
-    int goalCol_ = 0; // "lepka" kolumna wizualna dla ruchu góra/dół (PageUp itp.)
+    int cursorRow_ = 0, cursorCol_ = 0; // Cursor position in the LOGICAL LINE.
+    int scrollRow_ = 0;                 // First visible VISUAL ROW.
+    int scrollCol_ = 0;                 // First visible column (only when wrapping is disabled).
+    bool wrap_ = true;                  // Word wrapping (enabled by default).
+    bool insertsSpaces_ = false;        // Tab inserts spaces instead of '\t'.
+    bool lineNumbers_ = false;          // Line-number gutter.
+    int goalCol_ = 0; // "Sticky" visual column for vertical movement (PageUp, etc.).
 
     void markDirty() { layoutDirty_ = true; }
     void ensureLayout() const;
     void rebuildLayout() const;
-    int gutterW() const;               // szerokosc guttera z numerami linii (0 = brak)
-    int visualRowOf(int row, int col) const; // index w layout_ dla (row,col)
+    int gutterW() const;               // Width of the line-number gutter (0 = none).
+    int visualRowOf(int row, int col) const; // Index in layout_ for (row, col).
     std::pair<int, int> logicalOf(int segIdx, int offset) const;
-    int visualOffset() const; // biezacy kursor -> offset w jego wierszu wizualnym
-    void syncGoal();          // po ruchu poziomym: goal = aktualny offset wizualny
+    int visualOffset() const; // Current cursor offset within its visual row.
+    void syncGoal();          // After horizontal movement, set goal to the current visual offset.
 
     void insertChar(char32_t ch);
     void insertNewline();
     void backspace();
     void del();
-    void moveHoriz(int dCol); // prawo/lewo z przechodzeniem miedzy liniami
-    void moveVert(int dSeg);  // góra/dol o wiersz(e) wizualne (lepki cel)
+    void moveHoriz(int dCol); // Move left/right, crossing between lines.
+    void moveVert(int dSeg);  // Move up/down by visual row(s) (sticky goal).
     void clampCursor();
     void ensureVisible();
 };

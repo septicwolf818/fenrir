@@ -5,9 +5,9 @@
 
 namespace fenrir::text {
 
-// Jedyne miejsce w projekcie kodujace/dekodujace UTF-8. Wszystkie konwersje
-// std::string <-> std::u32string ida przez te funkcje (zadnego `u32(begin,end)`,
-// ktore traktuje bajty jako znaki i psuje Polskie znaki).
+// The only place in the project that encodes/decodes UTF-8. All conversions
+// std::string <-> std::u32string go through these functions (never `u32(begin,end)`,
+// which treats bytes as characters and breaks non-ASCII letters).
 
 inline void appendUtf8(std::string& out, char32_t cp) {
     if (cp < 0x80) {
@@ -34,8 +34,8 @@ inline std::string toUtf8(std::u32string_view s) {
     return out;
 }
 
-// Dekoduje UTF-8 -> UTF-32. Bledna/niepelna sekwencje traktujemy jak pojedynczy
-// bajt (nie gubimy danych przy wczytywaniu plikow).
+// Decodes UTF-8 -> UTF-32. Invalid/incomplete sequences are treated as a single
+// byte (we don't lose data when loading files).
 inline std::u32string toUtf32(std::string_view s) {
     std::u32string out;
     out.reserve(s.size());
@@ -75,27 +75,27 @@ inline std::u32string toUtf32(std::string_view s) {
     return out;
 }
 
-// Ucina tekst do `width` komorek. Jesli obcielo, dokleja `ellipsis` (domyślnie "...").
+// Truncates text to `width` cells. If truncated, appends `ellipsis` (default "...").
 inline std::u32string truncate(std::u32string_view s, int width, std::u32string_view ellipsis = U"...") {
     if (width <= 0) return {};
     if (static_cast<int>(s.size()) <= width) return std::u32string(s);
     int keep = width - static_cast<int>(ellipsis.size());
     if (keep < 0) {
-        // Miejsca mniej niz sam ellipsis — uciamy na znak.
+        // Less room than the ellipsis itself — cut at the character level.
         return std::u32string(s.substr(0, static_cast<std::size_t>(width)));
     }
     return std::u32string(s.substr(0, static_cast<std::size_t>(keep))) + std::u32string(ellipsis);
 }
 
-// Przycina bez ellipsis — do wypelniania prostokatow tekstem.
+// Clips without an ellipsis — for filling rectangles with text.
 inline std::u32string clip(std::u32string_view s, int width) {
     if (width <= 0) return {};
     if (static_cast<int>(s.size()) <= width) return std::u32string(s);
     return std::u32string(s.substr(0, static_cast<std::size_t>(width)));
 }
 
-// Zlam tekstu slowami do podanej szerokosci (dialogi, komunikaty).
-// Slowo dluzsze niz szerokosc lamie sie twardo.
+// Word-wraps text to the given width (dialogs, messages).
+// A word longer than the width is broken hard.
 inline std::vector<std::u32string> wrap(std::u32string_view s, int width) {
     std::vector<std::u32string> out;
     if (width <= 0) return out;

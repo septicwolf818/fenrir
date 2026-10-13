@@ -11,26 +11,26 @@ struct TerminalSize {
 };
 
 // -----------------------------------------------------------------------
-// Terminal — najniższa warstwa frameworka.
+// Terminal — the lowest layer of the framework.
 //
-// Odpowiedzialność (i TYLKO to):
-//   - wejście w "tryb GUI" terminala: raw mode + alternate screen buffer
-//     + ukrycie systemowego kursora (na stałe — nasz GUI ma WŁASNY kursor
-//     rysowany jako odwrócenie kolorów komórki, patrz etap 7),
-//   - powrót do normalnego stanu terminala przy zamknięciu programu
-//     (RAII) oraz przy sygnałach SIGINT/SIGTERM (żeby terminal nigdy nie
-//     został "zepsuty" po crashu),
-//   - surowy zapis/odczyt bajtów,
-//   - odczyt rozmiaru terminala (w komórkach znakowych),
-//   - wykrywanie zmiany rozmiaru (SIGWINCH).
+// Responsibility (and ONLY this):
+//   - putting the terminal into "GUI mode": raw mode + alternate screen buffer
+//     + hiding the system cursor (permanently — our GUI has its OWN cursor
+//     drawn by swapping a cell's colors, see stage 7),
+//   - restoring the normal terminal state when the program exits
+//     (RAII) and on SIGINT/SIGTERM (so the terminal is never
+//     left "broken" after a crash),
+//   - raw byte write/read,
+//   - reading the terminal size (in character cells),
+//   - detecting size changes (SIGWINCH).
 //
-// Terminal NIC nie wie o: komórkach, kolorach, klawiszach, widgetach.
-// To celowe — wyższe warstwy (Screen, Renderer, KeyParser) budują się na
-// tym, ale ta klasa pozostaje malutka i łatwa do przetestowania osobno.
+// Terminal knows NOTHING about: cells, colors, keys, widgets.
+// That is deliberate — the higher layers (Screen, Renderer, KeyParser) build on
+// this, but this class stays tiny and easy to test in isolation.
 //
-// Użyty jest idiom pimpl: <termios.h>, <sys/ioctl.h> itd. nie wyciekają
-// do publicznego nagłówka, więc reszta frameworka (i aplikacje) nie musi
-// ich widzieć ani się przejmować platformą.
+// The pimpl idiom is used: <termios.h>, <sys/ioctl.h>, etc. do not leak
+// into the public header, so the rest of the framework (and applications) never
+// needs to see them or worry about the platform.
 // -----------------------------------------------------------------------
 class Terminal {
 public:
@@ -42,25 +42,25 @@ public:
     Terminal(Terminal&&) = delete;
     Terminal& operator=(Terminal&&) = delete;
 
-    // Aktualny rozmiar terminala w komórkach znakowych.
+    // Current terminal size in character cells.
     TerminalSize size() const;
 
-    // Zapis surowych bajtów (np. już wyrenderowana klatka albo sekwencja ANSI).
+    // Writes raw bytes (e.g. an already-rendered frame or an ANSI sequence).
     void write(std::string_view data);
 
-    // Wymusza zrzut zbuforowanych danych do deskryptora terminala.
+    // Forces buffered data out to the terminal file descriptor.
     void flush();
 
-    // Blokujący/nieblokujący odczyt surowych bajtów wejścia.
-    //   timeoutMs < 0  -> czekaj bez limitu,
-    //   timeoutMs == 0 -> sprawdź natychmiast i wróć (non-blocking),
-    //   timeoutMs > 0  -> czekaj maks. tyle milisekund.
-    // Zwraca liczbę odczytanych bajtów (0 jeśli minął timeout).
+    // Blocking/non-blocking raw input byte read.
+    //   timeoutMs < 0  -> wait indefinitely,
+    //   timeoutMs == 0 -> check immediately and return (non-blocking),
+    //   timeoutMs > 0  -> wait at most that many milliseconds.
+    // Returns the number of bytes read (0 if the timeout elapsed).
     std::size_t read(char* buf, std::size_t maxLen, int timeoutMs = -1);
 
-    // Zwraca true, jeśli od ostatniego wywołania terminal zmienił rozmiar
-    // (SIGWINCH), i zeruje flagę. Warstwa wyżej (Screen) użyje tego, żeby
-    // wiedzieć kiedy przebudować framebuffer.
+    // Returns true if the terminal has changed size since the last call
+    // (SIGWINCH), and clears the flag. The layer above (Screen) uses this to
+    // know when to rebuild the framebuffer.
     bool consumeResizeFlag();
 
 private:
@@ -74,9 +74,9 @@ private:
     void restoreSignalHandlers();
 
 public:
-    // Publiczne tylko dlatego, że handler sygnału (funkcja C, poza klasą)
-    // musi się odwołać do tego typu przez wskaźnik. Aplikacje korzystające
-    // z fenrir nie mają powodu, by same tego używać.
+    // Public only because the signal handler (a C function, outside the class)
+    // must refer to this type through a pointer. Applications built on
+    // fenrir have no reason to use this themselves.
     struct Impl;
 
 private:

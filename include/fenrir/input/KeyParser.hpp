@@ -6,11 +6,11 @@
 
 namespace fenrir {
 
-// Zamienia surowe bajty z Terminal::read() na KeyEvent. Zakłada, że jedna
-// sekwencja (np. strzałka = 3 bajty ESC [ A) przychodzi w jednym read()
-// — prawdziwe dla lokalnej klawiatury; przy wejściu przez wolne łącze
-// sieciowe sekwencja mogłaby się rozdzielić na kilka read(), co tu nie
-// jest obsługiwane (celowa uproszczenie na tym etapie).
+// Converts raw bytes from Terminal::read() into KeyEvent. Assumes that one
+// sequence (e.g. an arrow = 3 bytes ESC [ A) arrives in a single read()
+// — true for a local keyboard; over a slow network link the sequence
+// could split across several read() calls, which is not handled
+// here (a deliberate simplification at this stage).
 class KeyParser {
 public:
     std::vector<KeyEvent> feed(const char* data, std::size_t len);

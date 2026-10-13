@@ -11,12 +11,12 @@
 
 namespace fenrir {
 
-// Widok katalogu = model (DirectoryListing) + lista (ListView) spierte w jeden
-// widget: naglowek ze sciezka, przewijana lista, wejscie do katalogow (Enter),
-// w gore (Backspace), bledy listowania rysowane w miejscu. Jedyne miejsce
-// obslugi "przegladania katalogu" — FileDialog i Menedzer plikow skladjaja
-// DWA takie widoki zamiast pisac wlasne rysowanie list (duplikacja, ktora
-// stalala sie w projekcie w trzech miejscach).
+// Directory view = model (DirectoryListing) + list (ListView) spliced into a single
+// widget: path header, scrollable list, entering directories (Enter), going
+// up (Backspace), listing errors drawn in place. The ONLY place that handles
+// "directory browsing" — FileDialog and the file manager compose TWO such views
+// instead of writing their own list drawing (a duplication that had crept into
+// the project in three places).
 class DirectoryView : public Widget {
 public:
     explicit DirectoryView(std::string startDir) : listing_(std::move(startDir)) {
@@ -24,9 +24,9 @@ public:
         refresh(/*keepSelection=*/false);
     }
 
-    std::function<void(const std::string& path)> onFileActivate; // Enter na pliku
-    std::function<void(const std::string& dir)> onDirChange;     // po zmianie katalogu
-    std::function<void(const std::string& msg)> onStatus;        // komunikat typu "weszles do ..."
+    std::function<void(const std::string& path)> onFileActivate; // Enter on a file
+    std::function<void(const std::string& dir)> onDirChange;     // after the directory changes
+    std::function<void(const std::string& msg)> onStatus;        // status message like "Entered: ..."
 
     const std::string& currentDir() const { return listing_.currentDir(); }
     bool hasError() const { return listing_.hasError(); }
@@ -39,7 +39,7 @@ public:
     bool selectedIsParent() const { return listing_.isParentAt(list_.selectedIndex()); }
     std::string selectedPath() const { return listing_.pathAt(list_.selectedIndex()); }
 
-    // Przejscie do podanego katalogu (Ctrl+G / "Idz do folderu...").
+    // Switch to the given directory (Ctrl+G / "Go to folder...").
     void setDirectory(std::string dir) {
         listing_ = DirectoryListing(std::move(dir));
         refresh(/*keepSelection=*/false);
@@ -53,18 +53,18 @@ public:
         if (onDirChange && listing_.currentDir() != before) onDirChange(listing_.currentDir());
     }
 
-    // Ponowny odczyt tego samego katalogu z DYSKU (po kopiowaniu/przenoszeniu/
-    // usunieciu/przemianowaniu) — zaznaczenie zostaje na tym samym indeksie
-    // (clamp), zeby nie skakac do gory. Wczesniej brakowalo listing_.reload():
-    // odswiezalismy tylko widok z pamieciowego modelu, wiec po operacjach na
-    // plikach panele zostawaly z starymi wpisami — kopiowanie "nic nie robilo".
+    // Re-read the same directory from DISK (after copy/move/delete/rename) —
+    // the selection stays on the same index (clamped) so it doesn't jump to the
+    // top. Previously listing_.reload() was missing: we only refreshed the view
+    // from the in-memory model, so after file operations the panels kept stale
+    // entries — copying "did nothing".
     void reload() {
         listing_.reload();
         refresh(/*keepSelection=*/true);
     }
 
-    // Zaznaczony katalog to ".."? Niszczenie/przemianowanie ".." ruszyloby
-    // katalog nadrzedny — zabezpieczenie wywolujacego (patrz menedzer plikow).
+    // Is the selected directory ".."? Deleting/renaming ".." would touch the
+    // parent directory — guard for the caller (see the file manager).
     bool selectionIsSafeTarget() const { return !listing_.isParentAt(list_.selectedIndex()); }
 
     void draw(Screen& screen) override {
@@ -72,7 +72,7 @@ public:
         if (bounds_.w <= 0 || bounds_.h <= 0) return;
 
         if (listing_.hasError()) {
-            // Blad listowania: czytelny czerwony komunikat zamiast pustej listy.
+            // Listing error: a clear red message instead of an empty list.
             screen.fillRect(bounds_, Cell{U' ', t.surfaceText, t.surfaceBg, 0});
             screen.fillRect(Rect{bounds_.x, bounds_.y, bounds_.w, 1},
                             Cell{U' ', t.headerText, t.headerBg, StyleBold});
@@ -114,7 +114,7 @@ private:
         if (listing_.enterAt(idx)) {
             refresh(/*keepSelection=*/false);
             if (onDirChange) onDirChange(listing_.currentDir());
-            if (onStatus) onStatus("Wszedles do: " + listing_.currentDir());
+            if (onStatus) onStatus("Entered: " + listing_.currentDir());
             return;
         }
         if (onFileActivate) onFileActivate(listing_.pathAt(idx));

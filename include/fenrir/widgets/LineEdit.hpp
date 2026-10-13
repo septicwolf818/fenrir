@@ -10,21 +10,21 @@
 
 namespace fenrir {
 
-// Jednoliniowe pole tekstowe z kursorem i przewijaniem w poziomie.
-// Nadaje sie jako content okna (wtedy edycja -> tryb Edit z kursorem GUI)
-// lub jako child dialogu (prompt / pole nazwy pliku).
+// Single-line text field with a cursor and horizontal scrolling.
+// Works as window content (then editing -> Edit mode with the GUI cursor)
+// or as a dialog child (prompt / file name field).
 class LineEdit : public Widget {
 public:
     explicit LineEdit(std::u32string initial = {}, std::u32string label = {})
         : value_(std::move(initial)), label_(std::move(label)) {
-        editable_ = true; // pole tekstowe zawsze chce kursor
-        // Kursor na KONCU wartosci wstepowej (jak setValue) — bez tego dialog
-        // zapisu mial kursor na 0 i Backspace nic nie kasowal.
+        editable_ = true; // a text field always wants a cursor
+        // Cursor at the END of the initial value (as in setValue) — without this
+        // the save dialog started with the cursor at 0 and Backspace deleted nothing.
         cursor_ = static_cast<int>(value_.size());
     }
 
     std::function<void(const std::u32string&)> onSubmit; // Enter
-    std::function<void(const std::u32string&)> onChange;  // kazda zmiana tresci
+    std::function<void(const std::u32string&)> onChange;  // every content change
 
     const std::u32string& value() const { return value_; }
     void setValue(std::u32string v) {
@@ -42,7 +42,7 @@ public:
         screen.fillRect(bounds_, Cell{U' ', t.fieldText, t.fieldBg, 0});
         if (bounds_.w <= 0 || bounds_.h <= 0) return;
 
-        // Etykieta (np. "Nazwa: ") na poczatku pola.
+        // Label (e.g. "Name: ") at the start of the field.
         int prefixW = 0;
         if (!label_.empty()) {
             std::u32string lab = text::clip(label_, bounds_.w);
@@ -54,7 +54,7 @@ public:
         if (fieldW <= 0) return;
         ensureVisible(fieldW);
 
-        // Widoczny wycinek wartosci (przewinany tak, zeby kursor byl widoczny).
+        // Visible slice of the value (scrolled so the cursor stays in view).
         const int start = std::clamp(scrollX_, 0, std::max(0, static_cast<int>(value_.size())));
         const int avail = std::min(fieldW, static_cast<int>(value_.size()) - start);
         if (avail > 0) {
@@ -63,7 +63,7 @@ public:
                                                               static_cast<std::size_t>(avail)),
                            t.fieldText, t.fieldBg);
         }
-        // Podkreslenie aktywnego pola — czytelne rowniez gdy kursor GUI nie jest widoczny.
+        // Underline for the active field — still clear when the GUI cursor is not visible.
         if (focused_) {
             for (int x = bounds_.x; x < bounds_.x + bounds_.w; ++x) {
                 Cell c = screen.at(x, bounds_.y);
@@ -119,7 +119,7 @@ public:
                     value_.insert(value_.begin() + cursor_, ev.character);
                     ++cursor_;
                     if (onChange) onChange(value_);
-                    // Chcemy zobaczyc kursor — prosimy Desktop o tryb Edit.
+                    // We want to show the cursor — ask Desktop for Edit mode.
                     return KeyEventResult::EnteredEdit;
                 }
                 return KeyEventResult::Ignored;

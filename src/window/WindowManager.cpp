@@ -20,8 +20,8 @@ void WindowManager::closeWindow(Window* w) {
     windows_.erase(it);
     if (!wasFocused || windows_.empty()) return;
 
-    // Nowy fokus = okno NA WIERZSZCIE (najwiekszy zOrder), nie ostatnie
-    // utworzone — zamykanie okna na wierzchu nie moze odslocic zakopanego.
+    // New focus = the window ON TOP (highest zOrder), not the last one
+    // created — closing the top window must not reveal a buried one.
     Window* top = nullptr;
     for (auto& p : windows_)
         if (!p->minimized() && (!top || p->zOrder() > top->zOrder())) top = p.get();
@@ -42,7 +42,7 @@ void WindowManager::bringToFront(Window* w) {
 void WindowManager::focus(Window* w) {
     for (auto& p : windows_) p->setFocused(p.get() == w);
     if (w) {
-        w->setMinimized(false); // fokusowanie przywraca zminimalizowane okno
+        w->setMinimized(false); // focusing restores a minimized window
         bringToFront(w);
     }
 }

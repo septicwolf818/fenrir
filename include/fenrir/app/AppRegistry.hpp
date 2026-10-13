@@ -6,9 +6,9 @@
 
 namespace fenrir {
 
-// Rejestr zainstalowanych aplikacji. Desktop czyta ta liste, zeby zbudowac
-// menu "Aplikacje". Dodanie nowej aplikacji do systemu = registerApp(...),
-// bez dotykania kodu Desktop/WindowManager.
+// Registry of installed applications. Desktop reads this list to build the
+// "Applications" menu. Adding a new app to the system = registerApp(...),
+// without touching Desktop/WindowManager code.
 class AppRegistry {
 public:
     App* registerApp(std::unique_ptr<App> app) {

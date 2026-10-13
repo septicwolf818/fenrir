@@ -10,8 +10,8 @@
 
 namespace fenrir {
 
-// Lista wyboru (tez podstawowe menu rozwijane). Wiersze na surface,
-// zaznaczenie na accent — dokladnie jak w listach plikow.
+// Selection list (also the basic dropdown menu). Rows on surface,
+// selection on accent — exactly like in file lists.
 class Menu : public Widget {
 public:
     explicit Menu(std::vector<std::u32string> items) : items_(std::move(items)) {}
@@ -35,7 +35,7 @@ public:
             const Color bg = sel ? t.accentBg : t.surfaceBg;
             const uint8_t style = sel ? StyleBold : StyleNone;
             const int y = bounds_.y + (i - scroll_);
-            // Tekst przyciety + dopelnienie wiersza tym samym tlem (pelne podswietlenie).
+            // Text clipped + the row padded with the same background (full highlight).
             screen.fillRect(Rect{bounds_.x, y, bounds_.w, 1}, Cell{U' ', fg, bg, style});
             screen.putText(bounds_.x + 1, y, text::clip(items_[static_cast<std::size_t>(i)], maxW), fg, bg, style);
         }
@@ -86,8 +86,8 @@ public:
     }
 
 private:
-    // Przewija tak, zeby zaznaczony element byl widoczny — wpp. duze menu
-    // (wiecej pozycji niz wysokosc bounds_.h) mialoby zaznaczenie poza ekranem.
+    // Scrolls so the selected item is visible — otherwise a large menu
+    // (more items than bounds_.h rows) would have its selection off screen.
     void ensureVisible() {
         if (bounds_.h <= 0 || items_.empty()) return;
         if (selected_ < scroll_) scroll_ = selected_;

@@ -13,14 +13,14 @@
 
 namespace fenrir::apps {
 
-// Widok ustawien: lista wierszy (nazwa + biezaca wartosc jako detail),
-// Enter na wierszu zmienia wartosc. Motyw podmieniany natychmiast
-// (theme::apply — caly UI rysuje z theme::active co tick, wiec zmiana
-// widoczna od razu), kazda zmiana zapisywana do settings.ini.
+// Settings view: a list of rows (name + current value as detail),
+// Enter/Space on a row changes the value. Theme is swapped immediately
+// (theme::apply — the whole UI draws from theme::active every tick, so the
+// change is visible at once), every change is saved to settings.ini.
 class SettingsView : public Widget {
 public:
     explicit SettingsView(AppContext& ctx) : ctx_(ctx) {
-        list_.setHeader(U"Ustawienia");
+        list_.setHeader(U"Settings");
         list_.onActivate = [this](int idx) { activateRow(idx); };
         rebuild();
     }
@@ -32,12 +32,7 @@ public:
         list_.draw(screen);
 
         status_.setBounds(Rect{bounds_.x, bounds_.y + std::max(0, bounds_.h - statusH), bounds_.w, statusH});
-        // StatusBar rysuje prawa kolumne NA koncu paska, wiec w waskim oknie
-        // "Zapisano" nachodziloby na dluga podpowiedz — przy wiadomosci po prawej
-        // pokazujemy krotsza instrukcje (12 + 12 <= minWidth 30, nic sie nie naklada).
-        status_.setText(statusRight_.empty() ? U"Enter: zmien | Zmiany zapisuja sie od razu"
-                                             : U"Enter: zmien",
-                        statusRight_);
+        status_.setText(U"Arrows: move | Enter/Space: change");
         status_.draw(screen);
     }
 
@@ -47,17 +42,21 @@ public:
 
     bool editable() const override { return false; }
 
-    // Minimum: naglowek + wiersze ustawien + pasek statusu.
+    // Minimum: header + settings rows + status bar.
     int minWidth() const override { return 30; }
     int minHeight() const override { return 6; }
 
 private:
+    void showStatus(std::u32string message) {
+        status_.setMessage(std::nullopt, std::optional<std::u32string>{std::move(message)});
+    }
+
     void rebuild() {
         std::vector<ListView::Item> items;
-        items.push_back({U"Motyw", text::toUtf32(currentThemeLabel())});
-        items.push_back({U"Zegar z sekundami", settings::active.taskbarSeconds ? U"Wlaczony" : U"Wylaczony"});
-        items.push_back({U"Nazwa pulpitu", text::toUtf32(settings::active.desktopName)});
-        items.push_back({U"Miganie kursora", settings::active.cursorBlink ? U"Wlaczony" : U"Wylaczony"});
+        items.push_back({U"Theme", text::toUtf32(currentThemeLabel())});
+        items.push_back({U"Taskbar clock seconds", settings::active.taskbarSeconds ? U"On" : U"Off"});
+        items.push_back({U"Desktop name", text::toUtf32(settings::active.desktopName)});
+        items.push_back({U"Cursor blink", settings::active.cursorBlink ? U"On" : U"Off"});
         list_.setItems(std::move(items));
     }
 
@@ -67,14 +66,14 @@ private:
     }
 
     void activateRow(int idx) {
-        bool ok = false; // czy settings.ini faktycznie przyjal nowa wartosc
+        bool ok = false; // whether settings.ini actually accepted the new value
         switch (idx) {
             case 0: ok = cycleTheme(); break;
             case 1:
                 settings::active.taskbarSeconds = !settings::active.taskbarSeconds;
                 ok = saveChecked("taskbar_seconds", settings::active.taskbarSeconds ? "1" : "0");
                 break;
-            case 2: editDesktopName(); return; // prompt ma wlasny callback + rebuild
+            case 2: editDesktopName(); return; // the prompt has its own callback + rebuild
             case 3:
                 settings::active.cursorBlink = !settings::active.cursorBlink;
                 ok = saveChecked("cursor_blink", settings::active.cursorBlink ? "1" : "0");
@@ -82,31 +81,34 @@ private:
             default: return;
         }
         rebuild();
-        statusRight_ = ok ? U"Zapisano" : U"Nie zapisano";
+        showStatus(ok ? U"Saved" : U"Not saved");
     }
 
-    // Zwraca false, gdy nie ma czego przelaczyc (pusty katalog) albo gdy plik
-    // nie przyjal nowej wartosci — wtedy status pokazuje "Nie zapisano".
+    // Returns false when there's nothing to cycle (empty catalog) or when the file
+    // didn't accept the new value — then the status shows "Not saved".
     bool cycleTheme() {
         const auto& cat = theme::catalog();
         if (cat.empty()) return false;
-        std::size_t cur = 0;
+        std::size_t nextIndex = 0;
         for (std::size_t i = 0; i < cat.size(); ++i) {
-            if (cat[i].id == settings::active.theme) { cur = i; break; }
+            if (cat[i].id == settings::active.theme) {
+                nextIndex = (i + 1) % cat.size();
+                break;
+            }
         }
-        const theme::NamedTheme& next = cat[(cur + 1) % cat.size()];
+        const theme::NamedTheme& next = cat[nextIndex];
         theme::apply(next.id);
         settings::active.theme = next.id;
         return saveChecked("theme", settings::active.theme);
     }
 
-    // settings::save() zwraca void i milczy, gdy pliku nie da sie zapisac
-    // (np. brak prawa do ~/.config/fenrir) — wiec sami odczytujemy settings.ini
-    // i porownujemy z wartoscia, ktora pokazuje UI. Tylko wtedy wolamy "Zapisano",
-    // inaczej pasek statusu klamalby.
+    // settings::save() returns void and stays silent when the file can't be written
+    // (e.g. no permission for ~/.config/fenrir) — so we read settings.ini ourselves
+    // and compare against the value the UI shows. Only then do we report "Saved",
+    // otherwise the status bar would lie.
     bool saveChecked(const char* key, const std::string& value) {
         settings::save();
-        const std::string file = settings::path(); // lokalna kopia, jak w settings::load()
+        const std::string file = settings::path(); // local copy, as in settings::load()
         std::ifstream f(file);
         if (!f) return false;
         const std::string want = std::string(key) + "=" + value;
@@ -117,43 +119,48 @@ private:
     }
 
     void editDesktopName() {
-        // Dialog zyje w swoim oknie; token strzeze `this` — jesli okno
-        // ustawien zamknie sie wczesniej, callback po prostu wraca.
+        // The dialog lives in its own window; the token guards `this` — if the
+        // settings window closes first, the callback just returns.
         std::weak_ptr<int> token = lifetimeToken();
-        ctx_.prompt(U"Nazwa pulpitu", U"Wpisz nowa nazwe pulpitu:", U"Nazwa: ",
+        ctx_.prompt(U"Desktop name", U"Enter a new desktop name:", U"Name: ",
                     text::toUtf32(settings::active.desktopName),
                     [this, token](std::optional<std::u32string> v) {
                         if (!token.lock()) return;
                         if (!v) return;
-                        // Pusta nazwa nie dziala: pasek menu i tak wrocilby do
-                        // nazwy ze startu (Desktop::drawMenuBar), a po restarcie
-                        // zostalaby pusta — wiec odrzucamy z komunikatem.
-                        if (v->empty()) { statusRight_ = U"Podaj nazwe"; return; }
-                        settings::active.desktopName = text::toUtf8(*v);
+                        // The settings loader trims ASCII whitespace around values,
+                        // so trim the same characters here to preserve the name on reload.
+                        const std::size_t first = v->find_first_not_of(U" \t\r\n");
+                        if (first == std::u32string::npos) {
+                            showStatus(U"Enter a name");
+                            return;
+                        }
+                        const std::size_t last = v->find_last_not_of(U" \t\r\n");
+                        const std::u32string name = v->substr(first, last - first + 1);
+                        settings::active.desktopName = text::toUtf8(name);
                         rebuild();
-                        statusRight_ = saveChecked("desktop_name", settings::active.desktopName)
-                                           ? U"Zapisano" : U"Nie zapisano";
+                        showStatus(saveChecked("desktop_name", settings::active.desktopName)
+                                       ? U"Saved" : U"Not saved");
                     });
     }
 
     AppContext& ctx_;
     ListView list_;
     StatusBar status_;
-    std::u32string statusRight_;
 };
 
 class SettingsApp : public App {
 public:
-    std::string name() const override { return "Ustawienia"; }
+    std::string name() const override { return "Settings"; }
 
     std::unique_ptr<Widget> createView(AppContext& ctx) override {
         return std::make_unique<SettingsView>(ctx);
     }
 
     Rect preferredBounds(const Rect& desktopArea) const override {
-        int w = std::min(52, std::max(36, desktopArea.w - 6));
-        int h = std::min(10, std::max(7, desktopArea.h - 4));
-        return Rect{desktopArea.x + 4, desktopArea.y + 2, w, h};
+        int w = std::min(52, std::max(32, desktopArea.w - 4));
+        int h = std::min(10, std::max(8, desktopArea.h - 4));
+        return Rect{desktopArea.x + std::max(0, (desktopArea.w - w) / 2),
+                    desktopArea.y + std::max(0, (desktopArea.h - h) / 2), w, h};
     }
 };
 

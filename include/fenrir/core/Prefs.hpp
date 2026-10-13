@@ -5,41 +5,41 @@
 
 namespace fenrir::prefs {
 
-// Preferencje aplikacji — JEDEN plik key=value na aplikacje:
+// Application preferences — ONE key=value file per application:
 //   ~/.config/fenrir/apps/<appId>.conf
-// (katalog $HOME/.config/fenrir istnieje juz dzieki settings.ini; podkatalog
-// apps/ Prefs tworzy przy pierwszym zapisie). Format jak w settings.ini:
-// `klucz=wartosc`, linie z '#'/';' i puste sa ignorowane. Nieznane klucze
-// przy odczycie trafiaja do mapy — aplikacja moze je ignorowac, wiec
-// dodanie/odjecie klucza jest kompatybilne w obu kierunkach.
+// (the $HOME/.config/fenrir directory already exists thanks to settings.ini; the
+// apps/ subdirectory is created by Prefs on first save). Format as in settings.ini:
+// `key=value`, lines starting with '#'/';' and empty lines are ignored. Unknown keys
+// are kept in the map on load - the application may ignore them, so
+// adding/removing keys is backward and forward compatible.
 //
-// Uzycie w aplikacji:
-//   auto& p = prefs::forApp("editor");   // cache'owana instancja na proces
+// Usage in an application:
+//   auto& p = prefs::forApp("editor");   // cached per-process instance
 //   bool spaces = p.getBool("insert_spaces", false);
-//   p.setBool("insert_spaces", true);    // zapisuje plik od razu
+//   p.setBool("insert_spaces", true);    // writes the file immediately
 //
-// set* zapisuje plik natychmiast (male pliki — brak dirty-trackingu, aplikacje
-// nie musza pamietac o save()). save() tez jest publiczne (zbiorcze zapisy).
+// set* writes the file immediately (small files - no dirty tracking, applications
+// don't have to remember to call save()). save() is also public (bulk saves).
 class Prefs {
 public:
-    // Wczytuje plik aplikacji o danym appId (brak pliku = pusta mapa).
+    // Loads the app file for the given appId (no file = empty map).
     void load(std::string_view appId);
 
-    // Zapisuje cala mape do ~/.config/fenrir/apps/<appId>.conf
-    // (tworzy katalogi). Zwraca false, gdy pliku nie da sie zapisac.
+    // Writes the whole map to ~/.config/fenrir/apps/<appId>.conf
+    // (creating directories). Returns false when the file cannot be written.
     bool save() const;
 
     std::string get(const std::string& key, const std::string& fallback = {}) const;
     bool getBool(const std::string& key, bool fallback = false) const;
     int getInt(const std::string& key, int fallback = 0) const;
 
-    // Ustawia i zapisuje plik. set(key, "") usuwa klucz (plik bez smieci).
+    // Sets and saves the file. set(key, "") removes the key (keeps the file tidy).
     void set(const std::string& key, const std::string& value);
     void setBool(const std::string& key, bool value);
     void setInt(const std::string& key, int value);
 
     std::string_view appId() const { return appId_; }
-    // Pelna sciezka pliku (do komunikatow/debugu).
+    // Full file path (for messages/debugging).
     std::string path() const;
 
 private:
@@ -47,9 +47,9 @@ private:
     std::map<std::string, std::string> kv_;
 };
 
-// Instancja preferencji danej aplikacji, cache'owana na caly proces —
-// wszystkie okna tej samej aplikacji dziela jedna mape (zapis = jeden plik).
-// appId powinno byc stabilne i po angielsku ("editor", "calendar", "paint").
+// Preferences instance for a given application, cached for the whole process -
+// all windows of the same application share one map (save = one file).
+// appId should be stable and in English ("editor", "calendar", "paint").
 Prefs& forApp(std::string_view appId);
 
 } // namespace fenrir::prefs

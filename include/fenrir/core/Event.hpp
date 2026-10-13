@@ -2,11 +2,10 @@
 
 namespace fenrir {
 
-// KeyEvent (patrz input/Key.hpp) jest obsługiwane bezpośrednio w pętli
-// Application - to jedyne źródło zdarzeń na tym etapie (klawiatura).
-// Poniższe struktury istnieją, żeby dodanie myszy/dotyku/timerów w
-// przyszłości nie wymagało przebudowy architektury, ale nie są jeszcze
-// nigdzie emitowane.
+// KeyEvent (see input/Key.hpp) is handled directly in the Application
+// loop - it is the only event source at this stage (keyboard).
+// The structs below exist so that adding mouse/touch/timers later won't
+// require an architecture rebuild, but they are not yet emitted anywhere.
 
 struct PointerEvent {
     int x = 0, y = 0;

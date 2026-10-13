@@ -32,16 +32,16 @@ std::string path() {
 }
 
 void load() {
-    // Wartosci domyslne juz siedza w `active` (struct Settings).
-    // Nieznane id motywu wraca do classic — apply() zignoruje nieznane id,
-    // wiec recznie ustawiamy klucz na wypadek, gdyby katalog sie zmienil.
-    const std::string file = path(); // lokalna kopia — strumien nie moze trzymac temporara
+    // Default values already live in `active` (struct Settings).
+    // An unknown theme id falls back to classic — apply() ignores unknown ids,
+    // so we set the key manually in case the catalog changed.
+    const std::string file = path(); // local copy — the stream can't hold the temporary
     std::ifstream f(file);
-    if (!f) return; // brak pliku = ustawienia domyslne
+    if (!f) return; // no file = default settings
 
     std::string line;
     while (std::getline(f, line)) {
-        std::string sv = trim(line); // std::string, nie string_view — trim zwraca temporara
+        std::string sv = trim(line); // std::string, not string_view — trim returns a temporary
         if (sv.empty() || sv.front() == '#' || sv.front() == ';') continue;
         std::size_t eq = sv.find('=');
         if (eq == std::string_view::npos) continue;
@@ -53,11 +53,11 @@ void load() {
         } else if (key == "taskbar_seconds") {
             active.taskbarSeconds = parseBool(val, active.taskbarSeconds);
         } else if (key == "desktop_name") {
-            active.desktopName = val; // pusta -> pasek pokaze nazwe ze startu (fallback w Desktop)
+            active.desktopName = val; // empty -> the taskbar shows the startup name (fallback in Desktop)
         } else if (key == "cursor_blink") {
             active.cursorBlink = parseBool(val, active.cursorBlink);
         }
-        // Nieznane klucze ignorujemy — kompatybilnosc w przod.
+        // Unknown keys are ignored — forward compatibility.
     }
 }
 
@@ -66,9 +66,9 @@ void save() {
     std::filesystem::path p(path());
     std::filesystem::create_directories(p.parent_path(), ec);
     std::ofstream f(p, std::ios::trunc);
-    if (!f) return; // brak zapisu nie jest fatalem — ustawienia dzialaja do konca sesji
+    if (!f) return; // a failed save is not fatal — settings keep working for the session
 
-    f << "# Ustawienia Fenrira (key=value; zmiany widoczne po zapisie)\n"
+    f << "# Fenrir settings (key=value; changes take effect after saving)\n"
       << "theme=" << active.theme << "\n"
       << "taskbar_seconds=" << (active.taskbarSeconds ? "1" : "0") << "\n"
       << "desktop_name=" << active.desktopName << "\n"

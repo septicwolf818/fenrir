@@ -10,19 +10,19 @@
 
 namespace fenrir {
 
-// Genericzna lista z zaznaczeniem, przewijaniem i opcjonalnym naglowkiem +
-// prawa kolumna "detail" (np. rozmiar pliku). Jedno miejsce na caly wzorzec
-// "naglowek + wiersze + zaznaczenie + scroll" — zastepuje recznie rysowane
-// listy w FileDialogu i menedzerze plikow.
+// Generic list with selection, scrolling, and an optional header +
+// right-hand "detail" column (e.g. file size). The single home of the whole
+// "header + rows + selection + scroll" pattern — replaces the hand-drawn
+// lists in FileDialog and the file manager.
 class ListView : public Widget {
 public:
     struct Item {
-        std::u32string text;    // glowna kolumna
-        std::u32string detail;  // prawa kolumna (opcjonalna)
-        bool dim = false;       // wyszarzony wiersz (np. "..")
+        std::u32string text;    // main column
+        std::u32string detail;  // right column (optional)
+        bool dim = false;       // dimmed row (e.g. "..")
     };
 
-    std::function<void(int index)> onActivate; // Enter/Space na zaznaczonym
+    std::function<void(int index)> onActivate; // Enter/Space on the selection
 
     void setItems(std::vector<Item> items) {
         items_ = std::move(items);
@@ -46,7 +46,7 @@ public:
         return &items_[static_cast<std::size_t>(selected_)];
     }
 
-    // Przesuwa zaznaczenie o delta (z owijaniem). Zwraca nowy indeks.
+    // Moves the selection by delta (wrapping). Returns the new index.
     int moveSelection(int delta) {
         if (items_.empty()) return -1;
         clampSelection();
@@ -56,9 +56,9 @@ public:
         return selected_;
     }
 
-    // Przewija tak, zeby zaznaczony element byl widoczny w viewport bounds_.h.
-    // Poziomo: przewija TYLKO zaznaczony wiersz (jego tekst moze byc dluzszy
-    // niz kolumna) — pozostale wiersze odmeruwaja od poczatku, wiec nic nie giniemy.
+    // Scrolls so the selected item is visible in the bounds_.h viewport.
+    // Horizontally: scrolls ONLY the selected row (its text may be longer
+    // than the column) — other rows are drawn from the start, so nothing is lost.
     void ensureVisible() {
         const int rows = viewportRows();
         if (rows <= 0 || items_.empty()) return;
@@ -72,7 +72,7 @@ public:
         const int detailW = static_cast<int>(it.detail.size());
         const int textW = detailW > 0 ? std::max(0, bounds_.w - detailW - 1) : bounds_.w;
         const int len = static_cast<int>(it.text.size());
-        scrollX_ = len <= textW ? 0 : len - textW; // koniec zaznaczonego tekstu zawsze widoczny
+        scrollX_ = len <= textW ? 0 : len - textW; // end of the selected text always visible
     }
 
     void draw(Screen& screen) override {
@@ -82,7 +82,7 @@ public:
 
         int y = bounds_.y;
         if (!header_.empty()) {
-            // Fokusowany widget = naglowek na kolorze akcentu (wyrazny aktywny panel).
+            // Focused widget = header in the accent color (clearly marks the active panel).
             const Color hb = focused_ ? t.accentBg : t.headerBg;
             const Color ht = focused_ ? t.accentText : t.headerText;
             screen.fillRect(Rect{bounds_.x, y, bounds_.w, 1}, Cell{U' ', ht, hb, StyleBold});
@@ -100,14 +100,14 @@ public:
 
             Color fg = sel ? t.accentText : t.surfaceText;
             Color bg = sel ? t.accentBg : t.surfaceBg;
-            if (!sel && it.dim) fg = t.dimText; // przygaszony wiersz (np. "..")
+            if (!sel && it.dim) fg = t.dimText; // dimmed row (e.g. "..")
             const uint8_t style = sel ? StyleBold : StyleNone;
 
             screen.fillRect(Rect{bounds_.x, y + row, bounds_.w, 1}, Cell{U' ', fg, bg, style});
 
-            // Kolumna detail przypieta do prawej — tekst glowny ucina sie przed nia.
-            // Detail dluzszy od wiersza nie moze wyjsc poza widget (drukowalby
-            // na ramce okna) — przycinamy do w-1, zostawiajac miejsce na tekst.
+            // Detail column pinned to the right — the main text is clipped before it.
+            // A detail longer than the row must not spill past the widget (it would
+            // print over the window border) — clipped to w-1, leaving room for the text.
             int detailW = std::min(static_cast<int>(it.detail.size()),
                                    std::max(0, bounds_.w - 1));
             int textW = detailW > 0 ? std::max(0, bounds_.w - detailW - 1) : bounds_.w;
@@ -115,8 +115,8 @@ public:
                 int dx = bounds_.x + bounds_.w - detailW;
                 screen.putText(dx, y + row, text::clip(it.detail, detailW), fg, bg, style);
             }
-            // Tylko zaznaczony wiersz jest przewiniety poziomo (scrollX_),
-            // reszta wyswietlana od pierwszego znaku.
+            // Only the selected row is scrolled horizontally (scrollX_);
+            // the rest is displayed from the first character.
             std::u32string_view tv = it.text;
             const int off = sel ? std::min(scrollX_, std::max(0, static_cast<int>(tv.size()) - 1)) : 0;
             if (off > 0) tv.remove_prefix(static_cast<std::size_t>(off));
@@ -167,7 +167,7 @@ private:
     std::u32string header_;
     int selected_ = 0;
     int scroll_ = 0;
-    int scrollX_ = 0; // przesuniecie poziome TYLKO zaznaczonego wiersza
+    int scrollX_ = 0; // horizontal offset of ONLY the selected row
 };
 
 } // namespace fenrir

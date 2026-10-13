@@ -13,15 +13,15 @@
 
 namespace fenrir {
 
-// Modalny dialog w oknie: komunikat + przyciski (+ pola tekstowe).
-// Zastepuje reczne wynalazki w aplikacjach (o "About", potwierdzenie usuniecia,
-// prompt przemianowania) — aplikacje dostaja gotowy widget i otwieraja go przez
-// AppContext::openDialog(). onResult(idx): idx = numer przycisku, -1 = Esc/anuluj.
+// Modal dialog in a window: message + buttons (+ text fields).
+// Replaces hand-rolled attempts in apps (an "About" box, delete confirmation,
+// rename prompt) — apps get a ready-made widget and open it via
+// AppContext::openDialog(). onResult(idx): idx = button number, -1 = Esc/Cancel.
 //
-// Pol tekstowych moze byc wiecej niz jedno (addInput) — np. kalendarz pyta
-// o tytul/godziny w jednym okienku. Tab/strzalki przechodza miedzy polami,
-// z ostatniego pola na przyciski (i z powrotem); Enter w polu = zatwierdz
-// (jakby wcisnac OK).
+// There can be more than one text field (addInput) — e.g. the calendar asks
+// for title/times in a single dialog. Tab/arrows move between fields, from the
+// last field to the buttons (and back); Enter in a field = confirm
+// (as if OK were pressed).
 class Dialog : public Widget {
 public:
     enum class Buttons { Ok, OkCancel, YesNo, YesNoCancel };
@@ -36,8 +36,8 @@ public:
     void setMessage(std::u32string m) { message_ = std::move(m); }
     const std::u32string& message() const { return message_; }
 
-    // Dodaje pole tekstowe (prompt / formularz). Zwraca wskaznik dla wygody
-    // ustawien callbackow. Fokus startuje na pierwszym dodanym polu.
+    // Adds a text field (prompt / form). Returns a pointer for convenience
+    // when wiring callbacks. Focus starts on the first field added.
     LineEdit* addInput(std::u32string label = {}, std::u32string initial = {}) {
         inputs_.push_back(std::make_unique<LineEdit>(std::move(initial), std::move(label)));
         LineEdit* raw = inputs_.back().get();
@@ -46,7 +46,7 @@ public:
         inputIdx_ = 0;
         return raw;
     }
-    // Zgodnosc ze starym API (AppContext::prompt): pierwsze pole.
+    // Compatibility with the old API (AppContext::prompt): first field.
     LineEdit* setInput(std::u32string label = {}, std::u32string initial = {}) {
         return addInput(std::move(label), std::move(initial));
     }
@@ -55,12 +55,12 @@ public:
     LineEdit* input(std::size_t i) { return i < inputs_.size() ? inputs_[i].get() : nullptr; }
     std::size_t inputCount() const { return inputs_.size(); }
 
-    // Wysokosc dialogu dla danej szerokosci — do rozmiarowania okna przez Desktop.
+    // Dialog height for a given width — used by Desktop to size the window.
     int heightForWidth(int w) const {
         const int inner = std::max(1, w - 2);
         const int msgLines = static_cast<int>(text::wrap(message_, inner).size());
         const int ins = static_cast<int>(inputs_.size());
-        return 1 + msgLines + ins + 1 + 1 + 1; // pad + tekst + pola + odstep + przyciski + pad
+        return 1 + msgLines + ins + 1 + 1 + 1; // pad + text + fields + gap + buttons + pad
     }
 
     bool editable() const override { return hasInput(); }
@@ -87,7 +87,7 @@ public:
             ++y;
         }
 
-        // Przyciski na ostatnim wierszu (Panel rozklada je rownomiernie).
+        // Buttons on the last row (Panel lays them out evenly).
         panel_->setBounds(Rect{bounds_.x, bounds_.y + bounds_.h - 1, bounds_.w, 1});
         panel_->setFocused(focused_ && zone_ == Zone::Buttons);
         panel_->draw(screen);
@@ -100,12 +100,12 @@ public:
     }
 
     KeyEventResult handleKey(const KeyEvent& ev) override {
-        // Esc = anuluj (zawsze, niezaleznie od strefy).
+        // Esc = cancel (always, regardless of zone).
         if (ev.key == Key::Escape) {
             fire(-1);
             return KeyEventResult::Activated;
         }
-        // Tab = przelaczanie stref: pole -> kolejne pole -> przyciski -> pole...
+        // Tab = zone switching: field -> next field -> buttons -> field...
         if (ev.key == Key::Tab && hasInput()) {
             if (zone_ == Zone::Buttons) {
                 zone_ = Zone::Input;
@@ -119,7 +119,7 @@ public:
         }
 
         if (zone_ == Zone::Input) {
-            // Up/Down = miedzy polami (z krajow na przyciski i z powrotem).
+            // Up/Down = move between fields (from the ends onto the buttons and back).
             if (ev.key == Key::Up) {
                 if (inputIdx_ > 0) --inputIdx_;
                 else zone_ = Zone::Buttons;
@@ -134,8 +134,8 @@ public:
             return r == KeyEventResult::Ignored ? KeyEventResult::Consumed : r;
         }
 
-        // Strefa przyciskow: strzalka gore na pierwszym przycisku wraca do
-        // ostatniego pola (dla jednego pola — do niego, jak dawniej).
+        // Button zone: Up on the first button returns to the last field
+        // (with a single field — to that field, as before).
         if (hasInput() && ev.key == Key::Up && panel_->selectedIndex() == 0) {
             zone_ = Zone::Input;
             inputIdx_ = inputs_.size() - 1;
@@ -157,9 +157,9 @@ private:
     static std::vector<std::u32string> labelsFor(Buttons b) {
         switch (b) {
             case Buttons::Ok:            return {U"OK"};
-            case Buttons::OkCancel:      return {U"OK", U"Anuluj"};
-            case Buttons::YesNo:         return {U"Tak", U"Nie"};
-            case Buttons::YesNoCancel:   return {U"Tak", U"Nie", U"Anuluj"};
+            case Buttons::OkCancel:      return {U"OK", U"Cancel"};
+            case Buttons::YesNo:         return {U"Yes", U"No"};
+            case Buttons::YesNoCancel:   return {U"Yes", U"No", U"Cancel"};
         }
         return {U"OK"};
     }
@@ -180,7 +180,7 @@ private:
 
     void fire(int idx) {
         if (onResult) {
-            auto cb = onResult; // kopiujemy — callback moze zamknac to okno (Dialog zniszczony)
+            auto cb = onResult; // copy it — the callback may close this window (Dialog destroyed)
             onResult = {};
             cb(idx);
         }

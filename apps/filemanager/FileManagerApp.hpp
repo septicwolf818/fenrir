@@ -10,30 +10,30 @@ namespace fenrir::apps {
 
 class FileManagerApp : public App {
 public:
-    std::string name() const override { return "Menedzer plikow"; }
+    std::string name() const override { return "File Manager"; }
 
     std::unique_ptr<Widget> createView(AppContext& ctx) override {
         auto view = std::make_unique<FileManagerView>(ctx, fs::homeDir());
         FileManagerView* raw = view.get();
 
-        // Menu: operacje na panelu (te same metody co skróty).
-        // Model dwupanelowy: Ctrl+C/X kopiuja/przenosza DO DRUGIEGO panelu
-        // (aktywny = zrodlo, drugi = cel) — bez schowka i wklejania.
-        view->setMenuTabs({{U"Plik", std::vector<MenuItem>{
-            {U"Idz do folderu... (Ctrl+G)", [raw] { raw->goToFolder(); }},
-            {U"Odswiez", [raw] { raw->refreshBoth(); }},
+        // Menu: operations on the panel (same methods as the shortcuts).
+        // Dual-panel model: Ctrl+C/X copy/move TO THE OTHER panel
+        // (active = source, other = target) — no clipboard, no pasting.
+        view->setMenuTabs({{U"File", std::vector<MenuItem>{
+            {U"Go to folder... (Ctrl+G)", [raw] { raw->goToFolder(); }},
+            {U"Refresh", [raw] { raw->refreshBoth(); }},
         }},
-        {U"Edycja", std::vector<MenuItem>{
-            {U"Kopiuj do drugiego panelu (Ctrl+C)", [raw] { raw->copySelected(); }},
-            {U"Przenies do drugiego panelu (Ctrl+X)", [raw] { raw->moveSelected(); }},
-            {U"Przemianuj (Ctrl+R)", [raw] { raw->renameSelected(); }},
-            {U"Usun (Del)", [raw] { raw->deleteSelected(); }},
+        {U"Edit", std::vector<MenuItem>{
+            {U"Copy to other panel (Ctrl+C)", [raw] { raw->copySelected(); }},
+            {U"Move to other panel (Ctrl+X)", [raw] { raw->moveSelected(); }},
+            {U"Rename (Ctrl+R)", [raw] { raw->renameSelected(); }},
+            {U"Delete (Del)", [raw] { raw->deleteSelected(); }},
         }},
-        {U"Nawigacja", std::vector<MenuItem>{
-            {U"W gore (Backspace)", [raw] { raw->goUp(); }},
+        {U"Navigation", std::vector<MenuItem>{
+            {U"Up (Backspace)", [raw] { raw->goUp(); }},
         }}});
 
-        // Skróty: rejestrowane na widgetcie — Desktop sprawdza je przed handleKey.
+        // Shortcuts: registered on the widget — Desktop checks them before handleKey.
         view->pushShortcut({true, Key::Char, U'g'}, [raw] { raw->goToFolder(); });
         view->pushShortcut({true, Key::Char, U'c'}, [raw] { raw->copySelected(); });
         view->pushShortcut({true, Key::Char, U'x'}, [raw] { raw->moveSelected(); });
@@ -44,9 +44,11 @@ public:
     }
 
     Rect preferredBounds(const Rect& desktopArea) const override {
-        int w = std::min(60, std::max(30, desktopArea.w - 6));
-        int h = std::min(20, std::max(8, desktopArea.h - 4));
-        return Rect{desktopArea.x + 2, desktopArea.y + 1, w, h};
+        int w = std::min(60, std::max(20, desktopArea.w - 4));
+        int h = std::min(20, std::max(6, desktopArea.h - 4));
+        const int x = desktopArea.x + std::min(2, std::max(0, desktopArea.w - w));
+        const int y = desktopArea.y + std::min(1, std::max(0, desktopArea.h - h));
+        return Rect{x, y, w, h};
     }
 };
 

@@ -13,17 +13,17 @@
 
 namespace fenrir {
 
-// Drzewo plikow — katalogi rozwijalne [+] / zwijane [-], pliki bez prefiksu,
-// wciecie 2 spacje na poziom. Wyswietla katalog root jako korzen (jego wiersz
-// pelni tez role naglowka). Enter: plik -> onOpen(path), katalog -> przelacz
-// rozwiniecie. Strzalki: G/D nawigacja, P rozwija, L zwija (lub w gore do
-// rodzica, gdy wiersz jest juz zwiniety). Katalogi pierwsze — tak jak
-// fs::list (sortowanie dziedziczone).
+// File tree — expandable directories [+] / collapsed [-], files without a prefix,
+// 2 spaces of indent per level. Shows the root directory as the root (its row
+// also serves as the header). Enter: file -> onOpen(path), directory -> toggle
+// expansion. Arrows: Up/Down navigate, Right expands, Left collapses (or moves
+// up to the parent when the row is already collapsed). Directories first — as in
+// fs::list (sorting inherited).
 class FileTree : public Widget {
 public:
     std::function<void(const std::string& path)> onOpen;
 
-    // Ustawia katalog root i rozwija go; zaznaczenie na korzeniu.
+    // Sets the root directory and expands it; selection on the root.
     void setRoot(std::string path) {
         root_ = std::move(path);
         expanded_.clear();
@@ -41,7 +41,7 @@ public:
         screen.fillRect(bounds_, Cell{U' ', t.editorText, t.editorBg, 0});
         if (bounds_.w <= 0 || bounds_.h <= 0 || visible_.empty()) return;
 
-        // Wybrany wiersz zawsze w widocznym zakresie.
+        // Keep the selected row within the visible range.
         if (sel_ < scrollRow_) scrollRow_ = sel_;
         if (sel_ >= scrollRow_ + bounds_.h) scrollRow_ = sel_ - bounds_.h + 1;
         scrollRow_ = std::max(0, scrollRow_);
@@ -83,7 +83,7 @@ public:
                 if (n.isDir && !n.expanded) toggleExpand(sel_);
                 else if (n.isDir && sel_ < last &&
                          visible_[static_cast<std::size_t>(sel_ + 1)].depth > n.depth)
-                    ++sel_; // do pierwszego potomka
+                    ++sel_; // to the first child
                 return KeyEventResult::Consumed;
             }
             case Key::Left: {
@@ -91,7 +91,7 @@ public:
                 if (n.isDir && n.expanded) {
                     toggleExpand(sel_);
                 } else if (n.depth > 0) {
-                    // do najblizszego przodka (ostatni wiersz nad nami o mniejszym glebokosci)
+                    // to the nearest ancestor (the last row above us with smaller depth)
                     for (int i = sel_ - 1; i >= 0; --i) {
                         if (visible_[static_cast<std::size_t>(i)].depth < n.depth) {
                             sel_ = i;
@@ -111,6 +111,14 @@ public:
         }
     }
 
+    bool clickAt(int x, int y) override {
+        if (!bounds_.contains(x, y)) return false;
+        const int index = scrollRow_ + (y - bounds_.y);
+        if (index < 0 || index >= static_cast<int>(visible_.size())) return false;
+        sel_ = index;
+        return true;
+    }
+
     bool editable() const override { return false; }
 
 private:
@@ -121,8 +129,8 @@ private:
         bool expanded = false;
     };
 
-    // Pelna przebudowa widocznej listy (root + rozwinieta galaz).
-    // Zaznaczenie trzymamy po SCIEZCE — indeksy zmieniaja sie przy rozwijaniu.
+    // Full rebuild of the visible list (root + expanded branch).
+    // The selection is tracked by PATH — indices change while expanding.
     void rebuild() {
         std::string selPath = (sel_ < static_cast<int>(visible_.size()))
                                   ? visible_[static_cast<std::size_t>(sel_)].path
@@ -150,7 +158,7 @@ private:
         try {
             entries = fs::list(path);
         } catch (...) {
-            return; // brak dostepu / znikniety katalog — pokazujemy sam wiersz
+            return; // no access / vanished directory — show just the row
         }
         for (const auto& e : entries) {
             const std::string full = fs::join(path, e.name);

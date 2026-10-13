@@ -11,35 +11,35 @@
 
 namespace fenrir {
 
-// Pojedynczy element menu (podpasek). Linkuje etykiete do akcji.
+// A single menu item (submenu). Associates a label with an action.
 struct MenuItem {
-    std::u32string label;      // tekst widoczny w menu
-    std::function<void()> cb;   // akcja po wybraniu
+    std::u32string label;      // Text shown in the menu.
+    std::function<void()> cb;   // Action invoked when selected.
 };
 
-// Grupa elementów — pasek górny (np. "Plik", "Edycja").
+// A group of items — a top-level menu tab (e.g. "File", "Edit").
 using MenuTab = std::pair<std::u32string, std::vector<MenuItem>>;
 
-// Sekwencja klawiszy skrótu w aplikacji. Pojedyncze wciśnięcie.
+// An application keyboard shortcut, consisting of a single key press.
 struct KeyShortcut {
     bool ctrl = false;
     Key key = Key::Unknown;
-    std::optional<char32_t> character = std::nullopt; // opcjonalny znak (np. U'C' dla Ctrl+C)
-    bool alt = false; // Alt — na golej TTY jedyny modyfikator rozroznialny dla
-                      // klawiszy zespolowych (Ctrl+PgUp ma identyczne bajty co PgUp)
+    std::optional<char32_t> character = std::nullopt; // Optional character (e.g. U'C' for Ctrl+C).
+    bool alt = false; // Alt is the only modifier distinguishable on a bare TTY for
+                      // compound keys (Ctrl+PgUp produces the same bytes as PgUp).
 };
 
-// Result zwracany przez handleKey — Desktop używa go do decydowania o trybie.
+// Result returned by handleKey — Desktop uses it to determine the current mode.
 enum class KeyEventResult {
-    Ignored,      // żadne dziecko nie chce tego klawisza
-    Consumed,     // obsłużony, bez zmiany trybu (np. nawigacja w kontenerze)
-    EnteredEdit,  // start edycji — przejscie do trybu Edit na tym widgete
-    Activated,    // aktywowano podległy element (np. przycisk przez Enter/Space)
+    Ignored,      // No child handled this key.
+    Consumed,     // Handled without a mode change (e.g. container navigation).
+    EnteredEdit,  // Editing started — enter Edit mode for this widget.
+    Activated,    // A child was activated (e.g. a button via Enter/Space).
 };
 
-// Bazowa klasa wszystkich widgetów. Widget zna tylko swój prostokąt
-// (współrzędne WZGLĘDEM ekranu, nie względem okna — Window przelicza to
-// przy setBounds, żeby sam widget nie musiał nic wiedzieć o oknie).
+// Base class for all widgets. A widget knows only its rectangle
+// (coordinates RELATIVE TO the screen, not the window — Window converts them
+// in setBounds so the widget itself does not need to know about the window).
 class Widget {
 public:
     virtual ~Widget() = default;
@@ -47,77 +47,79 @@ public:
     void setBounds(const Rect& r) { bounds_ = r; }
     const Rect& bounds() const { return bounds_; }
 
-    // focused_ = czy to okno (lub widget w oknie) jest aktywnym fokusowanym elementem.
-    // highlighted_ = czy ten widget jest aktualnie "podświetlony" (np. wybrany w nawigacji).
+    // focused_ indicates whether this window (or a widget within it) is focused.
+    // highlighted_ indicates whether this widget is currently highlighted (e.g. selected during navigation).
     void setFocused(bool f) { focused_ = f; }
     bool focused() const { return focused_; }
     void setHighlighted(bool h) { highlighted_ = h; }
     bool highlighted() const { return highlighted_; }
 
-    // Czy ten widget akceptuje tekst bezpośrednio (edytowalny)? true = wciśnięcie znaku
-    // powoduje przejście do trybu Edit na tym widgetze. Domyślnie false — ustawiają
-    // to tylko widgety z realną edycją (np. TextArea, pola tekstowe).
-    // Wirtualne: pojemniki (Frame) dziedzicza edytowalnosc dziecka.
+    // Does this widget accept text directly (is it editable)? true means pressing a character
+    // enters Edit mode for this widget. Defaults to false; only widgets with actual editing
+    // (e.g. TextArea and text fields) set it. Containers (Frame) inherit their child's editability.
     virtual bool editable() const { return editable_; }
     void setEditable(bool e) { editable_ = e; }
 
-    // Czy zawartosc tego widgetu ma niezapisane zmiany? Desktop pyta o
-    // potwierdzenie przed zamknieciem okna z brudna trescia (guard zamykania,
-    // patrz closeWithConfirm w Desktop.cpp). Domyslnie false — nadpisuja to
-    // widgety z realnym stanem edycji (TextArea robi to juz swoim wlasnym
-    // dirty(), widoki aplikacji — TextEditor, Paint — deleguja). Dialogi i
-    // okna wyboru plikow sa zawsze czyste, wiec nie wymagaja override.
+    // Does this widget contain unsaved changes? Desktop asks for confirmation before
+    // closing a window with modified content (close guard; see closeWithConfirm in
+    // Desktop.cpp). Defaults to false; widgets with actual editing state override it
+    // (TextArea uses its own dirty(), while app views — TextEditor and Paint — delegate).
+    // Dialogs and file pickers are always clean, so they do not need an override.
     virtual bool dirty() const { return false; }
 
-    // Klik wirtualnym kursorem (Enter/Spacja w trybie Desktop) w tresc okna.
-    // Widget moze obsluzyc trafienie we wlasny obszar (np. karta w pasku
-    // kart edytora) i zwrocic true; domyslnie false = Desktop robi
-    // standardowa aktywacje okna (wejscie do trybu Keyboard).
+    // Click in the window content using the virtual cursor (Enter/Space in Desktop mode).
+    // A widget can handle a hit in its own area (e.g. an editor tab) and return true;
+    // by default, false means Desktop performs the standard window activation
+    // (entering Keyboard mode).
     virtual bool clickAt(int /*x*/, int /*y*/) { return false; }
 
-    // --- Menu / shortcuts API (używane przez Desktop przy renderowaniu i skróty) ---
+    // --- Menu / shortcuts API (used by Desktop for rendering and shortcuts) ---
 
-    // Wszystkie karty menu tej aplikacji (zapisywane przez createView() w Widget).
+    // All menu tabs for this app (set by createView() in Widget).
     const std::vector<MenuTab>& menuTabs() const { return menuTabs_; }
     void setMenuTabs(std::vector<MenuTab> tabs) { menuTabs_ = std::move(tabs); }
 
-    // Skróty klawiszowe tej aplikacji.
+    // Keyboard shortcuts for this app.
     const std::vector<std::pair<KeyShortcut, std::function<void()>>>& shortcuts() const { return shortcuts_; }
     void setShortcuts(std::vector<std::pair<KeyShortcut, std::function<void()>>> s) { shortcuts_ = std::move(s); }
 
-    // Dodaje pojedynczy skrót (używane przez createView()).
+    // Add a single shortcut (used by createView()).
     void pushShortcut(KeyShortcut sc, std::function<void()> cb) {
         shortcuts_.push_back({std::move(sc), std::move(cb)});
     }
 
     virtual void draw(Screen& screen) = 0;
 
-    // Zwraca KeyEventResult — Desktop używa go do decydowania o trybie.
+    // Return KeyEventResult — Desktop uses it to determine the current mode.
     virtual KeyEventResult handleKey(const KeyEvent& ev) = 0;
 
-    // Aktywacja "Enter/Space" (wywolywana przez kontenery, np. Panel, zamiast
-    // dynamic_cast na konkretny typ widgetu). true = widget obsluzyl aktywacje.
+    // Activate via Enter/Space (called by containers such as Panel instead of
+    // dynamic_cast to a specific widget type). true means the widget handled activation.
     virtual bool activate() { return false; }
 
-    // Czy widget moze byc zaznaczony w nawigacji kontenera (Panel przeskakuje
-    // elementy z selectable() == false, np. etykiety).
+    // Can this widget be selected during container navigation? Panel skips
+    // elements where selectable() == false, such as labels.
     virtual bool selectable() const { return true; }
 
-    // Absolutna pozycja kursora GUI (w komórkach ekranu), jeśli widget
-    // ma sens edycyjny (np. TextArea). std::nullopt = brak własnego kursora.
+    // Absolute GUI cursor position (in screen cells), if the widget has an editing
+    // context (e.g. TextArea). std::nullopt means the widget has no cursor of its own.
     virtual std::optional<std::pair<int, int>> cursorPosition() const { return std::nullopt; }
 
-    // Minimalne rozmiary TRESCI (komorki ekranu), ktorych widget potrzebuje,
-    // zeby byl uzyteczny (np. kalendarz: siatka 30x10). Okno dodaje do tego
-    // swoja ramke/pasek tytulu i pilnuje przy resizeBy (F6) oraz przy tworzeniu
-    // — tresc nigdy nie jest przycinana ponizej minimum. Domyslnie 0 = brak.
+    // Whether the desktop should draw its blinking cursor over this widget.
+    // Terminal-like widgets can hide it when the child process hides its cursor.
+    virtual bool wantsGuiCursor() const { return true; }
+
+    // Minimum CONTENT size (screen cells) required for the widget to be usable
+    // (e.g. a calendar needs a 30x10 grid). The window adds its frame/title bar
+    // and enforces this minimum during resizeBy (F6) and creation, so content is
+    // never made smaller than the minimum. Defaults to 0 (no minimum).
     virtual int minWidth() const { return 0; }
     virtual int minHeight() const { return 0; }
 
-    // Token zycia widgetu do bezpiecznych callbackow ASYNCHRONICZNYCH
-    // (dialogi otwierane przez AppContext). Callback przechwytuje weak_ptr:
-    // jesli okno z tym widgetem zostanie zamkniete zanim dialog zwroci wynik,
-    // lock() zwraca nullopt zamiast dawac UB na dangling `this`:
+    // Widget lifetime token for safe ASYNCHRONOUS callbacks (dialogs opened by
+    // AppContext). A callback captures a weak_ptr: if the window containing this
+    // widget closes before the dialog returns, lock() returns nullopt instead of
+    // causing undefined behavior through a dangling `this`:
     //     auto token = lifetimeToken();
     //     ctx->confirm(msg, [token, this](bool ok){ if (!token.lock()) return; ... });
     std::weak_ptr<int> lifetimeToken() const { return lifetime_; }
@@ -128,7 +130,7 @@ protected:
     bool highlighted_ = false;
     bool editable_ = false;
 
-    // Metadane aplikacji — ustawiane przez createView() w Widget.
+    // App metadata — set by createView() in Widget.
     std::vector<MenuTab> menuTabs_;
     std::vector<std::pair<KeyShortcut, std::function<void()>>> shortcuts_;
 

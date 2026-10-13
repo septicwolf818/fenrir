@@ -5,26 +5,26 @@
 
 namespace fenrir::apps {
 
-// Czysta logika kalkulatora (bez widgetow, bez ekranu) - latwa do testowania
-// i ponownego uzycia. Semantyka klasycznego kalkulatora 4-funkcyjnego:
-//  - cyfry / kropka: wpychanie biezacego wpisu (entry),
-//  - operator (+ - * /): domyka biezacy wpis do akumulatora (takze łańcuchowo,
-//    np. "2 + 3 *" = 5, potem mnozenie),
-//  - "=": domyka calosc do wyniku,
-//  - C: reset; +/- znak; %: /100; x^2: kwadrat.
-// Bledy (dzielenie przez zero, overflow) sa przechwycone i sygnalowane;
-// kalkulator czeka na C.
+// Pure calculator logic (no widgets, no screen) - easy to test and
+// reuse. Semantics of a classic four-function calculator:
+//  - digits / dot: push into the current entry,
+//  - operator (+ - * /): folds the current entry into the accumulator (also
+//    chained, e.g. "2 + 3 *" = 5, then multiplication),
+//  - "=": folds everything into the result,
+//  - C: reset; +/- sign; %: /100; x^2: square.
+// Errors (division by zero, overflow) are caught and flagged;
+// the calculator waits for C.
 class CalculatorEngine {
 public:
     void inputDigit(char d) {
         if (error_) return;
         if (justEvaluated_) resetAfterEquals();
         if (!entering_) { entry_.clear(); entering_ = true; }
-        rhsReady_ = true; // swiezy operand = "=" moze liczyc
-        // Notacja naukowa (zapis po %/x^2) nie nadaje sie do dopisywania cyfr.
+        rhsReady_ = true; // fresh operand = "=" can compute
+        // Scientific notation (from %/x^2) can't have digits appended to it.
         if (entry_.find_first_of("eE") != std::string::npos) entry_.clear();
         if (entry_ == "0") entry_.clear();
-        else if (entry_ == "-0") entry_.erase(1); // "-0" + cyfra -> "-5", nie "-05"
+        else if (entry_ == "-0") entry_.erase(1); // "-0" + digit -> "-5", not "-05"
         if (entry_.size() < 16) entry_ += d;
     }
 
@@ -32,8 +32,8 @@ public:
         if (error_) return;
         if (justEvaluated_) resetAfterEquals();
         if (!entering_) { entry_.clear(); entering_ = true; }
-        rhsReady_ = true; // jw.
-        if (entry_.find_first_of("eE") != std::string::npos) entry_.clear(); // jw.
+        rhsReady_ = true; // as above
+        if (entry_.find_first_of("eE") != std::string::npos) entry_.clear(); // as above
         if (entry_.find('.') == std::string::npos) entry_ += '.';
     }
 
@@ -48,18 +48,18 @@ public:
                 acc_ = cur;
             }
         } else if (repeat) {
-            // powtorzenie operatora bez wpisu: "5 + + *" -> 5+5, potem mnozenie
+            // repeating the operator with no entry: "5 + + *" -> 5+5, then multiplication
             if (!apply(acc_, pendingOp_, cur)) return;
         }
-        // Inny operator bez wpisu = tylko podmiana ("5 + *" -> potem mnozenie).
-        // entry_ puste: glowa pokazuje acc_ tak jak po "=".
+        // A different operator with no entry = just a swap ("5 + *" -> then multiplication).
+        // entry_ empty: the display shows acc_ just as after "=".
         entry_.clear();
         pendingOp_ = op;
         entering_ = false;
         justEvaluated_ = false;
-        // Po powtorzeniu acc_ juz zawiera wynik — nastepne "=" tylko go
-        // potwierdza, nie liczy drugi raz (10+10). Bez powtorzenia "=" moze
-        // liczyc z acc_ jako prawym operandem ("5 + =" -> 10).
+        // After a repeat acc_ already holds the result — the next "=" only
+        // confirms it, it doesn't compute again (10+10). Without a repeat "=" may
+        // compute with acc_ as the right operand ("5 + =" -> 10).
         rhsReady_ = !repeat;
     }
 
@@ -70,7 +70,7 @@ public:
         }
         pendingOp_ = 0;
         entering_ = false;
-        entry_.clear(); // w glowie pokazywany jest teraz acc_
+        entry_.clear(); // the display now shows acc_
         justEvaluated_ = true;
     }
 
@@ -86,14 +86,14 @@ public:
             if (entry_.rfind('-', 0) == 0) entry_.erase(0, 1);
             else entry_.insert(0, "-");
         } else {
-            acc_ = -acc_; // wpis pusty -> glowa pokazuje acc_
+            acc_ = -acc_; // empty entry -> the display shows acc_
         }
         justEvaluated_ = false;
     }
 
-    // % i x^2 dzialaja TYLKO na biezacym wpisie (glowie) i nie ruszaja
-    // akumulatora ani oczekujacego operatora - wiec "10 + 20 % " = 20% jest
-    // podstawa drugiego operandu, a "2 x^2 + 3 =" = 4 + 3 = 7.
+    // % and x^2 act ONLY on the current entry (the display) and leave
+    // the accumulator and the pending operator alone - so "10 + 20 % " = 20% is
+    // the base of the second operand, and "2 x^2 + 3 =" = 4 + 3 = 7.
     void percent() {
         if (error_) return;
         double v = currentEntry() / 100.0;
@@ -101,7 +101,7 @@ public:
         entry_ = format(v);
         entering_ = true;
         justEvaluated_ = false;
-        rhsReady_ = true; // swiezy operand po przeliczeniu
+        rhsReady_ = true; // fresh operand after the recalculation
     }
 
     void square() {
@@ -111,26 +111,26 @@ public:
         entry_ = format(v);
         entering_ = true;
         justEvaluated_ = false;
-        rhsReady_ = true; // jw.
+        rhsReady_ = true; // as above
     }
 
-    // Tekst na glowie (right-aligned; widok sam go wyrównuje).
+    // Text for the display (right-aligned; the view aligns it itself).
     std::string display() const {
-        if (error_) return "Błąd";
+        if (error_) return "Error";
         if (entry_.empty()) return format(acc_);
         std::string s = entry_;
         if (s.back() == '.') s.pop_back(); // "2." -> "2"
-        if (s.empty()) return "0";         // sam "." -> pokazuj "0"
+        if (s.empty()) return "0";         // just "." -> show "0"
         return s;
     }
 
 private:
-    double acc_ = 0.0;          // akumulator (pierwszy operand / wynik)
-    std::string entry_;         // biezacy wpis (cyfry wpychane przez uzytkownika)
-    char pendingOp_ = 0;        // oczekujacy operator: + - * /
-    bool entering_ = false;     // true = wpychanie entry_
-    bool justEvaluated_ = false;// true = dopiero co naciśnięto "="
-    bool rhsReady_ = true;      // "=" moze uzyc acc_ jako prawego operandu
+    double acc_ = 0.0;          // accumulator (first operand / result)
+    std::string entry_;         // current entry (digits pushed by the user)
+    char pendingOp_ = 0;        // pending operator: + - * /
+    bool entering_ = false;     // true = pushing into entry_
+    bool justEvaluated_ = false;// true = "=" was just pressed
+    bool rhsReady_ = true;      // "=" may use acc_ as the right operand
     bool error_ = false;
 
     void resetAfterEquals() {
@@ -146,7 +146,7 @@ private:
         try { return std::stod(s); } catch (...) { return acc_; }
     }
 
-    // Zwraca true = powodzenie; false = blad (acc_ NIE zmienione).
+    // Returns true = success; false = error (acc_ NOT changed).
     bool apply(double a, char op, double b) {
         double r = 0;
         switch (op) {

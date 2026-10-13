@@ -17,23 +17,23 @@
 
 namespace fenrir {
 
-// Tryb, w jakim aktualnie dziala wlasny kursor GUI / klawiatura:
-//  - Desktop:       strzalki przesuwaja wolny kursor po calym ekranie;
-//                    Enter/Space aktywuje to, co jest pod kursorem.
-//  - Keyboard:      wewnatrz fokusowanego okna - strzalki przemieszczaja
-//                    focus pomiedzy widgetami, Space/Enter aktywuje je.
-//  - Edit:          wewnatrz edytowalnego widgetu (np. TextArea) - klawisze
-//                    trafiaja bezposrednio do niego (pisanie, strzalki po tekscie);
-//                    Escape cofa do Keyboard mode tego okna.
-//  - WindowMove:     strzalki przesuwaja fokusowane okno.
-//  - WindowResize:   strzalki zmieniaja rozmiar fokusowanego okna.
+// Current mode of the custom GUI cursor / keyboard input:
+//  - Desktop:       arrows move the free cursor anywhere on the screen;
+//                   Enter/Space activates whatever is under the cursor.
+//  - Keyboard:      inside the focused window - arrows move focus
+//                   between widgets, Space/Enter activates them.
+//  - Edit:          inside an editable widget (e.g. TextArea) - keys go
+//                   straight to it (typing, arrows through the text);
+//                   Escape falls back to that window's Keyboard mode.
+//  - WindowMove:    arrows move the focused window.
+//  - WindowResize:  arrows resize the focused window.
 enum class CursorMode { Desktop, Keyboard, Edit, WindowMove, WindowResize };
 
-// Desktop = "framework pulpitu": wlasny kursor + tryby, pasek menu (u gory,
-// dynamiczna szerokosc = szerokosc terminala), pasek stanu (u dolu),
-// WindowManager ("framework okien") i AppRegistry ("framework aplikacji").
-// Aplikacje implementuja App (patrz app/App.hpp) i nie dotykaja niczego
-// z tej klasy poza AppRegistry::registerApp().
+// Desktop = the "desktop framework": custom cursor + modes, menu bar (top,
+// dynamic width = terminal width), status bar (bottom),
+// WindowManager ("window framework") and AppRegistry ("app framework").
+// Applications implement App (see app/App.hpp) and touch nothing in this
+// class beyond AppRegistry::registerApp().
 class Desktop : public AppContext {
 public:
     Desktop();
@@ -43,7 +43,7 @@ public:
 
     int screenWidth()  const { return screen_.width(); }
     int screenHeight() const { return screen_.height(); }
-    // Obszar pulpitu dostepny na okna: pod paskiem menu, nad paskiem stanu.
+    // Desktop area available to windows: below the menu bar, above the status bar.
     Rect desktopArea() const;
 
     void setDesktopName(std::string name) { desktopName_ = std::move(name); }
@@ -58,7 +58,7 @@ public:
                   OnPick onPick, OnCancel onCancel) override;
     void openDialog(std::u32string title, std::unique_ptr<Dialog> content,
                     OnDialogResult onResult) override;
-    // Asynchroniczne zrodla (np. PTY terminala) — pollowane w tickOnce.
+    // Asynchronous sources (e.g. the terminal PTY) — polled in tickOnce.
     void addFdSource(int fd, std::function<void()> onReady) override;
     void removeFdSource(int fd) override;
 
@@ -74,9 +74,9 @@ private:
     std::string desktopName_ = "Fenrir";
     bool running_ = true;
     CursorMode mode_ = CursorMode::Desktop;
-    // Migotanie kursora sterowane zegarem (steady_clock), NIE liczba ticków:
-    // tick przy otwartym terminalu trwa ~30ms zamiast ~400ms, więc licznik
-    // ticków migotałby kilkanaście razy za szybko.
+    // Cursor blink driven by a clock (steady_clock), NOT a tick counter:
+    // a tick with the terminal open lasts ~30ms instead of ~400ms, so a tick
+    // counter would blink a dozen times too fast.
     bool cursorBlinkState_ = true;
     std::chrono::steady_clock::time_point lastBlinkToggle_;
 
@@ -86,13 +86,13 @@ private:
     static constexpr int kMenuBarHeight = 1;
     static constexpr int kTaskBarHeight = 1;
 
-    std::unique_ptr<Menu> appMenu_;  // != nullptr gdy globalne menu aplikacji (F1) jest otwarte
+    std::unique_ptr<Menu> appMenu_;  // != nullptr while the global application menu (F1) is open
     Rect appMenuBounds_{};
-    bool appMenuClosePending_ = false;  // onSelect ustawia; handleKey domyka menu PO powrocie z callbacku
+    bool appMenuClosePending_ = false;  // set by onSelect; handleKey closes the menu AFTER returning from the callback
 
-    // Menu konkretnej aplikacji (zakładki w pasku tytułu okna):
-    // winMenu_ != nullptr gdy dropdown jest otwarty dla okna winMenuWin_,
-    // na karcie winMenuTab_.
+    // Per-application menu (tabs in the window's title bar):
+    // winMenu_ != nullptr while the dropdown is open for window winMenuWin_,
+    // on tab winMenuTab_.
     Window* winMenuWin_{nullptr};
     int winMenuTab_ = 0;
     std::u32string winMenuTitle_{};
@@ -100,42 +100,42 @@ private:
     Rect winMenuBounds_{};
     bool winMenuClosePending_ = false;
 
-    // Okna zamykane PO powrocie z callbacku widgetu (dialogi). Zamykanie okna
-    // z wewnatrz jego wlasnego handleKey zniszczyloby widget na stosie wywolan —
-    // flagujemy, a Desktop zamyka po dispatchu (patrz flushPendingCloses).
+    // Windows closed AFTER returning from a widget callback (dialogs). Closing a
+    // window from inside its own handleKey would destroy the widget on its own
+    // call stack — we flag it instead and Desktop closes after dispatch (see flushPendingCloses).
     std::vector<Window*> closePending_;
 
-    // Zarejestrowane fd-y (AppContext::addFdSource): poll(POLLIN) co tick,
-    // przed odczytem klawiatury — zrodla maja krotszy interwal odswiezania.
+    // Registered fds (AppContext::addFdSource): poll(POLLIN) each tick,
+    // before reading the keyboard — sources refresh at a shorter interval.
     std::vector<std::pair<int, std::function<void()>>> fdSources_;
 
-    void handleKey(const KeyEvent& ev);          // wrapper: dispatch + flush zamkniec
-    void handleKeyEvent(const KeyEvent& ev);     // wlasciwa obsluga klawiszy
+    void handleKey(const KeyEvent& ev);          // wrapper: dispatch + flush of pending closes
+    void handleKeyEvent(const KeyEvent& ev);     // actual key handling
     void flushPendingCloses();
-    // Fokus z powrotem na okno wystawiajace dialog (guard: czy jeszcze istnieje).
+    // Focus back to the window that opened the dialog (guard: does it still exist).
     void restoreFocusTo(Window* requester);
-    // Reakcja na wynik handleKey widgetu: EnteredEdit -> tryb Edit,
-    // Ignored + Tab/Esc -> globalne fallbacki.
+    // Reacts to a widget handleKey result: EnteredEdit -> Edit mode,
+    // Ignored + Tab/Esc -> global fallbacks.
     void applyWidgetResult(KeyEventResult r, const KeyEvent& ev);
 
     void tickOnce();
 
     void openAppMenu();
     void closeAppMenu();
-    // Menu konkretnej aplikacji: otwiera (lub przełącza na) dropdown karty
-    // `tab` pod paskiem tytułu okna. Tab = indeks w content->menuTabs().
+    // Per-application menu: opens (or switches to) the dropdown for tab
+    // `tab` under the window's title bar. Tab = index into content->menuTabs().
     void openWinMenu(Window& w, int tab);
     void closeWinMenu();
     void buildWinMenu(Window& w, int tab);
-    // Czy okno wciąż istnieje w managerze (guard dla raw pointerów w callbackach).
+    // Whether the window still exists in the manager (guard for raw pointers in callbacks).
     bool windowAlive(Window* w) const;
     void activateAtCursor();
     void launchApp(App& app);
     void toggleMaximize(Window& w);
-    // Wejście w tryb nawigacji kl. lub edycji na poziomie okna.
-    // Zwraca nowy tryb kursora (Keyboard lub Edit).
+    // Enter window-level keyboard navigation or editing mode.
+    // Returns the new cursor mode (Keyboard or Edit).
     CursorMode enterWindowMode(Window& w);
-    // Wyjscie z trybu Keyboard/Edit na pulpitu (nie niszczy fokusu okna).
+    // Leave Keyboard/Edit mode on the desktop (does not drop the window's focus).
     void leaveWindowMode();
     void openDialogWindow(FileDialogMode mode, const std::string& startDir,
                           const std::string& suggestedName, OnPick onPick, OnCancel onCancel);
@@ -145,7 +145,7 @@ private:
     void drawDesktopBackground(Screen& screen);
     void positionGuiCursor();
 
-    // Pomocnicze funkcje do obslugi skrótow klawiszowych.
+    // Helper functions for keyboard shortcut handling.
     static bool matchesShortcuts(const std::vector<std::pair<KeyShortcut, std::function<void()>>>& sc, const KeyEvent& ev);
     static void invokeShortcut(const std::vector<std::pair<KeyShortcut, std::function<void()>>>& sc, const KeyEvent& ev);
 };

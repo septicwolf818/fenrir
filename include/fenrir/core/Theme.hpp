@@ -7,95 +7,95 @@
 
 namespace fenrir::theme {
 
-// Semantyczne role kolorow. Kod (widgety, okna, aplikacje) odwoluje sie do ROLI,
-// nigdy bezposrednio do konkretnej palety — dzieki temu caly motyw wymienia sie
-// przez podmiane jednej zmiennej `active`.
-// Wszystkie role sa kolorami z palety ANSI 16 (Linux TTY, zero truecolor).
+// Semantic color roles. Code (widgets, windows, applications) refers to ROLES,
+// never directly to a concrete palette - so the whole theme is swapped
+// by replacing a single variable, `active`.
+// All roles are colors from the 16-color ANSI palette (Linux TTY, no truecolor).
 struct Theme {
-    // --- pulpit ---
+    // --- desktop ---
     Color desktopBg{colors::Black};
     Color desktopText{colors::White};
 
-    // --- pasek menu u gory ekranu ---
+    // --- menu bar at the top of the screen ---
     Color menuBarBg{colors::Blue};
     Color menuBarText{colors::White};
 
-    // --- pasek zadan u dolu ---
+    // --- taskbar at the bottom ---
     Color taskbarBg{colors::Black};
     Color taskbarText{colors::White};
     Color taskbarActiveBg{colors::Gray};
-    Color highlightText{colors::Yellow}; // zegar, strzalki, akcenty tekstu
+    Color highlightText{colors::Yellow}; // clock, arrows, text accents
 
-    // --- okno ---
-    Color border{colors::White};           // ramka aktywnego okna
+    // --- window ---
+    Color border{colors::White};           // active window frame
     Color borderInactive{colors::Gray};
     Color titleBg{colors::Blue};
     Color titleText{colors::White};
     Color closeBg{colors::Red};
     Color closeText{colors::White};
-    Color windowBg{colors::Gray};          // tlo zawartosci okna
+    Color windowBg{colors::Gray};          // window content background
     Color windowText{colors::White};
 
-    // --- menu w oknie (karty) i ramki dropdownow ---
+    // --- in-window menu (tabs) and dropdown frames ---
     Color menuBg{colors::Gray};
     Color menuText{colors::White};
 
-    // --- zaznaczenie / element akcentowy ---
+    // --- selection / accent element ---
     Color accentBg{colors::Blue};
     Color accentText{colors::White};
 
-    // --- powierzchnie: panele list, wnetrza dialogow, wiersze menu ---
+    // --- surfaces: list panels, dialog interiors, menu rows ---
     Color surfaceBg{colors::White};
     Color surfaceText{colors::Black};
-    Color dimText{colors::Gray}; // przygaszone wiersze (np. "..") na surfaceBg
+    Color dimText{colors::Gray}; // dimmed rows (e.g. "..") on surfaceBg
 
-    // --- naglowki list ---
+    // --- list headers ---
     Color headerBg{colors::Gray};
     Color headerText{colors::White};
 
-    // --- przyciski ---
-    // Uwaga: Gray{8} to "bright black" (ciemny szary) — na tle okna wychodzi
-    // czarne-na-czarnym. Klasyczny motyw uzywa White{7} (jasny szary) + czarny
-    // tekst; hot = niebieski tekst na jasnym tle.
+    // --- buttons ---
+    // Note: Gray{8} is "bright black" (dark gray) - against the window background
+    // it renders black-on-black. The classic theme uses White{7} (light gray) + black
+    // text; hot = blue text on a light background.
     Color buttonBg{colors::White};
     Color buttonText{colors::Black};
-    Color buttonTextHot{colors::Blue}; // fokus / zaznaczenie
+    Color buttonTextHot{colors::Blue}; // focus / selection
 
-    // --- pola tekstowe ---
+    // --- text fields ---
     Color fieldBg{colors::White};
     Color fieldText{colors::Black};
 
-    // --- pasek statusu / podpowiedzi ---
+    // --- status bar / hints ---
     Color statusBg{colors::Gray};
     Color statusText{colors::White};
 
-    // --- powierzchnia edycji tekstu ---
+    // --- text editing surface ---
     Color editorBg{colors::Black};
     Color editorText{colors::White};
 
-    // --- bledy ---
+    // --- errors ---
     Color errorText{colors::BrightRed};
 };
 
-// Aktualny motyw. Podmiana = nowy motyw dla calego UI.
+// The current theme. Swapping it = a new theme for the entire UI.
 inline Theme active{};
 
-// Motyw z katalogu — id (stabilny klucz w ustawieniach, np. "classic") +
-// nazwa wyswietlana (np. "Klasyczny") + pelna paleta ról.
+// A theme from the catalog - id (stable settings key, e.g. "classic") +
+// display name (e.g. "Classic") + full palette of roles.
 struct NamedTheme {
     std::string id;
     std::string label;
     Theme theme;
 };
 
-// Katalog motywow dostepnych w systemie (Ustawienia cykla po nim Enterem).
+// Catalog of themes available in the system (Settings cycles through it with Enter).
 const std::vector<NamedTheme>& catalog();
 
-// Motyw o danym id albo nullptr (nieznane id).
+// Theme with the given id, or nullptr (unknown id).
 const NamedTheme* find(std::string_view id);
 
-// Podmienia `active` na motyw o danym id. Nieznane id = bez zmian.
-// Zwraca true, jesli motyw zostal zastosowany.
+// Replaces `active` with the theme having the given id. Unknown id = no change.
+// Returns true if the theme was applied.
 bool apply(std::string_view id);
 
 } // namespace fenrir::theme

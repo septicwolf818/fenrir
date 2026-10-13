@@ -11,11 +11,11 @@ namespace fenrir {
 
 enum class FileDialogMode { OpenFile, OpenFolder, SaveFile };
 
-// Jeden widget obslugujacy wszystkie trzy operacje z AppContext (Open/OpenFolder/
-// Save). Skladany z PRZEZYTEGNIETEGO UI biblioteki: DirectoryView (lista katalogu),
-// LineEdit (pole nazwy), StatusBar (podpowiedzi) — zero wlasnego rysowania list.
-// Desktop opakowuje ten widget w zwykle Window; dialog NIE jest osobnym
-// mechanizmem, tylko kolejnym oknem frameworka.
+// A single widget handling all three AppContext operations (Open/OpenFolder/
+// Save). Assembled from the REUSED library UI: DirectoryView (directory list),
+// LineEdit (name field), StatusBar (hints) — no custom list drawing of its own.
+// Desktop wraps this widget in a regular Window; the dialog is NOT a separate
+// mechanism, just another framework window.
 class FileDialog : public Widget {
 public:
     FileDialog(FileDialogMode mode, std::string startDir, std::string suggestedName);
@@ -37,7 +37,7 @@ private:
     Zone zone_ = Zone::List;
 
     DirectoryView view_;
-    LineEdit nameEdit_; // wersja uzywana tylko w trybie SaveFile
+    LineEdit nameEdit_; // used only in SaveFile mode
     StatusBar status_;
 
     static constexpr int kStatusRows = 1;

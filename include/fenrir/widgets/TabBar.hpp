@@ -11,18 +11,17 @@
 
 namespace fenrir {
 
-// Pasek kart (tabs) — np. otwarte pliki w edytorze. Widget biblioteczny:
-// rysuje karty "etykieta[*]" z podswietleniem biezacej (accentBg + bold);
-// przewija poziomo tak, zeby zaznaczona karta byla widoczna, a przy
-// przepełnieniu rysuje <> na krawędziach (klik = scrollBy o jedna karte).
-// Przelaczanie strzalkami L/P (gdy widget ma fokus), skrotami aplikacji
-// (Alt+PgDn/PgUp) albo kliknieciem wirtualnym kursorem (tabAt) — zmiana
-// zaznaczenia wola onSwitch(nowyIndex).
+// Tab bar — e.g. open files in an editor. This library widget draws tabs as
+// "label[*]", highlighting the current tab (accentBg + bold); it scrolls
+// horizontally to keep the selected tab visible and draws <> at the edges
+// when tabs overflow (clicking scrolls by one tab via scrollBy).
+// Switch tabs with Left/Right (when focused), app shortcuts (Alt+PgDn/PgUp),
+// or a virtual-cursor click (tabAt); selection changes invoke onSwitch(newIndex).
 class TabBar : public Widget {
 public:
     struct Tab {
         std::u32string label;
-        bool dirty = false; // gwiazdka za etykieta
+        bool dirty = false; // Show an asterisk after the label.
     };
 
     std::function<void(int)> onSwitch;
@@ -30,21 +29,28 @@ public:
     void setTabs(std::vector<Tab> tabs) {
         tabs_ = std::move(tabs);
         clampSelected();
-        ensurePending_ = true; // nowa lista kart — przewin do zaznaczonej
+        ensurePending_ = true; // New tab list — scroll to the selected tab.
+    }
+
+    // Update a dirty marker without forcing the current tab back into view.
+    void setDirty(int index, bool dirty) {
+        if (index < 0 || index >= count()) return;
+        tabs_[static_cast<std::size_t>(index)].dirty = dirty;
+        scrollX_ = std::clamp(scrollX_, 0, maxScroll());
     }
 
     int selected() const { return selected_; }
     int count() const { return static_cast<int>(tabs_.size()); }
 
-    // Indeks karty pod kolumna ekranu (klik wirtualnym kursorem), -1 gdy
-    // kolumna lezy za pasem kart lub na przycisku <>. Uwzglednia przewijanie
-    // poziome (scrollX_).
+    // Index of the tab under a screen column (virtual-cursor click); -1 if the
+    // column is outside the tab bar or on a <> button. Accounts for horizontal
+    // scrolling (scrollX_).
     int tabAt(int screenX) const {
         if (tabs_.empty() || bounds_.w <= 0) return -1;
         if (screenX < bounds_.x || screenX >= bounds_.x + bounds_.w) return -1;
         if (overflow() && (screenX == bounds_.x || screenX == bounds_.x + bounds_.w - 1))
-            return -1; // komorki <> sa przyciskami, nie kartami
-        const int sx = screenX - bounds_.x + scrollX_;
+            return -1; // The <> cells are buttons, not tabs.
+        const int sx = screenX - contentStartX() + scrollX_;
         int start = 0;
         for (int i = 0; i < static_cast<int>(tabs_.size()); ++i) {
             const int tw = tabWidth(tabs_[static_cast<std::size_t>(i)]);
@@ -54,8 +60,8 @@ public:
         return -1;
     }
 
-    // Klik w przycisk <> (przy przepełnieniu) — przewija pas o jedna karte
-    // bez zmiany zaznaczenia; true = trafiony (klik skonsumowany).
+    // Click a <> button (when tabs overflow) to scroll by one tab without
+    // changing the selection; true means the button was hit (click consumed).
     bool scrollHit(int screenX) {
         if (!overflow() || bounds_.w <= 0) return false;
         if (screenX == bounds_.x) { scrollBy(-1); return true; }
@@ -63,26 +69,26 @@ public:
         return false;
     }
 
-    // Przewija pas kart o jedna karte w lewo/prawo (przyciski <>).
+    // Scroll the tab bar one tab left or right (<> buttons).
     void scrollBy(int dir) {
         if (tabs_.empty() || bounds_.w <= 0) return;
-        int total = 0;
-        for (const auto& t : tabs_) total += tabWidth(t);
-        const int maxScroll = std::max(0, total - bounds_.w);
-        if (maxScroll == 0) { scrollX_ = 0; return; }
-        int sx = std::clamp(scrollX_, 0, maxScroll);
+        const int max = maxScroll();
+        if (max == 0) { scrollX_ = 0; return; }
+        int sx = std::clamp(scrollX_, 0, max);
+        const int viewW = visibleWidth();
+        if (viewW <= 0) return;
         int ns = sx;
         if (dir > 0) {
-            // Do przodu: do poczatku pierwszej karty wystajacej za prawy brzeg.
+            // Forward: to the start of the first tab extending past the right edge.
             int pos = 0;
             for (const auto& t : tabs_) {
                 const int tw = tabWidth(t);
-                if (pos + tw > sx + bounds_.w) { ns = pos; break; }
+                if (pos + tw > sx + viewW) { ns = pos; break; }
                 pos += tw;
             }
-            if (ns == sx) ns = maxScroll; // nic sie nie zmienilo — skok na koniec
+            if (ns == sx) ns = max; // No change — jump to the end.
         } else {
-            // Do tylu: do poczatku ostatniej karty ukrytej za lewym brzegiem.
+            // Backward: to the start of the last tab hidden past the left edge.
             int pos = 0;
             for (const auto& t : tabs_) {
                 if (pos < sx) ns = pos;
@@ -90,22 +96,22 @@ public:
             }
             if (ns == sx) ns = 0;
         }
-        scrollX_ = std::clamp(ns, 0, maxScroll); // reczne — bez ensureVisible
+        scrollX_ = std::clamp(ns, 0, max); // Manual scroll — do not call ensureVisible.
     }
 
-    // Wymuszone zaznaczenie (po otwarciu/zamknieciu karty) — bez callbacku.
+    // Force selection (after opening/closing a tab) without invoking the callback.
     void select(int idx) {
         selected_ = idx;
         clampSelected();
-        ensurePending_ = true; // zmiana zaznaczenia — przewin do nowej karty
+        ensurePending_ = true; // Selection changed — scroll to the new tab.
     }
 
     void draw(Screen& screen) override {
         const auto& t = theme::active;
         screen.fillRect(bounds_, Cell{U' ', t.menuText, t.menuBg, 0});
         if (bounds_.w <= 0 || bounds_.h <= 0 || tabs_.empty()) return;
-        // ensureVisible tylko przy zmianie zaznaczenia/rozmiaru — reczne
-        // przewijanie (scrollBy) ma zostac tak, jak ustawil uzytkownik.
+        // Call ensureVisible only when the selection or size changes; preserve
+        // manual scrolling (scrollBy) as set by the user.
         if (ensurePending_ || bounds_.x != lastBounds_.x || bounds_.y != lastBounds_.y ||
             bounds_.w != lastBounds_.w || bounds_.h != lastBounds_.h) {
             ensureVisible();
@@ -113,13 +119,13 @@ public:
             lastBounds_ = bounds_;
         }
 
-        // Przy przepełnieniu: <> na krawędziach — sygnalizują ukryte karty
-        // i przewijaja (klik wirtualnym kursorem: scrollHit).
+        // When tabs overflow, <> at the edges indicate hidden tabs and scroll
+        // the bar when clicked with the virtual cursor (scrollHit).
         const bool ov = overflow();
         const int areaX0 = ov ? bounds_.x + 1 : bounds_.x;
         const int areaX1 = ov ? bounds_.x + bounds_.w - 1 : bounds_.x + bounds_.w;
 
-        int x = bounds_.x - scrollX_;
+        int x = areaX0 - scrollX_;
         for (int i = 0; i < static_cast<int>(tabs_.size()); ++i) {
             const Tab& tab = tabs_[static_cast<std::size_t>(i)];
             const int tw = tabWidth(tab);
@@ -128,13 +134,13 @@ public:
                 const Color bg = sel ? t.accentBg : t.menuBg;
                 const Color fg = sel ? t.accentText : t.menuText;
                 const uint8_t st = sel ? StyleBold : StyleNone;
-                // karta rysowana tylko w granicach widocznego zakresu
+                // Draw the tab only within the visible area.
                 const int cx0 = std::max(x, areaX0);
                 const int cx1 = std::min(x + tw, areaX1);
                 if (cx1 > cx0)
                     screen.fillRect(Rect{cx0, bounds_.y, cx1 - cx0, 1}, Cell{U' ', fg, bg, st});
-                // etykieta/gwiazdka przyciete znak po znaku (nie moga wychodzic
-                // poza pas kart — kiedys wychodzily w ramke okna)
+                // Clip the label/asterisk character by character so they cannot
+                // extend beyond the tab bar (they once overlapped the window frame).
                 const auto putClipped = [&](int cx, char32_t ch) {
                     if (cx >= areaX0 && cx < areaX1)
                         screen.set(cx, bounds_.y, Cell{ch, fg, bg, st});
@@ -165,15 +171,23 @@ public:
 
 private:
     static int tabWidth(const Tab& t) {
-        return static_cast<int>(t.label.size()) + (t.dirty ? 1 : 0) + 2; // spacje + '*'
+        return static_cast<int>(t.label.size()) + (t.dirty ? 1 : 0) + 2; // Padding + '*'.
     }
 
-    // Czy karty nie mieszcza sie w pasku (rysujemy wtedy <> i przewijamy).
+    // Do the tabs overflow the bar? If so, draw <> and enable scrolling.
     bool overflow() const {
         if (tabs_.empty() || bounds_.w <= 0) return false;
         int total = 0;
         for (const auto& t : tabs_) total += tabWidth(t);
         return total > bounds_.w;
+    }
+
+    int visibleWidth() const { return std::max(0, bounds_.w - (overflow() ? 2 : 0)); }
+    int contentStartX() const { return bounds_.x + (overflow() ? 1 : 0); }
+    int maxScroll() const {
+        int total = 0;
+        for (const auto& t : tabs_) total += tabWidth(t);
+        return std::max(0, total - visibleWidth());
     }
 
     void clampSelected() {
@@ -184,7 +198,7 @@ private:
     void step(int d) {
         if (tabs_.empty()) return;
         const int n = static_cast<int>(tabs_.size());
-        select(((selected_ + d) % n + n) % n); // cyklicznie
+        select(((selected_ + d) % n + n) % n); // Wrap around.
         fire();
     }
 
@@ -192,23 +206,24 @@ private:
         if (onSwitch) onSwitch(selected_);
     }
 
-    // Przesuwa scrollX_, zeby zaznaczona karta lezala w widocznym zakresie.
+    // Adjust scrollX_ so the selected tab is within the visible area.
     void ensureVisible() {
-        if (tabs_.empty() || bounds_.w <= 0) { scrollX_ = 0; return; }
+        if (tabs_.empty() || bounds_.w <= 0 || visibleWidth() <= 0) { scrollX_ = 0; return; }
+        const int viewW = visibleWidth();
         int start = 0;
         for (int i = 0; i < selected_; ++i)
             start += tabWidth(tabs_[static_cast<std::size_t>(i)]);
         const int end = start + tabWidth(tabs_[static_cast<std::size_t>(selected_)]);
         if (start < scrollX_) scrollX_ = start;
-        if (end > scrollX_ + bounds_.w) scrollX_ = end - bounds_.w;
+        if (end > scrollX_ + viewW) scrollX_ = end - viewW;
         scrollX_ = std::max(0, scrollX_);
     }
 
     std::vector<Tab> tabs_;
     int selected_ = 0;
     int scrollX_ = 0;
-    bool ensurePending_ = true; // czy przewinac do zaznaczonej przy nastepnym draw
-    Rect lastBounds_{};         // poprzedni rozmiar (resize = ponowne ensureVisible)
+    bool ensurePending_ = true; // Scroll to the selected tab on the next draw.
+    Rect lastBounds_{};         // Previous bounds (resize triggers ensureVisible again).
 };
 
 } // namespace fenrir

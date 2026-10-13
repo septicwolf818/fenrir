@@ -18,33 +18,32 @@
 
 namespace fenrir::apps {
 
-// Zdarzenie kalendarza: jednodniowy przedzial godzinowy + tytul.
-// Bez wydarzen calodniowych i przechodzacych na nastepny dzien (v1).
+// Calendar event: a time range within one day, plus a title.
+// No all-day events or events spanning multiple days (v1).
 struct CalEvent {
     int y = 0, m = 1, d = 1;
     int startMin = 0, endMin = 0;
     std::string title;
-    int id = -1; // klucz w Prefs ("e<id>"), -1 = jeszcze nie zapisane
+    int id = -1; // Prefs key ("e<id>"), -1 = not saved yet
 };
 
-// Kalendarz — trzy widoki na tym samym kursorze daty (y/m/d + godzina):
-//   Miesiac — siatka 7 kolumn (poniedzialek pierwszy), dzis i kursor
-//             podswietlone, dni z zdarzeniami oznaczone '*', a pod siatka
-//             agenda kursora (czasy i tytuly zdarzen wybranego dnia).
-//   Tydzien — 7 kolumn (pon..nd) + lewa kolumna godzin (00:..23:),
-//             zdarzenia rysowane jako bloki na planie dnia.
-//   Dzien   — to samo, jedna kolumna na pelnej szerokosci.
-// Nawigacja: strzalki = kursor daty (L/P: dzien, G/D: tydzien) w widoku
-// miesiaca, a w widokach tygodnia/dnia L/P = dzien, G/D = przewijanie
-// godzin. PgUp/PgDn = miesiac/tydzien/7 dni, Home = dzis, Backspace = powrot
-// do miesiaca. Ctrl+Up/Down = rok. Enter: z miesiaca otwiera widok dnia,
-// z widokow dnia/tygodnia edytuje zdarzenie pod kursorem (a gdy go brak —
-// tworzy nowe). Delete: usuwa zdarzenie pod kursorem (z potwierdzeniem).
-// Kilka zdarzen na ta sama godzine: komorka rysuje wszystkie (wybrane
-// z markerem '>' na poczatku), a Tab przełacza wybor — Enter/Del dzialaja
-// na wybranym. Ctrl+N = nowe zdarzenie, Ctrl+T = tydzien, Ctrl+D = dzien
-// (menu: F2).
-// Zdarzenia trwale w ~/.config/fenrir/apps/calendar.conf (Prefs).
+// Calendar — three views sharing the same date cursor (y/m/d + hour):
+//   Month — 7-column grid (Monday first), today and cursor highlighted,
+//           event days marked with '*', and the selected day's agenda
+//           (event times and titles) below the grid.
+//   Week  — 7 columns (Mon..Sun) + a left-hand hour column (00:..23:),
+//           with events drawn as blocks in the daily schedule.
+//   Day   — the same layout, with one full-width column.
+// Navigation: arrows move the date cursor (Left/Right: day, Up/Down: week)
+// in the month view; in week/day views Left/Right move by day and Up/Down
+// scroll by hour. PgUp/PgDn = month/week/7 days, Home = today, Backspace =
+// return to month. Ctrl+Up/Down = year. Enter: from month, open day view;
+// from day/week, edit the event under the cursor (or create one if none).
+// Delete removes the event under the cursor (after confirmation).
+// Multiple events in the same hour: the cell draws all of them (the selected
+// one is prefixed with '>'); Tab changes the selection — Enter/Del act on it.
+// Ctrl+N = new event, Ctrl+T = week, Ctrl+D = day (menu: F2).
+// Events persist in ~/.config/fenrir/apps/calendar.conf (Prefs).
 class CalendarView : public Widget {
 public:
     enum class View { Month, Week, Day };
@@ -71,31 +70,24 @@ public:
         }
 
         status_.setBounds(Rect{bounds_.x, bounds_.y + bounds_.h - 1, bounds_.w, 1});
-        if (!statusMsg_.empty()) {
-            status_.setText(text::toUtf32(statusMsg_), {});
-        } else if (view_ == View::Month) {
-            status_.setText(U"Ent:dzien N:zdarz PgUp/Dn:mies");
+        if (view_ == View::Month) {
+            status_.setText(U"Enter: day Ctrl+N: event PgUp/Dn: month");
         } else if (view_ == View::Week) {
-            status_.setText(multiAtCursor() ? U"Ent:edyt Tab:wyb Del:usun PgUp/Dn:tydz"
-                                            : U"Ent:edyt/dodaj Del:usun PgUp/Dn:tydz");
+            status_.setText(multiAtCursor() ? U"Enter: edit Tab: next Del: delete PgUp/Dn: week"
+                                            : U"Enter: edit/add Del: delete PgUp/Dn: week");
         } else {
-            status_.setText(multiAtCursor() ? U"Ent:edyt Tab:wyb Del:usun PgUp/Dn:7d"
-                                            : U"Ent:edyt/dodaj Del:usun PgUp/Dn:7d");
+            status_.setText(multiAtCursor() ? U"Enter: edit Tab: next Del: delete PgUp/Dn: 7d"
+                                            : U"Enter: edit/add Del: delete PgUp/Dn: 7d");
         }
         status_.draw(screen);
     }
 
     KeyEventResult handleKey(const KeyEvent& ev) override {
-        statusMsg_.clear();
+        // Moving the date/hour cursor resets the slot selection — Tab selects
+        // among events in the same hour, so after moving we return to 0.
+        resetSlotSelectionIfCursorMoved();
 
-        // Zmiana kursora daty/godziny kasuje wybor w slocie — Tab wybiera
-        // miedzy zdarzeniami tej samej godziny, wiec po ruchu wracamy do 0.
-        if (year_ != selY_ || month_ != selM_ || curD_ != selD_ || hourCur_ != selH_) {
-            selY_ = year_; selM_ = month_; selD_ = curD_; selH_ = hourCur_;
-            slotSel_ = 0;
-        }
-
-        // Ctrl+Up/Down = rok (ESC[1;5A / ESC[1;5B) — dziala w kazdym widoku.
+        // Ctrl+Up/Down = year (ESC[1;5A / ESC[1;5B) — works in every view.
         if (ev.ctrl && ev.key == Key::Up)   { shiftYear(-1); return KeyEventResult::Consumed; }
         if (ev.ctrl && ev.key == Key::Down) { shiftYear(1);  return KeyEventResult::Consumed; }
 
@@ -103,20 +95,21 @@ public:
             case Key::Home: jumpToToday(); return KeyEventResult::Consumed;
             case Key::Enter: {
                 if (view_ == View::Month) { view_ = View::Day; return KeyEventResult::Consumed; }
-                // Pod kursorem zdarzenie? Edytuj wybrane (Tab = kolejne);
-                // w przeciwnym razie nowe.
+                // If there's an event under the cursor, edit the selected one
+                // (Tab selects the next); otherwise create a new event.
                 if (const CalEvent* e = selectedEvent(year_, month_, curD_, hourCur_))
                     eventDialog(e);
                 else
                     newEvent();
                 return KeyEventResult::Consumed;
             }
-            // Backspace = wroc z dnia/tygodnia do miesiaca. Esc celowo NIE —
-            // rezerwuje go Desktop na zmiane trybow kursora (Edit->Keyboard->
-            // Desktop); aplikacje moga uzywac Esc tylko w popupach (Dialog).
+            // Backspace returns from day/week to month. Esc is intentionally
+            // not handled here — Desktop reserves it for switching cursor
+            // modes (Edit->Keyboard->Desktop); apps may use Esc only in
+            // popups (Dialog).
             case Key::Backspace:
                 if (view_ != View::Month) { view_ = View::Month; return KeyEventResult::Consumed; }
-                return KeyEventResult::Ignored; // z miesiaca Backspace = globalne
+                return KeyEventResult::Ignored; // In month view, Backspace is global.
             default: break;
         }
 
@@ -128,20 +121,26 @@ public:
                 case Key::Down:    moveCursor(7);  return KeyEventResult::Consumed;
                 case Key::PageUp:   prevMonth(); return KeyEventResult::Consumed;
                 case Key::PageDown: nextMonth(); return KeyEventResult::Consumed;
-                case Key::Delete:  return KeyEventResult::Consumed; // brak kontekstu godziny
+                case Key::Delete:  return KeyEventResult::Consumed; // no hour context
                 default: return KeyEventResult::Ignored;
             }
         }
-        // Widoki tygodnia/dnia: L/P = dzien, G/D = godzina, PgUp/Dn = skok tygodnia.
+        // Week/day views: Left/Right = day, Up/Down = hour, PgUp/Dn = jump a week.
         switch (ev.key) {
             case Key::Left:    moveCursor(-1); return KeyEventResult::Consumed;
             case Key::Right:   moveCursor(1);  return KeyEventResult::Consumed;
-            case Key::Up:      hourCur_ = std::max(0, hourCur_ - 1); return KeyEventResult::Consumed;
-            case Key::Down:    hourCur_ = std::min(23, hourCur_ + 1); return KeyEventResult::Consumed;
+            case Key::Up:
+                hourCur_ = std::max(0, hourCur_ - 1);
+                resetSlotSelectionIfCursorMoved();
+                return KeyEventResult::Consumed;
+            case Key::Down:
+                hourCur_ = std::min(23, hourCur_ + 1);
+                resetSlotSelectionIfCursorMoved();
+                return KeyEventResult::Consumed;
             case Key::PageUp:   moveCursor(-7); return KeyEventResult::Consumed;
             case Key::PageDown: moveCursor(7);  return KeyEventResult::Consumed;
             case Key::Tab: {
-                // Wybor miedzy zdarzeniami tej samej godziny (Enter/Del go uzywaja).
+                // Select among events in the same hour (Enter/Del use this selection).
                 auto list = slotEvents(year_, month_, curD_, hourCur_);
                 if (list.size() < 2) return KeyEventResult::Ignored;
                 if (slotSel_ >= static_cast<int>(list.size())) slotSel_ = 0;
@@ -162,17 +161,17 @@ public:
     int minHeight() const override { return kMinH; }
 
 private:
-    static constexpr int kCellW = 4;  // 7 * 4 = 28 kolumn siatki
+    static constexpr int kCellW = 4;  // 7 * 4 = 28 grid columns
     static constexpr int kGridW = 7 * kCellW;
-    static constexpr int kMinH = 10;  // tytul + naglowki + odstep + 6 tyg. + status
+    static constexpr int kMinH = 10;  // title + headers + gap + 6 weeks + status
     static constexpr int kMinYear = 1;
     static constexpr int kMaxYear = 9999;
-    static constexpr int kGutterW = 4; // kolumna godzin w widokach tygodnia/dnia
+    static constexpr int kGutterW = 4; // hour column in week/day views
 
-    // --- Zdarzenia: trwale w Prefs (calendar.conf) ---------------------------
+    // --- Events: persisted in Prefs (calendar.conf) ---------------------------
 
     static std::string hmStr(int min) {
-        min = std::clamp(min, 0, 23 * 60 + 59); // tez wycisza -Wformat-truncation (glibc)
+        min = std::clamp(min, 0, 23 * 60 + 59); // also silences -Wformat-truncation (glibc)
         char buf[8];
         std::snprintf(buf, sizeof(buf), "%02d:%02d", min / 60, min % 60);
         return buf;
@@ -189,7 +188,7 @@ private:
         return true;
     }
 
-    // "YYYY-MM-DD|HH:MM|HH:MM|tytul" — tytul moze zawierac '|' (limit splits).
+    // "YYYY-MM-DD|HH:MM|HH:MM|title" — title may contain '|' (limited splits).
     static std::string fmtEvent(const CalEvent& e) {
         char buf[48];
         std::snprintf(buf, sizeof(buf), "%04d-%02d-%02d|%s|%s|", e.y, e.m, e.d,
@@ -199,7 +198,7 @@ private:
 
     static bool parseEvent(std::string_view s, CalEvent& e) {
         auto dig = [](char c) { return c >= '0' && c <= '9'; };
-        // 0-9 data, 10 '|', 11-15 start, 16 '|', 17-21 koniec, 22 '|', 23+ tytul.
+        // 0-9 date, 10 '|', 11-15 start, 16 '|', 17-21 end, 22 '|', 23+ title.
         if (s.size() < 23) return false;
         if (!(dig(s[0]) && dig(s[1]) && dig(s[2]) && dig(s[3]) && s[4] == '-' &&
               dig(s[5]) && dig(s[6]) && s[7] == '-' && dig(s[8]) && dig(s[9]) &&
@@ -249,27 +248,27 @@ private:
     }
 
     void deleteEvent(int id) {
-        prefs::forApp("calendar").set("e" + std::to_string(id), ""); // set("") kasuje klucz
+        prefs::forApp("calendar").set("e" + std::to_string(id), ""); // set("") deletes the key
         std::erase_if(events_, [id](const CalEvent& v) { return v.id == id; });
     }
 
-    // --- Zapytanie o zdarzenie (Ctrl+N / Enter z widoku dnia/tygodnia) ------
+    // --- Event form (Ctrl+N / Enter from day/week view) ----------------------
 
     void clearDrafts() {
         draftTitle_.clear();
         draftStart_.clear();
         draftEnd_.clear();
-        draftEditId_ = -1; // -1 = tryb tworzenia, >=0 = tryb edycji danego id
+        draftEditId_ = -1; // -1 = create mode, >=0 = edit mode for that id
     }
 
-    // --- Rysowanie: widok miesiaca ------------------------------------------
+    // --- Drawing: month view --------------------------------------------------
 
     void drawMonth(Screen& screen) {
         const auto& t = theme::active;
         if (bounds_.w < kGridW + 2 || bounds_.h < kMinH) return;
 
-        // "Dzis" liczone na biezaco w kazdej klatce — przeskoczymy polnoc
-        // bez odswiezania okna (ten sam trik co zegar na pasku zadan).
+        // Recalculate "today" on every frame — this handles crossing midnight
+        // without refreshing the window (same trick as the taskbar clock).
         int todayD = 1, todayM = 1, todayY = 1970;
         const time_t now = time(nullptr);
         if (struct tm* lt = localtime(&now)) {
@@ -281,35 +280,35 @@ private:
         const int x0 = bounds_.x + (bounds_.w - kGridW) / 2;
         int y = bounds_.y;
 
-        // --- Wiersz 1: nazwa miesiaca i roku, wyrodkowana, pogrubiona ---
+        // --- Row 1: centered, bold month and year -----------------------------
         std::u32string title = monthName(month_) + U" " + text::toUtf32(std::to_string(year_));
         int tx = x0 + (kGridW - static_cast<int>(title.size())) / 2;
         screen.putText(tx, y, title, t.headerText, t.windowBg, StyleBold);
         ++y;
 
-        // --- Wiersz 2: skroty dni tygodnia (poniedzialek pierwszy) ---
+        // --- Row 2: weekday abbreviations (Monday first) ----------------------
         for (int c = 0; c < 7; ++c) {
             std::u32string lab = kDni[c];
             int cx = x0 + c * kCellW + (kCellW - static_cast<int>(lab.size())) / 2;
             screen.putText(cx, y, lab, t.headerText, t.windowBg, StyleBold);
         }
-        y += 2; // pusty wiersz odstepu po naglowkach
+        y += 2; // blank spacer row after the headers
 
-        // --- Siatka dni: maks 6 tygodni ---
-        const int firstWd = weekdayMondayFirst(year_, month_); // 0 = poniedzialek
+        // --- Day grid: up to 6 weeks -----------------------------------------
+        const int firstWd = weekdayMondayFirst(year_, month_); // 0 = Monday
         const int dim = daysInMonth(year_, month_);
         int day = 1;
         for (int row = 0; row < 6 && day <= dim; ++row) {
             for (int col = 0; col < 7; ++col) {
-                if (row == 0 && col < firstWd) continue; // pole przed 1-szym
+                if (row == 0 && col < firstWd) continue; // cell before the 1st
                 if (day > dim) break;
                 const bool isToday = (day == todayD && month_ == todayM && year_ == todayY);
-                const bool isCur = (day == curD_); // kursor jest zawsze w wyswietlanym miesiacu
+                const bool isCur = (day == curD_); // cursor is always in the displayed month
                 Color fg = isToday ? t.accentText : (isCur ? t.titleText : t.windowText);
                 Color bg = isToday ? t.accentBg : (isCur ? t.titleBg : t.windowBg);
                 uint8_t style = (isToday || isCur) ? StyleBold : StyleNone;
 
-                // Kurs dzis + kursor = nawiasy, zeby oba byli widoczne naraz.
+                // Today + cursor = brackets, so both are visible at once.
                 std::u32string s;
                 if (isToday && isCur) s = U"[" + text::toUtf32(std::to_string(day)) + U"]";
                 else s = text::toUtf32(std::to_string(day));
@@ -319,8 +318,8 @@ private:
                 int cx = cellX + (kCellW - static_cast<int>(s.size())) / 2;
                 screen.putText(cx, y, s, fg, bg, style);
 
-                // Dni z zadarzeniami: '*' na ostatniej kolumnie komorki
-                // (nie gryzie sie z dwuznakowym numerem; przy nawiasach pomijamy).
+                // Event days: '*' in the cell's last column (does not conflict
+                // with two-digit dates; omitted when brackets are shown).
                 if (hasEvents(year_, month_, day) && !(isToday && isCur)) {
                     screen.putText(cellX + kCellW - 1, y, U"*", t.highlightText, bg);
                 }
@@ -329,8 +328,8 @@ private:
             ++y;
         }
 
-        // Agenda kursora: jeden wiersz miedzy siatka a statusem — czasy
-        // i tytuly zdarzen wybranego dnia (gdy brak zdarzen, wiersz zostaje pusty).
+        // Cursor agenda: one row between the grid and status — event times and
+        // titles for the selected day (blank when there are no events).
         const int statusY = bounds_.y + bounds_.h - 1;
         if (y < statusY) {
             const std::u32string ag = dayAgenda();
@@ -340,25 +339,26 @@ private:
         }
     }
 
-    // --- Rysowanie: widok tygodnia ------------------------------------------
+    // --- Drawing: week view ---------------------------------------------------
 
     void drawWeek(Screen& screen) {
         const auto& t = theme::active;
         if (bounds_.h < 5 || bounds_.w < kGutterW + 7) return;
 
         int mY = 0, mM = 0, mD = 0;
-        cursorWeek(mY, mM, mD);                       // poniedzialek tygodnia kursora
+        cursorWeek(mY, mM, mD);                       // Monday of the cursor's week
         int eY = 0, eM = 0, eD = 0;
-        civilFromDays(daysFromCivil(mY, mM, mD) + 6, eY, eM, eD); // niedziela
+        civilFromDays(daysFromCivil(mY, mM, mD) + 6, eY, eM, eD); // Sunday
 
         int y0 = bounds_.y;
-        std::u32string title = U"tydzien " + ddmm(mD, mM) + U" - " + ddmm(eD, eM) +
-                               U"." + text::toUtf32(std::to_string(eY));
+        std::u32string title = U"Week " + ddmm(mD, mM);
+        if (mY != eY) title += U"." + text::toUtf32(std::to_string(mY));
+        title += U" - " + ddmm(eD, eM) + U"." + text::toUtf32(std::to_string(eY));
         int tx = bounds_.x + (bounds_.w - static_cast<int>(title.size())) / 2;
         if (tx < bounds_.x) tx = bounds_.x;
         screen.putText(tx, y0, title, t.headerText, t.windowBg, StyleBold);
 
-        // --- Naglowki kolumn: pon..nd z datami; kolumna kursora na akcencie ---
+        // --- Column headers: Mon..Sun with dates; cursor column highlighted --
         const int curWd = weekdayOf(year_, month_, curD_);
         const int colW = std::max(1, (bounds_.w - kGutterW) / 7);
         int hy = y0 + 1;
@@ -376,7 +376,7 @@ private:
         }
 
         const int rowY = y0 + 2;
-        const int avail = bounds_.h - 3; // tytul + naglowki + status
+        const int avail = bounds_.h - 3; // title + headers + status
         syncScroll(avail);
         const int rows = std::max(0, std::min(avail, 24 - hourScroll_));
         for (int i = 0; i < rows; ++i) {
@@ -390,7 +390,7 @@ private:
         }
     }
 
-    // --- Rysowanie: widok dnia ------------------------------------------------
+    // --- Drawing: day view ----------------------------------------------------
 
     void drawDay(Screen& screen) {
         const auto& t = theme::active;
@@ -405,7 +405,7 @@ private:
         screen.putText(tx, y0, title, t.headerText, t.windowBg, StyleBold);
 
         const int rowY = y0 + 1;
-        const int avail = bounds_.h - 2; // tytul + status
+        const int avail = bounds_.h - 2; // title + status
         syncScroll(avail);
         const int colX = bounds_.x + kGutterW;
         const int colW = std::max(1, bounds_.w - kGutterW);
@@ -417,7 +417,7 @@ private:
         }
     }
 
-    // Kolumna godzin: "HH:" + marker '>' na kursorze godziny.
+    // Hour column: "HH:" + '>' marker on the selected hour.
     void drawGutter(Screen& screen, int y, int hour) {
         const auto& t = theme::active;
         const bool cur = (hour == hourCur_);
@@ -429,9 +429,9 @@ private:
         screen.putText(bounds_.x + 3, y, cur ? U">" : U" ", fg, bg, cur ? StyleBold : StyleNone);
     }
 
-    // Komorka zdarzenia: tytuly zdarzen STARTUJACYCH w tej godzinie — wybrane
-    // z markerem '>' na poczatku (widoczne mimo przyciecia), pozostale po nim.
-    // Godziny kontynuacji (bez startu) = '|' jak dotychczas.
+    // Event cell: titles of events STARTING in this hour — the selected event
+    // is prefixed with '>' (visible even when clipped), followed by the rest.
+    // Continuation hours (no event starts) use '|', as before.
     void drawEventCell(Screen& screen, int x, int w, int y, int ey, int em, int ed, int hour) {
         if (w <= 0) return;
         const auto& t = theme::active;
@@ -442,17 +442,36 @@ private:
         bool startsHere = false;
         for (const auto* e : list)
             if (e->startMin / 60 == hour) { startsHere = true; break; }
+
+        // Show '>' only in the cursor cell (where Tab selection applies).
+        const bool cursorSlot = (ey == year_ && em == month_ && ed == curD_ && hour == hourCur_);
+        const CalEvent* sel = nullptr;
+        if (cursorSlot && selY_ == year_ && selM_ == month_ && selD_ == curD_ && selH_ == hourCur_ &&
+            slotSel_ >= 0 && slotSel_ < static_cast<int>(list.size()))
+            sel = list[static_cast<std::size_t>(slotSel_)];
+
         if (!startsHere) {
-            screen.putText(x, y, U"|", t.dimText, t.surfaceBg);
+            if (sel) {
+                // A selected event can continue through this hour. Keep the
+                // continuation bar, but expose both the selection and title.
+                screen.putText(x, y, text::clip(U">|" + text::toUtf32(sel->title), w),
+                               t.highlightText, t.surfaceBg, StyleBold);
+            } else {
+                screen.putText(x, y, U"|", t.dimText, t.surfaceBg);
+            }
             return;
         }
 
-        // Znacznik '>' tylko w komorce kursora (tam dziala wybor z Tab).
-        const bool cursorSlot = (ey == year_ && em == month_ && ed == curD_ && hour == hourCur_);
-        const CalEvent* sel = nullptr;
-        if (cursorSlot && slotSel_ >= 0 && slotSel_ < static_cast<int>(list.size()))
-            sel = list[static_cast<std::size_t>(slotSel_)];
-        if (sel && sel->startMin / 60 != hour) sel = nullptr; // wybrane nie startuje tu — bez znacznika
+        if (sel && sel->startMin / 60 != hour) {
+            // The selected event is a continuation; show it first so Tab
+            // selection remains visible alongside events starting this hour.
+            std::u32string txt = U">|" + text::toUtf32(sel->title);
+            for (const auto* e : list)
+                if (e != sel && e->startMin / 60 == hour)
+                    txt += U"; " + text::toUtf32(e->title);
+            screen.putText(x, y, text::clip(txt, w), t.highlightText, t.surfaceBg, StyleBold);
+            return;
+        }
 
         if (sel) {
             const std::u32string head = U">" + text::toUtf32(sel->title);
@@ -480,10 +499,10 @@ private:
         screen.putText(x, y, text::clip(txt, w), t.surfaceText, t.surfaceBg, StyleBold);
     }
 
-    // --- Stan / nawigacja -----------------------------------------------------
+    // --- State / navigation ---------------------------------------------------
 
-    // Wszystkie zdarzenia nakladajace sie na dana godzine, posortowane po
-    // starcie (a przy remisie po id — stabilna kolejnosc tworzenia).
+    // All events overlapping the given hour, sorted by start time (then by id
+    // to preserve creation order for ties).
     std::vector<const CalEvent*> slotEvents(int y, int m, int d, int hour) const {
         const int from = hour * 60, to = from + 60;
         std::vector<const CalEvent*> out;
@@ -497,7 +516,7 @@ private:
         return out;
     }
 
-    // Wybrane zdarzenie w slocie kursora (Tab zmienia wybor) — nullptr = brak.
+    // Selected event in the cursor slot (Tab changes selection); nullptr = none.
     const CalEvent* selectedEvent(int y, int m, int d, int hour) {
         auto list = slotEvents(y, m, d, hour);
         if (list.empty()) return nullptr;
@@ -506,7 +525,7 @@ private:
         return list[static_cast<std::size_t>(slotSel_)];
     }
 
-    bool multiAtCursor() const { // >=2 zdarzenia na kursorze godziny (widok dzien/tydzien)
+    bool multiAtCursor() const { // >=2 events in the cursor hour (day/week view)
         return slotEvents(year_, month_, curD_, hourCur_).size() > 1;
     }
 
@@ -516,7 +535,7 @@ private:
         return false;
     }
 
-    // Zdarzenia kursora dnia posortowane po starcie: "HH:MM tytul  HH:MM tytul".
+    // Events on the cursor day, sorted by start: "HH:MM title  HH:MM title".
     std::u32string dayAgenda() const {
         std::vector<const CalEvent*> list;
         for (const auto& e : events_)
@@ -528,12 +547,12 @@ private:
         for (std::size_t i = 0; i < list.size(); ++i) {
             if (i) s += U"  ";
             s += text::toUtf32(hmStr(list[i]->startMin)) + U" " + text::toUtf32(list[i]->title);
-            if (s.size() > 400) break; // i tak przetnie clip() przy rysowaniu
+            if (s.size() > 400) break; // clip() will truncate it when drawing anyway
         }
         return s;
     }
 
-    // Przesuwa godziny widoczne tak, zeby kursor godziny byl widoczny.
+    // Scroll the visible hours as needed to keep the cursor hour in view.
     void syncScroll(int avail) {
         if (avail < 1) { hourScroll_ = 0; return; }
         if (hourCur_ < hourScroll_) hourScroll_ = hourCur_;
@@ -549,32 +568,47 @@ private:
             curD_ = lt->tm_mday;
             hourCur_ = lt->tm_hour;
         }
+        resetSlotSelectionIfCursorMoved();
+    }
+
+    void resetSlotSelectionIfCursorMoved() {
+        if (year_ != selY_ || month_ != selM_ || curD_ != selD_ || hourCur_ != selH_) {
+            selY_ = year_;
+            selM_ = month_;
+            selD_ = curD_;
+            selH_ = hourCur_;
+            slotSel_ = 0;
+        }
     }
 
     void shiftYear(int dy) {
         year_ = std::clamp(year_ + dy, kMinYear, kMaxYear);
         curD_ = std::min(curD_, daysInMonth(year_, month_));
+        resetSlotSelectionIfCursorMoved();
     }
 
     void prevMonth() {
-        if (month_ > 1) { --month_; return; }
-        if (year_ > kMinYear) { month_ = 12; --year_; }
+        if (month_ > 1) --month_;
+        else if (year_ > kMinYear) { month_ = 12; --year_; }
         curD_ = std::min(curD_, daysInMonth(year_, month_));
+        resetSlotSelectionIfCursorMoved();
     }
     void nextMonth() {
-        if (month_ < 12) { ++month_; return; }
-        if (year_ < kMaxYear) { month_ = 1; ++year_; }
+        if (month_ < 12) ++month_;
+        else if (year_ < kMaxYear) { month_ = 1; ++year_; }
         curD_ = std::min(curD_, daysInMonth(year_, month_));
+        resetSlotSelectionIfCursorMoved();
     }
 
-    // Kursor daty przesuniety o delta dni (przechodzi miedzy miesiacami).
+    // Move the date cursor by delta days (crossing month boundaries as needed).
     void moveCursor(int deltaDays) {
         long days = daysFromCivil(year_, month_, curD_) + deltaDays;
         days = std::clamp(days, daysFromCivil(kMinYear, 1, 1), daysFromCivil(kMaxYear, 12, 31));
         civilFromDays(days, year_, month_, curD_);
+        resetSlotSelectionIfCursorMoved();
     }
 
-    // Poniedzialek tygodnia kursora.
+    // Monday of the cursor's week.
     void cursorWeek(int& y, int& m, int& d) const {
         civilFromDays(daysFromCivil(year_, month_, curD_) - weekdayOf(year_, month_, curD_), y, m, d);
     }
@@ -587,12 +621,12 @@ private:
 
     static std::u32string monthName(int m) {
         static const char32_t* kMies[12] = {
-            U"Styczeń", U"Luty", U"Marzec", U"Kwiecień", U"Maj", U"Czerwiec",
-            U"Lipiec", U"Sierpień", U"Wrzesień", U"Październik", U"Listopad", U"Grudzień"};
+            U"January", U"February", U"March", U"April", U"May", U"June",
+            U"July", U"August", U"September", U"October", U"November", U"December"};
         return (m >= 1 && m <= 12) ? kMies[m - 1] : U"?";
     }
 
-    static const char32_t* kDni[7]; // defined below (pon..nd)
+    static const char32_t* kDni[7]; // defined below (Mon..Sun)
 
     static bool isLeap(int y) {
         return (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
@@ -603,9 +637,9 @@ private:
         return (m == 2 && isLeap(y)) ? 29 : kDim[m - 1];
     }
 
-    // Dni od epoki (proleptyczny gregorianianski, algorytm Hinnanta) —
-    // wystarczy do dnia tygodnia, bez <chrono> kalendarza (portable na starych
-    // toolchainach).
+    // Days since the epoch (proleptic Gregorian, Hinnant algorithm) —
+    // sufficient for weekday calculations, without <chrono> calendar support
+    // (portable to older toolchains).
     static long daysFromCivil(int y, int m, int d) {
         y -= m <= 2;
         const long era = (y >= 0 ? y : y - 399) / 400;
@@ -615,7 +649,7 @@ private:
         return era * 146097L + static_cast<long>(doe) - 719468L;
     }
 
-    // Odwrotnosc daysFromCivil (Hinnant): liczba dni -> y/m/d.
+    // Inverse of daysFromCivil (Hinnant): day count -> y/m/d.
     static void civilFromDays(long z, int& y, int& m, int& d) {
         z += 719468;
         const long era = (z >= 0 ? z : z - 146096) / 146097;
@@ -628,13 +662,13 @@ private:
         y = static_cast<int>(yoe) + static_cast<int>(era) * 400 + (m <= 2 ? 1 : 0);
     }
 
-    // Dzien tygodnia dowolnej daty: 0 = poniedzialek (1970-01-01 = czwartek = 3).
+    // Weekday for any date: 0 = Monday (1970-01-01 = Thursday = 3).
     static int weekdayOf(int y, int m, int d) {
         const long days = daysFromCivil(y, m, d);
         return static_cast<int>(((days + 3) % 7 + 7) % 7);
     }
 
-    // Dzien tygodnia 1-szego dnia miesiaca: 0 = poniedzialek.
+    // Weekday of the month's first day: 0 = Monday.
     static int weekdayMondayFirst(int y, int m) {
         return weekdayOf(y, m, 1);
     }
@@ -643,25 +677,24 @@ private:
     View view_ = View::Month;
     int year_ = 1970;
     int month_ = 1;
-    int curD_ = 1;        // kursor daty (dzien)
-    int hourCur_ = 0;     // kursor godziny (widoki dzien/tydzien)
-    int hourScroll_ = 0;  // pierwszy widoczny wiersz godziny
+    int curD_ = 1;        // date cursor (day)
+    int hourCur_ = 0;     // hour cursor (day/week views)
+    int hourScroll_ = 0;  // first visible hour row
     std::vector<CalEvent> events_;
-    int slotSel_ = 0;                      // wybor w slocie godziny (Tab)
-    int selY_ = -1, selM_ = -1, selD_ = -1, selH_ = -1; // kursor z ostatniego resetu wyboru
-    std::string draftTitle_, draftStart_, draftEnd_; // zachowane po bledzie walidacji
-    int draftEditId_ = -1;                           // id edycji z tych szkicow (-1 = tworzenie)
-    std::string statusMsg_;                          // przelotowy komunikat (np. "Dodano: ...")
+    int slotSel_ = 0;                      // selection in the hour slot (Tab)
+    int selY_ = -1, selM_ = -1, selD_ = -1, selH_ = -1; // cursor at last selection reset
+    std::string draftTitle_, draftStart_, draftEnd_; // kept after validation errors
+    int draftEditId_ = -1;                           // edited draft id (-1 = create)
     StatusBar status_;
 };
 
-inline const char32_t* CalendarView::kDni[7] = {U"pon", U"wt", U"śr", U"czw", U"pt", U"sob", U"nd"};
+inline const char32_t* CalendarView::kDni[7] = {U"Mon", U"Tue", U"Wed", U"Thu", U"Fri", U"Sat", U"Sun"};
 
 inline void CalendarView::newEvent() { eventDialog(nullptr); }
 
-// Wspolny formularz tworzenia (existing = nullptr) i edycji zdarzenia.
-// Szkice po bledzie walidacji sa przywracane tylko, gdy pasuja do trybu
-// (draftEditId_), zeby szkic edycji nie wskoczyl przy nowym zdarzeniu.
+// Shared form for creating (existing = nullptr) and editing an event.
+// Restore drafts after validation errors only when the mode matches
+// (draftEditId_), so an edit draft is not reused for a new event.
 inline void CalendarView::eventDialog(const CalEvent* existing) {
     const int editId = existing ? existing->id : -1;
     if (draftEditId_ != editId) clearDrafts();
@@ -672,7 +705,7 @@ inline void CalendarView::eventDialog(const CalEvent* existing) {
             draftStart_ = hmStr(existing->startMin);
             draftEnd_ = hmStr(existing->endMin);
         } else {
-            // Start = kursor godziny (w widokach dnia/tygodnia), koniec godzine pozniej.
+            // Start = cursor hour (in day/week views), end = one hour later.
             const int sm = hourCur_ * 60;
             draftStart_ = hmStr(sm);
             draftEnd_ = hmStr(std::min(sm + 60, 23 * 60 + 59));
@@ -682,77 +715,77 @@ inline void CalendarView::eventDialog(const CalEvent* existing) {
     const int dm = existing ? existing->m : month_;
     const int dd = existing ? existing->d : curD_;
     char buf[32];
-    std::snprintf(buf, sizeof(buf), "Data: %02d.%02d.%04d", dd, dm, dy);
+    std::snprintf(buf, sizeof(buf), "Date: %02d.%02d.%04d", dd, dm, dy);
     auto dlg = std::make_unique<Dialog>(text::toUtf32(std::string(buf)),
                                         Dialog::Buttons::OkCancel);
-    dlg->addInput(U"Tytul: ", text::toUtf32(draftTitle_));
+    dlg->addInput(U"Title: ", text::toUtf32(draftTitle_));
     dlg->addInput(U"Start: ", text::toUtf32(draftStart_));
-    dlg->addInput(U"Koniec: ", text::toUtf32(draftEnd_));
+    dlg->addInput(U"End: ", text::toUtf32(draftEnd_));
     Dialog* raw = dlg.get();
-    ctx_.openDialog(editId >= 0 ? U"Edytuj zdarzenie" : U"Zdarzenie", std::move(dlg),
+    ctx_.openDialog(editId >= 0 ? U"Edit event" : U"Event", std::move(dlg),
                     [this, token, raw, editId, dy, dm, dd](int idx) {
         if (!token.lock()) return;
-        if (idx != 0) { clearDrafts(); return; } // Anuluj/Esc — czysty start
+        if (idx != 0) { clearDrafts(); return; } // Cancel/Esc — start fresh
         const std::string title = text::toUtf8(raw->input(0)->value());
         const std::string sTxt = text::toUtf8(raw->input(1)->value());
         const std::string eTxt = text::toUtf8(raw->input(2)->value());
         int sm = 0, em = 0;
         if (title.empty()) {
             draftTitle_.clear(); draftStart_ = sTxt; draftEnd_ = eTxt; draftEditId_ = editId;
-            ctx_.showMessage(U"Podaj tytul zdarzenia.");
+            ctx_.showMessage(U"Enter an event title.");
             return;
         }
         if (!parseHm(sTxt, sm) || !parseHm(eTxt, em)) {
             draftTitle_ = title; draftStart_ = sTxt; draftEnd_ = eTxt; draftEditId_ = editId;
-            ctx_.showMessage(U"Godzina w formacie HH:MM (00:00-23:59).");
+            ctx_.showMessage(U"Time must be in HH:MM format (00:00-23:59).");
             return;
         }
         if (em <= sm) {
             draftTitle_ = title; draftStart_ = sTxt; draftEnd_ = eTxt; draftEditId_ = editId;
-            ctx_.showMessage(U"Koniec musi byc pozniej niz start.");
+            ctx_.showMessage(U"End time must be after start time.");
             return;
         }
         clearDrafts();
         if (editId >= 0) {
             updateEvent(CalEvent{dy, dm, dd, sm, em, title, editId});
-            statusMsg_ = "Edytowano: " + title;
+            status_.setMessage(text::toUtf32("Updated: " + title));
         } else {
             addEvent(CalEvent{dy, dm, dd, sm, em, title});
-            statusMsg_ = "Dodano: " + title;
+            status_.setMessage(text::toUtf32("Added: " + title));
         }
     });
 }
 
-// Usuwanie zawsze przez potwierdzenie — Delete byl zbyt latwy do przypadkowego
-// wcisniecia przy przewijaniu godzin.
+// Always confirm deletion — Delete was too easy to press accidentally while
+// scrolling through hours.
 inline void CalendarView::confirmDelete(const CalEvent& e) {
     const auto token = lifetimeToken();
     const int id = e.id;
     const std::string title = e.title;
-    ctx_.confirm(U"Usunac zdarzenie: " + text::toUtf32(title) + U"?",
+    ctx_.confirm(U"Delete event: " + text::toUtf32(title) + U"?",
                  [this, token, id, title](bool ok) {
         if (!token.lock()) return;
         if (!ok) return;
         deleteEvent(id);
-        statusMsg_ = "Usunieto: " + title;
+        status_.setMessage(text::toUtf32("Deleted: " + title));
     });
 }
 
 class CalendarApp : public App {
 public:
-    std::string name() const override { return "Kalendarz"; }
+    std::string name() const override { return "Calendar"; }
 
     std::unique_ptr<Widget> createView(AppContext& ctx) override {
         auto view = std::make_unique<CalendarView>(ctx);
         CalendarView* raw = view.get();
 
-        view->setMenuTabs({{U"Widok", std::vector<MenuItem>{
-            {U"Miesiac", [raw] { raw->setView(CalendarView::View::Month); }},
-            {U"Tydzien (Ctrl+T)", [raw] { raw->setView(CalendarView::View::Week); }},
-            {U"Dzien (Ctrl+D)", [raw] { raw->setView(CalendarView::View::Day); }},
+        view->setMenuTabs({{U"View", std::vector<MenuItem>{
+            {U"Month", [raw] { raw->setView(CalendarView::View::Month); }},
+            {U"Week (Ctrl+T)", [raw] { raw->setView(CalendarView::View::Week); }},
+            {U"Day (Ctrl+D)", [raw] { raw->setView(CalendarView::View::Day); }},
         }},
-        {U"Zdarzenie", std::vector<MenuItem>{
-            {U"Nowe (Ctrl+N)", [raw] { raw->newEvent(); }},
+        {U"Event", std::vector<MenuItem>{
+            {U"New (Ctrl+N)", [raw] { raw->newEvent(); }},
         }}});
 
         view->pushShortcut({true, Key::Char, U'n'}, [raw] { raw->newEvent(); });
@@ -763,8 +796,8 @@ public:
     }
 
     Rect preferredBounds(const Rect& desktopArea) const override {
-        // Szerzej/wyzej niz kiedys — widok tygodnia ma 7 kolumn + godziny;
-        // 48 kolumn = 6 na kolumne, zeby zmiescilo sie "pon 12".
+        // Wider/taller than before — week view has 7 columns plus hours;
+        // 48 columns = 6 per column, enough to fit "Mon 12".
         int w = std::min(48, std::max(30, desktopArea.w - 6));
         int h = std::min(14, std::max(11, desktopArea.h - 4));
         return Rect{desktopArea.x + 4, desktopArea.y + 1, w, h};

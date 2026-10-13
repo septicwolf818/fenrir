@@ -19,8 +19,8 @@ namespace fenrir {
 namespace {
 
 void drawBox(Screen& screen, const Rect& r, std::u32string_view title) {
-    // Ramka dropdownu z motywu: niebieski pasek tytulu (titleBg/titleText),
-    // szara ramka (menuBg/menuText), biale wnetrze (surfaceBg/surfaceText).
+    // Dropdown frame from the theme: blue title bar (titleBg/titleText),
+    // gray frame (menuBg/menuText), white interior (surfaceBg/surfaceText).
     const auto& t = theme::active;
     const Color titleBg = t.titleBg;
     const Color titleFg = t.titleText;
@@ -29,33 +29,37 @@ void drawBox(Screen& screen, const Rect& r, std::u32string_view title) {
     const Color innerFg = t.surfaceText;
     const Color innerBg = t.surfaceBg;
 
-    // Wnętrze — białe (menu wypełni je wpisami; puste miejsca zostają białe).
+    // Interior — white (the menu fills it with entries; leftover space stays white).
     for (int y = r.y; y < r.y + r.h; ++y)
         for (int x = r.x; x < r.x + r.w; ++x)
             screen.set(x, y, Cell{U' ', innerFg, innerBg, 0});
 
-    // Górny wiersz = niebieski pasek tytułu.
+    // Top row = blue title bar.
     for (int x = r.x; x < r.x + r.w; ++x)
         screen.set(x, r.y, Cell{U' ', titleFg, titleBg, StyleBold});
 
-    // Ramka boczna i dolna — szara.
-    for (int y = r.y + 1; y < r.y + r.h; ++y) {
-        screen.set(r.x, y, Cell{U'|', frameFg, frameBg, 0});
-        screen.set(r.x + r.w - 1, y, Cell{U'|', frameFg, frameBg, 0});
+    // Box-drawing frame: single-cell UTF-8 glyphs available in standard TTY fonts.
+    screen.set(r.x, r.y, Cell{U'┌', frameFg, titleBg, 0});
+    screen.set(r.x + r.w - 1, r.y, Cell{U'┐', frameFg, titleBg, 0});
+    for (int y = r.y + 1; y < r.y + r.h - 1; ++y) {
+        screen.set(r.x, y, Cell{U'│', frameFg, frameBg, 0});
+        screen.set(r.x + r.w - 1, y, Cell{U'│', frameFg, frameBg, 0});
     }
-    for (int x = r.x; x < r.x + r.w; ++x)
-        screen.set(x, r.y + r.h - 1, Cell{U' ', frameFg, frameBg, 0});
+    screen.set(r.x, r.y + r.h - 1, Cell{U'└', frameFg, frameBg, 0});
+    screen.set(r.x + r.w - 1, r.y + r.h - 1, Cell{U'┘', frameFg, frameBg, 0});
+    for (int x = r.x + 1; x < r.x + r.w - 1; ++x)
+        screen.set(x, r.y + r.h - 1, Cell{U'─', frameFg, frameBg, 0});
 
-    // Nazwa na pasku tytułu.
+    // Title text on the title bar.
     if (!title.empty()) {
         std::u32string t = U" " + std::u32string(title) + U" ";
         screen.putText(r.x + 1, r.y, t, titleFg, titleBg, StyleBold);
     }
 }
 
-// Szerokosc ramki dropdownu dopasowana do tresci, zawsze miesci najszersza
-// kolumne: ramka + wypelnienie + tekst (etykieta LUB tytul paska) + wypelnienie
-// + ramka = +4. Minimum 12, zeby pusty dropdown byl czytelny.
+// Dropdown frame width fitted to the content, always wide enough for the
+// widest column: frame + padding + text (label OR bar title) + padding
+// + frame = +4. Minimum 12 so an empty dropdown stays legible.
 int dropdownWidth(const std::vector<std::u32string>& labels, std::u32string_view title) {
     int w = 12;
     for (const auto& l : labels)
@@ -64,17 +68,17 @@ int dropdownWidth(const std::vector<std::u32string>& labels, std::u32string_view
     return w;
 }
 
-// Guard zamykania okna: okno z brudna trescia (Widget::dirty) nie zamyka sie
-// od razu — pytamy uzytkownika (AppContext::confirm = Dialog Ok/Anuluj), a
-// zamkniecie enkuje dopiero na OK; przy Anuluj/Esc nic sie nie dzieje.
-// `deferClose` zawsze enkuje zamkniecie (closePending_), takze dla okna
-// czystego: callback dialogu biegnie z wewnatrz handleKey widgetu, wiec okno
-// moze zginac dopiero w flushPendingCloses — po powrocie z dispatchu. Obie
-// sciezki koncza sie wienc zamknieciem po obsluzeniu klawisza (albo klikniecia).
+// Window-close guard: a window with dirty content (Widget::dirty) does not
+// close immediately — we ask the user (AppContext::confirm = OK/Cancel dialog)
+// and enqueue the close only on OK; on Cancel/Esc nothing happens.
+// `deferClose` always enqueues the close (closePending_), even for a clean
+// window: the dialog callback runs from inside the widget's handleKey, so the
+// window may only die in flushPendingCloses — after returning from dispatch.
+// Both paths thus close the window after the key press (or click) is handled.
 void closeWithConfirm(AppContext& ctx, Window* w, std::function<void()> deferClose) {
     if (!w) return;
     if (!w->content() || !w->content()->dirty()) { deferClose(); return; }
-    ctx.confirm(U"Niezapisane zmiany. Zamknac okno?",
+    ctx.confirm(U"Unsaved changes. Close the window?",
                 [deferClose = std::move(deferClose)](bool ok) {
                     if (ok) deferClose();
                 });
@@ -82,22 +86,22 @@ void closeWithConfirm(AppContext& ctx, Window* w, std::function<void()> deferClo
 
 } // namespace
 
-// Pomocnicze funkcje do obslugi skrótow klawiszowych — statyczne, bo nie modyfikuja stanu Desktop.
+// Helper functions for keyboard shortcut handling — static because they do not modify Desktop state.
 
 bool Desktop::matchesShortcuts(const std::vector<std::pair<KeyShortcut, std::function<void()>>>& sc, const KeyEvent& ev) {
     for (auto& [shortcut, _] : sc) {
         if (shortcut.ctrl != ev.ctrl) continue;
         if (shortcut.alt != ev.alt) continue;
         if (shortcut.key != ev.key) continue;
-        // Dla Key::Char porownujemy character — uwaga: terminal wysyla lowercase!
+        // For Key::Char we compare the character — note: the terminal sends lowercase!
         if (shortcut.key == Key::Char) {
             if (shortcut.character.has_value()) {
                 char32_t sc = shortcut.character.value();
-                // Dopasowanie case-insensitive dla liter (terminal zawsze wysyla lowercase).
+                // Case-insensitive match for letters (the terminal always sends lowercase).
                 char32_t ec = ev.character;
                 if (sc != ec && std::tolower(static_cast<unsigned char>(sc)) != std::tolower(static_cast<unsigned char>(ec))) continue;
             } else {
-                // Bez zadanego character = niepasuje (nie wiemy co porownac).
+                // No character specified = no match (nothing to compare against).
                 continue;
             }
         }
@@ -127,8 +131,8 @@ Desktop::Desktop()
       renderer_(terminal_),
       wm_(),
       registry_() {
-    // Ustawienia trwale (~/.config/fenrir/settings.ini): motyw, nazwa,
-    // zegar, migajacy kursor. Ladujemy przed pierwszym rysowaniem.
+    // Persistent settings (~/.config/fenrir/settings.ini): theme, name,
+    // clock, blinking cursor. Loaded before the first draw.
     settings::load();
     theme::apply(settings::active.theme);
     desktopName_ = settings::active.desktopName;
@@ -141,19 +145,19 @@ Rect Desktop::desktopArea() const {
 
 void Desktop::openAppMenu() {
     if (appMenu_) return;
-    closeWinMenu(); // menu aplikacji (dropdown) i menu pulpitowe nie istnieja razem
-    appMenuClosePending_ = false; // czyscimy stale flagi z poprzedniego zamkniecia (np. po launchu aplikacji)
+    closeWinMenu(); // the app dropdown and the desktop menu are never open at the same time
+    appMenuClosePending_ = false; // clear stale flags from the previous close (e.g. after launching an app)
 
     std::vector<std::u32string> items;
     for (auto& a : registry_.apps()) {
         std::string n = a->name();
         items.emplace_back(n.begin(), n.end());
     }
-    items.push_back(U"Zamknij pulpit");
+    items.push_back(U"Quit desktop");
 
-    int w = std::max(24, dropdownWidth(items, U"Aplikacje"));
+    int w = std::max(24, dropdownWidth(items, U"Applications"));
     int h = static_cast<int>(items.size()) + 2;
-    appMenuBounds_ = Rect{1, kMenuBarHeight + 1, w, h}; // 1 wiersz odstepu od paska - na wysokosci 1szego wiersza okien
+    appMenuBounds_ = Rect{1, kMenuBarHeight + 1, w, h}; // 1 row gap below the bar - aligned with the first row of windows
 
     auto menu = std::make_unique<Menu>(items);
     Menu* raw = menu.get();
@@ -167,18 +171,18 @@ void Desktop::openAppMenu() {
         } else {
             quit();
         }
-        // Domykamy PO powrocie z callbacku — reset() zniszczy Menu, wiec nie
-        // mozemy go usunać z wewnatrz wlasnego onSelect (UB na std::function).
+        // Close AFTER returning from the callback — reset() destroys the Menu, so we
+        // cannot remove it from inside its own onSelect (UB on std::function).
         appMenuClosePending_ = true;
     };
 }
 
 void Desktop::closeAppMenu() {
     appMenu_.reset();
-    appMenuClosePending_ = false; // stale flaga po zamknieciu = domknie nastepne menu przy pierwszym klawiszu
+    appMenuClosePending_ = false; // a stale flag after closing would close the next menu on the first key press
 }
 
-// --- Menu konkretnej aplikacji (dropdown pod paskiem tytulu okna) -------------------
+// --- Per-application menu (dropdown under the window's title bar) -------------------
 
 bool Desktop::windowAlive(Window* w) const {
     for (auto& c : wm_.windows())
@@ -193,9 +197,9 @@ void Desktop::openWinMenu(Window& w, int tab) {
     if (tabs.empty()) return;
     if (tab < 0 || tab >= static_cast<int>(tabs.size())) tab = 0;
 
-    appMenu_.reset(); // dropdown i menu pulpitowe (F1) wykluczaja sie wzajemnie
+    appMenu_.reset(); // the dropdown and the desktop menu (F1) are mutually exclusive
 
-    // Zmiana karty w otwartym menu = przelaczenie na nowa karte.
+    // Switching tabs in an open menu = switching to that tab.
     if (winMenu_ && winMenuWin_ == &w && winMenuTab_ == tab) return;
 
     winMenuWin_ = &w;
@@ -222,16 +226,16 @@ void Desktop::buildWinMenu(Window& w, int tab) {
     labels.reserve(items.size());
     for (auto& it : items) labels.push_back(it.label);
 
-    // Dropdown POD paskiem menu okna (wiersz menu = y+1), pod konkretna kartą.
-    // Klawiatura moze otworzyc menu karty poza widokiem — najpierw przewijamy.
+    // Dropdown BELOW the window's menu row (menu row = y+1), under the given tab.
+    // The keyboard can open a menu tab that is off-screen — scroll it into view first.
     int h = static_cast<int>(labels.size()) + 2;
     int menuW = dropdownWidth(labels, tabs[static_cast<std::size_t>(tab)].first);
 
     Rect wb = w.bounds();
     w.ensureMenuTabVisible(tab);
     int x = w.menuTabScreenX(tab) + 1;
-    int y = wb.y + 2; // pod paskiem tytulu (y+0) i paskiem menu (y+1)
-    // Trzymamy dropdown w granicach ekranu.
+    int y = wb.y + 2; // below the title bar (y+0) and menu bar (y+1)
+    // Keep the dropdown within the screen.
     x = std::max(0, std::min(x, screenWidth() - menuW));
     y = std::max(kMenuBarHeight, std::min(y, screenHeight() - kTaskBarHeight - h));
 
@@ -244,20 +248,20 @@ void Desktop::buildWinMenu(Window& w, int tab) {
                          winMenuBounds_.w - 2, winMenuBounds_.h - 2});
     winMenu_ = std::move(menu);
 
-    // Snapshot: callback moze zamknac okno (np. pozycja "Wyjdziez"), wiec po
-    // nim wskaznik winMenuWin_ moze byc dangling — trzymamy etykiety + callbacky
-    // PO WARTOSCI w closure i nigdy nie wracamy po dane do okna.
-    auto itemsCopy = items; // value-capture: std::function kopiuje safe
+    // Snapshot: the callback may close the window (e.g. an "Exit" item), so after
+    // it the winMenuWin_ pointer may dangle — we keep labels + callbacks
+    // BY VALUE in the closure and never go back to the window for data.
+    auto itemsCopy = items; // value-capture: std::function copies it safely
     raw->onSelect = [this, items = std::move(itemsCopy)](int index) {
         if (index >= 0 && static_cast<std::size_t>(index) < items.size() &&
             items[static_cast<std::size_t>(index)].cb) {
             items[static_cast<std::size_t>(index)].cb();
         }
-        winMenuClosePending_ = true; // domkamy PO powrocie z callbacku (nie zniszczamy Menu w trakcie)
+        winMenuClosePending_ = true; // close AFTER returning from the callback (never destroy the Menu mid-call)
     };
 }
 
-// --- Dialogi: zamykanie okien PO powrocie z callbackow widgetow -------------------
+// --- Dialogs: closing windows AFTER returning from widget callbacks -------------------
 
 void Desktop::flushPendingCloses() {
     if (closePending_.empty()) return;
@@ -272,8 +276,8 @@ void Desktop::restoreFocusTo(Window* requester) {
         wm_.focus(requester);
         mode_ = enterWindowMode(*requester);
     } else {
-        // Wystawiajace okno zostalo zamkniete w miedzyczasie — nie dotykamy
-        // wskaznika (dangling), po prostu wracamy na pulpit.
+        // The requesting window was closed in the meantime — we do not touch
+        // the (dangling) pointer, we just return to the desktop.
         mode_ = CursorMode::Desktop;
     }
 }
@@ -281,9 +285,9 @@ void Desktop::restoreFocusTo(Window* requester) {
 void Desktop::applyWidgetResult(KeyEventResult r, const KeyEvent& ev) {
     if (r == KeyEventResult::EnteredEdit) { mode_ = CursorMode::Edit; return; }
     if (r != KeyEventResult::Ignored) return;
-    // Widget nie chce tego klawisza — globalny fallback to TYLKO Escape
-    // (cofniecie trybu Edit -> Keyboard -> Desktop). Zwykly Tab celowo nic
-    // nie robi: przełączanie okien wylacznie przez Alt+Tab.
+    // The widget does not want this key — the global fallback is ONLY Escape
+    // (unwinding Edit -> Keyboard -> Desktop). Plain Tab deliberately does
+    // nothing: window switching is exclusively via Alt+Tab.
     if (ev.key == Key::Escape) {
         if (mode_ == CursorMode::Edit) mode_ = CursorMode::Keyboard;
         else leaveWindowMode();
@@ -294,11 +298,12 @@ void Desktop::launchApp(App& app) {
     Rect area = desktopArea();
     Rect bounds = app.preferredBounds(area);
     Window* w = wm_.createWindow(app.name(), bounds, app.createView(*this));
+    w->constrainTo(area);
     wm_.focus(w);
     cursor_.moveTo(w->bounds().x + 2, w->bounds().y + 1);
     cursor_.clamp(screenWidth(), screenHeight());
-    // Wchodzimy w tryb Keyboard - uzytkownik nawiguje strzalami po widgetach
-    // i aktywuje je Enterem/Space. Escape -> Desktop.
+    // Enter Keyboard mode - the user navigates between widgets with arrows
+    // and activates them with Enter/Space. Escape -> Desktop.
     mode_ = enterWindowMode(*w);
 }
 
@@ -308,7 +313,7 @@ CursorMode Desktop::enterWindowMode(Window& w) {
 }
 
 void Desktop::leaveWindowMode() {
-    // Usuwamy highlight ze wszystkich widgetow w fokusowanym oknie.
+    // Remove the highlight from all widgets in the focused window.
     if (Window* f = wm_.focused()) {
         f->content()->setHighlighted(false);
     }
@@ -328,22 +333,23 @@ void Desktop::openDialogWindow(FileDialogMode mode, const std::string& startDir,
     Rect area = desktopArea();
     Rect bounds{area.x + 2, area.y + 1, std::min(56, std::max(24, area.w - 4)),
                 std::min(16, std::max(8, area.h - 2))};
-    std::string title = mode == FileDialogMode::SaveFile  ? "Zapisz jako"
-                         : mode == FileDialogMode::OpenFolder ? "Wybierz folder"
-                                                               : "Otworz plik";
+    std::string title = mode == FileDialogMode::SaveFile  ? "Save As"
+                         : mode == FileDialogMode::OpenFolder ? "Select Folder"
+                                                               : "Open File";
     Window* w = wm_.createWindow(title, bounds, std::move(dialog));
+    w->constrainTo(area);
     wm_.focus(w);
     mode_ = enterWindowMode(*w);
 
-    // Zamkniecie odroczone (closePending_): callback jest wywolywany z wewnatrz
-    // handleKey widgetu — nie mozemy zniszczyc okna na jego stosie wywolan.
-    // Fokus wraca do wystawiajacego, ale TYLKO jesli jeszcze istnieje.
+    // Deferred close (closePending_): the callback is invoked from inside the
+    // widget's handleKey — we cannot destroy the window on its own call stack.
+    // Focus returns to the requester, but ONLY if it still exists.
     raw->onConfirm = [this, w, requester, onPick = std::move(onPick)](const std::string& path) {
         if (onPick) onPick(path);
-        // cb mogl otworzyc kolejny dialog (np. guardDirty -> openFile) — wtedy
-        // nowe okno ma fokus i nie przywrocilismyby go wystawiajacemu, tylko
-        // wrocilibysmy do starego zrodla, zostawiajac nowy dialog bez fokusa
-        // (ignorowalby klawisze). Fokus cofamy tylko, gdy nikt go nie zabral.
+        // the cb may have opened another dialog (e.g. guardDirty -> openFile) — then
+        // the new window owns focus and we must not restore it to the requester,
+        // we would go back to the old source and leave the new dialog unfocused
+        // (it would ignore keys). We only restore focus if nobody else took it.
         if (wm_.focused() == w) restoreFocusTo(requester);
         closePending_.push_back(w);
     };
@@ -364,50 +370,50 @@ void Desktop::openFolder(const std::string& startDir, OnPick onPick, OnCancel on
 
 void Desktop::saveFile(const std::string& startDir, const std::string& suggestedName,
                         OnPick onPick, OnCancel onCancel) {
-    // "Zapisz jako" na juz istniejacy plik: pytamy o potwierdzenie zamiast cicho
-    // nadpisywac (dotad FileDialog::confirmSave oddawal sciezke bez sprawdzenia,
-    // a zapis (TextArea/Paint) ucinajacy plik - bez pytania). Ctrl+S na otwartym
-    // pliku (saveToCurrentPath) NIE przechodzi przez ten dialog - potwierdzenie
-    // dotyczy wylacznie przeplywow przez "Zapisz jako".
-    // requester = okno wystawiajace (aplikacja): dialog zapisu moze zostac
-    // zamkniety wczesniej, niz uzytkownik rozstrzygnie potwierdzenie nadpisania.
+    // "Save As" on an existing file: we ask for confirmation instead of silently
+    // overwriting (until now FileDialog::confirmSave returned the path unchecked,
+    // and a truncating save (TextArea/Paint) happened without asking). Ctrl+S on
+    // an open file (saveToCurrentPath) does NOT go through this dialog - the
+    // confirmation applies only to "Save As" flows.
+    // requester = the requesting window (app): the save dialog may close
+    // before the user resolves the overwrite confirmation.
     Window* requester = wm_.focused();
 
-    // guard = wspoldzielony "straznik nadpisania": ponowne otwarcia dialogu
-    // zapisu (po Anuluj) w koluje przez ten sam guard, wiec kazdy kolejny wybor
-    // jest tez sprawdzany. Trzymamy go trampoliny OnPick (kopiujace shared_ptr);
-    // weak PRZED lambda-guarda przecina cykl guard -> lamba -> guard.
+    // guard = shared "overwrite gate": reopening the save dialog (after Cancel)
+    // loops through the same guard, so every subsequent choice is checked too.
+    // The OnPick trampolines hold it (copying the shared_ptr);
+    // the weak ptr BEFORE the guard lambda breaks the guard -> lambda -> guard cycle.
     using GuardFn = std::function<void(const std::string&)>;
     auto guard = std::make_shared<GuardFn>();
     *guard = [this, requester, startDir, suggestedName, onPick, onCancel,
               weak = std::weak_ptr<GuardFn>(guard)](const std::string& path) {
         if (!fs::exists(path)) {
-            // Fokus wprost do wystawiajacego okna (wlasciwy requester moze byc
-            // juz niezywy, jesli to ponownie otwarty dialog zapisu); wrapper
-            // openDialogWindow zobaczy nowy fokus i nie przywroci starego.
+            // Focus goes straight to the requesting window (the real requester may
+            // already be dead if this is a reopened save dialog); the
+            // openDialogWindow wrapper sees the new focus and will not restore the old one.
             restoreFocusTo(requester);
             if (onPick) onPick(path);
             return;
         }
-        // Plik juz istnieje - pytamy, czy nadpisac. keep = mocny uchwyt dla
-        // callbacku potwierdzenia: dialog zapisu (z trampolina guard) zostanie
-        // zamkniety przez closePending_, zanim potwierdzenie sie rozstrzygnie.
+        // The file already exists - ask whether to overwrite. keep = strong handle
+        // for the confirmation callback: the save dialog (with the guard trampoline)
+        // will be closed via closePending_ before the confirmation resolves.
         auto keep = weak.lock();
         const std::u32string msg =
-            U"Plik " + text::toUtf32(fs::nameOf(path)) + U" juz istnieje. Nadpisac?";
+            U"File " + text::toUtf32(fs::nameOf(path)) + U" already exists. Overwrite?";
         confirm(msg, [this, requester, path, startDir, suggestedName, onPick, onCancel,
                       keep](bool ok) {
             if (ok) {
-                // Fokus wprost do wystawiajacego okna (dialog zapisu juz nie
-                // zyje); PRZED onPick - jesli aplikacja otworzy wlasny dialog
-                // (np. blad zapisu), to on dostanie fokus po naszym.
+                // Focus goes straight to the requesting window (the save dialog is
+                // already gone); BEFORE onPick - if the app opens its own dialog
+                // (e.g. a save error), it gets focus after ours.
                 restoreFocusTo(requester);
                 if (onPick) onPick(path);
             } else {
-                // Nadpisanie anulowane: ponownie otwieramy "Zapisz jako" z tym
-                // samym katalogiem, podpowiedzia nazwy i straznikiem nadpisania,
-                // zeby uzytkownik mogl wybrac inna nazwe (petla przez guard).
-                OnCancel cancelCopy{onCancel}; // onCancel w lambdzie jest const
+                // Overwrite cancelled: reopen "Save As" with the same
+                // directory, suggested name and overwrite gate, so the user can pick
+                // another name (looping through the guard).
+                OnCancel cancelCopy{onCancel}; // onCancel in the lambda is const
                 openDialogWindow(FileDialogMode::SaveFile, startDir, suggestedName,
                                  OnPick([keep](const std::string& p) { (*keep)(p); }),
                                  std::move(cancelCopy));
@@ -423,32 +429,33 @@ void Desktop::openDialog(std::u32string title, std::unique_ptr<Dialog> content, 
     Window* requester = wm_.focused();
     Dialog* raw = content.get();
 
-    // Rozmiar z samego dialogu (message wrap + pole + przyciski), wycentrowany.
-    // UWAGA: Dialog zyje w WEWNATRZ okna z ramka — Window::relayoutContent
-    // zabiera pasek tytulu i dolna ramke (h-2) oraz kolumne z kazdej strony
-    // (w-2). heightForWidth liczy dla szerokosci TRESCI (tak jak draw wrapuje
-    // na bounds.w-2), wiec okno musi dostac te szerokosc + ramke i te
-    // wysokosc + ramke — inaczej komunikat nie miesci sie wcale (byly same
-    // przyciski, bo petla draw puszczala message zanim zdazyla zaczac).
+    // Size from the dialog itself (wrapped message + field + buttons), centered.
+    // WARNING: The dialog lives INSIDE a framed window — Window::relayoutContent
+    // removes the title bar, bottom frame (h-2), and one column from each side
+    // (w-2). heightForWidth calculates for the CONTENT width (as draw wraps
+    // at bounds.w-2), so the window needs that width plus the frame and that
+    // height plus the frame. Otherwise the message does not fit at all (only
+    // the buttons were visible because the draw loop skipped the message).
     Rect area = desktopArea();
-    const int w = std::min(56, std::max(30, area.w - 6)); // szerokosc okna (z ramka)
+    const int w = std::min(56, std::max(30, area.w - 6)); // window width (including frame)
     const int contentW = w - 2;
     const int contentH = raw ? raw->heightForWidth(contentW) : 10;
-    int h = contentH + 2; // pasek tytulu + dolna ramka (okno dialogu bez kart)
+    int h = contentH + 2; // title bar + bottom frame (dialog window without tabs)
     h = std::min(area.h - 2, std::max(7, h));
     Rect bounds{area.x + std::max(0, (area.w - w) / 2),
                 area.y + std::max(0, (area.h - h) / 2), w, h};
 
     Window* win = wm_.createWindow(text::toUtf8(title), bounds, std::move(content));
+    win->constrainTo(area);
     wm_.focus(win);
     mode_ = enterWindowMode(*win);
 
-    // Callback widgetu: wynik -> app cb -> fokus -> OROCZONE zamkniecie okna
-    // (widget zywy az do powrotu z handleKey; patrz flushPendingCloses).
+    // Widget callback: result -> app callback -> focus -> DEFERRED window close
+    // (the widget stays alive until handleKey returns; see flushPendingCloses).
     raw->onResult = [this, win, requester, cb = std::move(onResult)](int idx) {
         if (cb) cb(idx);
-        // Ten sam wyjatek co w openDialogWindow: cb mogl otworzyc kolejny
-        // dialog — wtedy to on ma fokus i nie wolamy restoreFocusTo.
+        // Same exception as in openDialogWindow: the callback may open another
+        // dialog, which then owns focus, so do not call restoreFocusTo.
         if (wm_.focused() == win) restoreFocusTo(requester);
         closePending_.push_back(win);
     };
@@ -457,36 +464,37 @@ void Desktop::openDialog(std::u32string title, std::unique_ptr<Dialog> content, 
 void Desktop::toggleMaximize(Window& w) {
     if (w.maximized()) w.restore();
     else w.maximize(desktopArea());
+    w.constrainTo(desktopArea());
 }
 
 void Desktop::activateAtCursor() {
-    // Nie dotykamy appMenu_ (F1 menu) — to jest oddzielne, globalne menu.
+    // Leave appMenu_ (the F1 menu) alone — it is a separate global menu.
     if (!appMenu_) {
-        // Klik gdziekolwiek = domykaj otwarty dropdown menu aplikacji — ALE nie,
-        // gdy klikamy w ta sama karte, ktora jest otwarta (bez migniecia).
+        // Any click closes the open application dropdown, EXCEPT when clicking
+        // the same tab that is already open (avoid flicker).
         if (winMenu_ && winMenuWin_ && windowAlive(winMenuWin_)) {
             bool overSameTab = winMenuWin_->titleBarZoneAt(cursor_.x(), cursor_.y()) == TitleBarZone::MenuTab
                               && winMenuWin_->menuTabIndexAt(cursor_.x(), cursor_.y()) == winMenuTab_;
             if (!overSameTab) closeWinMenu();
         } else if (winMenu_) {
-            closeWinMenu(); // okno juz nie zyla — czyścimy stan
+            closeWinMenu(); // The window is gone — clear the state.
         }
     }
 
     if (cursor_.y() < kMenuBarHeight) { openAppMenu(); return; }
 
-    // --- Taskbar (status bar) — aktywacja uchwytu okna ----------------------
+    // --- Taskbar (status bar) — activate a window handle -------------------
     if (cursor_.y() >= screenHeight() - kTaskBarHeight) {
         const auto& wins = wm_.windows();
         int totalHandles = static_cast<int>(wins.size());
-        if (totalHandles == 0) return; // nic do aktywacji
+        if (totalHandles == 0) return; // nothing to activate
 
         int canScrollLeft  = taskbarScroll_ > 0;
         int rightArrowWidth = 1;
         int usableWidth    = screenWidth() - (canScrollLeft ? 1 : 0) - rightArrowWidth;
         int maxVisible     = std::max(1, usableWidth / kTaskHandleW);
 
-        // Sprawdź czy kliknięto na strzałkę scrolla
+        // Check whether a scroll arrow was clicked.
         if (cursor_.x() == 0 && canScrollLeft) {
             taskbarScroll_ = std::max(0, taskbarScroll_ - 1);
             return;
@@ -497,30 +505,30 @@ void Desktop::activateAtCursor() {
             return;
         }
 
-        // Oblicz indeks okna pod kursorem
+        // Calculate the index of the window under the cursor.
         int visualStartX = canScrollLeft ? 1 : 0;
         int winIdx       = (cursor_.x() - visualStartX) / kTaskHandleW;
         winIdx += taskbarScroll_;
 
         if (winIdx >= 0 && winIdx < totalHandles) {
             Window* w = wins[static_cast<std::size_t>(winIdx)].get();
-            wm_.focus(w);                       // focus() przywraca zminimalizowane okna
-            mode_ = enterWindowMode(*w);         // przejdź do trybu okna
+            wm_.focus(w);                       // focus() restores minimized windows
+            mode_ = enterWindowMode(*w);         // enter window mode
         }
         return;
     }
 
-    if (cursor_.y() >= screenHeight() - kTaskBarHeight) return; // task bar - informacyjny
+    if (cursor_.y() >= screenHeight() - kTaskBarHeight) return; // informational taskbar
 
     Window* w = wm_.windowAt(cursor_.x(), cursor_.y());
-    if (!w) return; // pusty pulpit - nic pod kursorem
+    if (!w) return; // empty desktop — nothing under the cursor
 
-    if (w->minimized()) { wm_.focus(w); return; } // focus() przywraca
+    if (w->minimized()) { wm_.focus(w); return; } // focus() restores it
 
     wm_.focus(w);
     switch (w->titleBarZoneAt(cursor_.x(), cursor_.y())) {
         case TitleBarZone::CloseButton:
-            // Guard: brudna tresc = pytanie przed zamknieciem (jak Ctrl+W).
+            // Guard: dirty content prompts before closing (as with Ctrl+W).
             closeWithConfirm(*this, w, [this, w] { closePending_.push_back(w); });
             break;
         case TitleBarZone::MinimizeButton: w->setMinimized(true); break;
@@ -532,12 +540,12 @@ void Desktop::activateAtCursor() {
         case TitleBarZone::MenuScrollLeft:  w->scrollMenuTabs(-1); break;
         case TitleBarZone::MenuScrollRight: w->scrollMenuTabs(+1); break;
         case TitleBarZone::Border:
-            // Krawedz okna (oprocz gornej) = tryb Resize, jak F6.
+            // Window border (except the top) enters Resize mode, as with F6.
             mode_ = CursorMode::WindowResize;
             break;
         case TitleBarZone::None:
-            // Klik w tresc: widget moze obsluzyc trafienie (np. karta w pasku
-            // kart edytora); wpp. standardowe wejscie do trybu okna.
+            // Content click: the widget may handle it (e.g. an editor tab);
+            // otherwise, enter the window's standard interaction mode.
             if (w->content() && w->content()->clickAt(cursor_.x(), cursor_.y())) break;
             mode_ = enterWindowMode(*w);
             break;
@@ -545,55 +553,55 @@ void Desktop::activateAtCursor() {
 }
 
 void Desktop::handleKey(const KeyEvent& ev) {
-    // Wrapper: dispatch klawisza, a POTEM zamkniecie okien odroconych przez
-    // callbacki dialogow (widget musi juz byc poza swoim handleKey).
+    // Dispatch the key, THEN close windows deferred by dialog callbacks
+    // (the widget must have returned from its handleKey).
     handleKeyEvent(ev);
     flushPendingCloses();
 }
 
 void Desktop::handleKeyEvent(const KeyEvent& ev) {
-    // Ctrl+Q dziala ZAWSZE, niezaleznie od trybu kursora/menu - to "wylacznik
-    // awaryjny". Bez tego dałoby się utknac np. w trybie WindowMove bez
-    // mozliwosci wyjscia z aplikacji.
+    // Ctrl+Q ALWAYS works, regardless of cursor/menu mode — it is the emergency
+    // exit. Without it, the user could get stuck in WindowMove mode, for example,
+    // with no way to leave the application.
     if (ev.ctrl && ev.key == Key::Char && ev.character == U'q') { quit(); return; }
 
-    // --- Menu pulpitowe (F1) ma najwiekszy priorytet ---
+    // --- Desktop menu (F1) has the highest priority ---
     if (appMenu_) {
         if (ev.key == Key::Escape) { closeAppMenu(); return; }
         appMenu_->handleKey(ev);
-        if (appMenuClosePending_) closeAppMenu(); // PO powrocie z onSelect — bez UB
+        if (appMenuClosePending_) closeAppMenu(); // After onSelect returns — avoids undefined behavior.
         return;
     }
 
-    // --- Menu aplikacji (dropdown pod paskiem tytulu okna) ---
+    // --- Application menu (dropdown below the window title bar) ---
     if (winMenu_) {
         if (ev.key == Key::Escape) { closeWinMenu(); return; }
         Window* owner = winMenuWin_;
         auto nTabs = (owner && windowAlive(owner) && owner->content())
                          ? static_cast<int>(owner->content()->menuTabs().size())
                          : 0;
-        // Left/Right = przelaczenie karty, o ile jest wiecej niz jedna.
+        // Left/Right switches tabs when there is more than one.
         if (nTabs > 1) {
             if (ev.key == Key::Left)  { openWinMenu(*owner, (winMenuTab_ - 1 + nTabs) % nTabs); return; }
             if (ev.key == Key::Right) { openWinMenu(*owner, (winMenuTab_ + 1) % nTabs); return; }
         }
         winMenu_->handleKey(ev);
-        if (winMenuClosePending_) closeWinMenu(); // PO powrocie z onSelect — bez UB
+        if (winMenuClosePending_) closeWinMenu(); // After onSelect returns — avoids undefined behavior.
         return;
     }
 
-    // --- Globalne skróty klawiszowe — zawsze działają, niezależnie od trybu ---
-    // Uwaga: zwykly Tab NIE jest globalny — najpierw dostaje go widget (np.
-    // edytor wstawia tabulator, menedzer plikow przelacza panele), a gdy
-    // widget zwraca Ignored — nic (zwykly Tab juz NIE przełącza okien).
-    // Globalne przełączanie okien to WYLACZNIE Alt+Tab (gola konsola Linux
-    // wysyla to jako ESC+Tab — jedyne combo z modyfikatorem, jakie da sie
-    // odebrac na TTY; Ctrl+Tab nie produkuje ZADNEGO bajtu w domyslnej
-    // keymapie, a keymapy z odrębna sekwencją tez nie zmieniają okien).
+    // --- Global keyboard shortcuts — always active, regardless of mode ---
+    // Note: plain Tab is NOT global — widgets receive it first (e.g. an editor
+    // inserts a tab, or a file manager switches panels). If a widget returns
+    // Ignored, nothing happens (plain Tab no longer switches windows).
+    // Global window switching is EXCLUSIVELY Alt+Tab (a bare Linux console sends
+    // this as ESC+Tab — the only modified combo available on a TTY; Ctrl+Tab
+    // emits NO bytes with the default keymap, and keymaps with a separate
+    // sequence do not switch windows either).
     if (ev.key == Key::Tab && ev.alt) { wm_.focusNext(); return; }
     if (ev.key == Key::F1) { openAppMenu(); return; }
     if (ev.ctrl && ev.key == Key::Char && ev.character == U'w') {
-        // Guard: brudne okno (Widget::dirty) pyta o potwierdzenie przed zamknieciem.
+        // Guard: a dirty window (Widget::dirty) prompts for confirmation before closing.
         Window* w = wm_.focused();
         closeWithConfirm(*this, w, [this, w] { closePending_.push_back(w); });
         return;
@@ -603,7 +611,7 @@ void Desktop::handleKeyEvent(const KeyEvent& ev) {
     if (ev.key == Key::F7 && wm_.focused()) { toggleMaximize(*wm_.focused()); return; }
     if (ev.key == Key::F8 && wm_.focused()) { wm_.focused()->setMinimized(true); return; }
 
-    // --- WindowMove / WindowResize (wyszczególnione najwyzej w trybie, zeby ESC wychodzil natychmiast) ---
+    // --- WindowMove / WindowResize (handled first so Esc exits immediately) ---
     if (mode_ == CursorMode::WindowMove || mode_ == CursorMode::WindowResize) {
         Window* f = wm_.focused();
         if (!f) { mode_ = CursorMode::Desktop; return; }
@@ -621,68 +629,69 @@ void Desktop::handleKeyEvent(const KeyEvent& ev) {
             case Key::Right: moving ? f->moveBy(1, 0)  : f->resizeBy(1, 0);  break;
             default: break;
         }
+        f->constrainTo(desktopArea());
         return;
     }
 
-    // --- Edit mode — klawisze trafiaja do edytowalnego widgetu ---
+    // --- Edit mode — keys go directly to the editable widget ---
     if (mode_ == CursorMode::Edit) {
         Window* f = wm_.focused();
         if (!f || f->minimized()) { mode_ = CursorMode::Desktop; return; }
 
-        // F2 = menu aplikacji (dziala tez w trybie edycji).
+        // F2 opens the application menu (also works in Edit mode).
         if (ev.key == Key::F2) {
             if (f->content() && !f->content()->menuTabs().empty()) openWinMenu(*f, 0);
             return;
         }
         auto* content = f->content();
-        // Sprawdz skróty aplikacji PRZED widgetem (np. Ctrl+S dla TextEditor).
+        // Check application shortcuts BEFORE the widget (e.g. Ctrl+S in TextEditor).
         if (content && matchesShortcuts(content->shortcuts(), ev)) {
             invokeShortcut(content->shortcuts(), ev);
             return;
         }
-        // Widget dostaje klawisz PIERWSZY: moze zerznac Escape (dialog: anuluj)
-        // albo Tab (menedzer: przelaczenie panelu). Fallbacki Esc/Tab obsluguje
-        // applyWidgetResult, gdy widget zwraca Ignored.
+        // The widget gets the key FIRST: it may consume Escape (cancel a dialog)
+        // or Tab (switch a file-manager panel). applyWidgetResult handles the
+        // Escape fallback when the widget returns Ignored.
         applyWidgetResult(f->handleKey(ev), ev);
         return;
     }
 
-    // --- Keyboard mode — nawigacja miedzy widgetami w fokusowanym oknie ---
+    // --- Keyboard mode — navigate widgets in the focused window ---
     if (mode_ == CursorMode::Keyboard) {
         Window* f = wm_.focused();
         if (!f || f->minimized()) { mode_ = CursorMode::Desktop; return; }
 
-        // F2 -> otwiera/przełącza menu konkretnej aplikacji (pierwsza karta).
+        // F2 opens or switches to the application's menu (first tab).
         if (ev.key == Key::F2) {
             auto& tabs = f->content()->menuTabs();
             if (!tabs.empty()) openWinMenu(*f, 0);
             return;
         }
 
-        // Sprawdz skróty aplikacji PRZED widgetem.
+        // Check application shortcuts BEFORE the widget.
         auto* content = f->content();
         if (content && matchesShortcuts(content->shortcuts(), ev)) {
             invokeShortcut(content->shortcuts(), ev);
             return;
         }
 
-        // Znak -> przechodzimy do trybu Edit dla edytowalnych widgetow
-        // (alt+znak pomijamy — to nie jest wpisywanie tekstu).
+        // A character enters Edit mode for editable widgets
+        // (ignore Alt+character; it is not text input).
         if (ev.key == Key::Char && !ev.ctrl && !ev.alt && content && content->editable()) {
             mode_ = CursorMode::Edit;
         }
 
-        // Delegujemy do widgetu-zawartosci; Ignored + Esc = fallback globalny
-        // (Esc -> pulpit; zwykly Tab celowo bez akcji — patrz applyWidgetResult).
-        // Widget moze tez zaprosic do Edit zwrotem EnteredEdit (np. LineEdit).
+        // Delegate to the content widget; Ignored + Esc uses the global fallback
+        // (Esc -> desktop; plain Tab deliberately does nothing — see applyWidgetResult).
+        // A widget can also request Edit mode by returning EnteredEdit (e.g. LineEdit).
         applyWidgetResult(f->handleKey(ev), ev);
         return;
     }
 
-    // --- Desktop mode — wolny kursor po ekranie ---
+    // --- Desktop mode — free cursor movement across the screen ---
     if (ev.key == Key::F2) {
-        // Otwiera menu pierwszego okna, na ktorego pasku tytulu stoi kursor;
-        // inaczej menu okna fokusa.
+        // Open the menu of the first window whose title bar contains the cursor;
+        // otherwise, open the focused window's menu.
         Window* under = wm_.windowAt(cursor_.x(), cursor_.y());
         Window* target = (under && !under->minimized() && under->content() &&
                           under->content()->menuTabs().size() > 0 &&
@@ -695,21 +704,20 @@ void Desktop::handleKeyEvent(const KeyEvent& ev) {
         return;
     }
 
-    // Zwykly Tab na pulpicie celowo NIE przełącza okien — jedyna sciezka
-    // przełączania to Alt+Tab (globalny, patrz wyzej) oraz taskbar (Enter
-    // na uchwycie okna).
+    // Plain Tab deliberately does NOT switch windows on the desktop — the only
+    // ways to switch are Alt+Tab (global; see above) and the taskbar (Enter on a
+    // window handle).
 
-    // --- Taskbar — nawigacja i aktywacja okien ------------------
+    // --- Taskbar — window navigation and activation ------------------
     if (cursor_.y() >= screenHeight() - kTaskBarHeight) {
         const auto& wins = wm_.windows();
         int totalHandles = static_cast<int>(wins.size());
         if (totalHandles == 0) {
-            // Pusty taskbar (zadne okno nie otwarte): Down nie schodzi nizej,
-            // w gore wraca na pulpit, Left/Right moga sie jeszcze poruszac
-            // po pasku, Enter/Space nic nie aktywuje. Wazne: NIE teleportujemy
-            // kursora do (0, dol) — tak wlasnie zapadal on w lewy dolny rog
-            // i nie dalo sie juz z niego wydostac (ten branch wykonywal sie
-            // PRZED obsluga strzalki w gore).
+            // Empty taskbar (no windows open): Down does not move lower, Up
+            // returns to the desktop, Left/Right can still move along the bar,
+            // and Enter/Space activates nothing. IMPORTANT: do NOT teleport the
+            // cursor to (0, bottom) — it would get stuck in the lower-left corner
+            // (this branch runs BEFORE handling the Up arrow).
             if (ev.key == Key::Up) {
                 cursor_.moveTo(cursor_.x(), screenHeight() - kTaskBarHeight - 1);
             } else if (ev.key == Key::Left || ev.key == Key::Right) {
@@ -725,7 +733,7 @@ void Desktop::handleKeyEvent(const KeyEvent& ev) {
         int maxVisible     = std::max(1, usableWidth / kTaskHandleW);
 
         if (ev.key == Key::Left) {
-            // Porusz sie w lewo o jedno pole; jesli scroll mozliwy i jestes na pocztku — przesun scroll.
+            // Move left one position; if scrolling is possible and we are at the start, scroll left.
             if (canScrollLeft && cursor_.x() <= kTaskHandleW) {
                 taskbarScroll_ = std::max(0, taskbarScroll_ - 1);
             } else {
@@ -734,7 +742,7 @@ void Desktop::handleKeyEvent(const KeyEvent& ev) {
             return;
         }
         if (ev.key == Key::Right) {
-            // Porusz sie w prawo o jedno pole; jesli scroll mozliwy i jestes na koncu — przesun scroll.
+            // Move right one position; if scrolling is possible and we are at the end, scroll right.
             int arrowX = screenWidth() - 1;
             bool canScrollRight = (taskbarScroll_ + maxVisible < totalHandles);
             if (canScrollRight && cursor_.x() >= arrowX - kTaskHandleW + 1) {
@@ -745,31 +753,31 @@ void Desktop::handleKeyEvent(const KeyEvent& ev) {
             return;
         }
         if (ev.key == Key::Enter || (ev.key == Key::Char && !ev.ctrl && ev.character == U' ')) {
-            // Aktywuj okno pod kursorem na taskbarze
+            // Activate the window under the cursor on the taskbar.
             int canScrollL = taskbarScroll_ > 0;
             usableWidth    = screenWidth() - (canScrollL ? 1 : 0) - rightArrowWidth;
             maxVisible     = std::max(1, usableWidth / kTaskHandleW);
 
-            int visualStartX = canScrollL ? 1 : 0; // pozycja pierwszego widocznego uchwytu
+            int visualStartX = canScrollL ? 1 : 0; // position of the first visible handle
             int winIdx       = (cursor_.x() - visualStartX) / kTaskHandleW;
-            winIdx += taskbarScroll_;             // dodaj offset scrolla
+            winIdx += taskbarScroll_;             // add the scroll offset
 
             if (winIdx >= 0 && winIdx < totalHandles) {
                 Window* w = wins[static_cast<std::size_t>(winIdx)].get();
-                wm_.focus(w);                       // focus() przywraca zminimalizowane okna
-                mode_ = enterWindowMode(*w);         // przejdź do trybu okna
+                wm_.focus(w);                       // focus() restores minimized windows
+                mode_ = enterWindowMode(*w);         // enter window mode
             }
             return;
         }
-        // Jeśli kursor jest na taskbarze i użytkownik nacisnął strzałkę w górę,
-        // opuść task bar (wróć na pulpit).
+        // If the cursor is on the taskbar and the user presses Up, leave the
+        // taskbar and return to the desktop.
         if (ev.key == Key::Up) {
             cursor_.moveTo(cursor_.x(), screenHeight() - 2);
             return;
         }
 
-        // Down — nie rób nic (kursor już jest na taskbarze).
-        // Każdy inny klawisz: ignorujemy (głównie Enter/Space, ale to też tu trafia).
+        // Down does nothing (the cursor is already on the taskbar).
+        // Ignore all other keys (mainly Enter/Space, which are handled above).
         return;
     }
 
@@ -797,10 +805,10 @@ void Desktop::drawMenuBar(Screen& screen) {
     for (int x = 0; x < screen.width(); ++x)
         screen.set(x, 0, Cell{U' ', t.menuBarText, t.menuBarBg, 0});
 
-    std::u32string left = U" Aplikacje (F1) ";
+    std::u32string left = U" Applications ";
     screen.putText(0, 0, left, t.menuBarText, t.menuBarBg, StyleBold);
 
-    // Tryb w prawym gornym rogu: [tryb] | Fenrir — miejsce gdzie byly "Fenrir".
+    // Mode in the upper-right corner: [mode] | Fenrir — where "Fenrir" used to be.
     std::u32string modeLabel = U"Desktop";
     switch (mode_) {
         case CursorMode::Keyboard:  modeLabel = U"Keyboard"; break;
@@ -809,9 +817,9 @@ void Desktop::drawMenuBar(Screen& screen) {
         case CursorMode::WindowResize: modeLabel = U"Resize"; break;
         default: break;
     }
-    // Zegar z ustawien: taskbarSeconds = dodatkowe ":SS" na koncu.
-    // Nazwa pulpitu tez z ustawien (zmiana w aplikacji Ustawienia od razu
-    // widoczna — drawMenuBar czyta settings na bieżaco).
+    // Clock settings: taskbarSeconds adds ":SS" at the end.
+    // The desktop name also comes from settings (changes in Settings appear
+    // immediately because drawMenuBar reads the settings on each draw).
     const std::string& name =
         settings::active.desktopName.empty() ? desktopName_ : settings::active.desktopName;
     std::u32string right = modeLabel + U" | " + text::toUtf32(name);
@@ -821,8 +829,8 @@ void Desktop::drawMenuBar(Screen& screen) {
 }
 
 void Desktop::drawTaskBar(Screen& screen) {
-    // Pasek zadan z motywu: taskbarBg tlo, aktywny uchwyt = "wcisniety przycisk"
-    // (taskbarActiveBg), akcenty (zegar, strzalki) = highlightText.
+    // Themed taskbar: taskbarBg is the background, the active handle is the
+    // "pressed button" (taskbarActiveBg), and accents (clock, arrows) use highlightText.
     const auto& t = theme::active;
     const Color barBg = t.taskbarBg;
     const Color activeFg = t.taskbarText;
@@ -885,18 +893,18 @@ void Desktop::drawTaskBar(Screen& screen) {
         if (canScrollRight) screen.set(screen.width() - 1, y, Cell{'>', accent, barBg});
     }
 
-    // --- Date/time: ZAWSZE w tym samym miejscu (prawy kraniec, przy strzale >). ---
-    // Strefa zegara jest zarezerwowana: uchwytów okien jest tak dużo, żeby nie
-    // nachodziły na zegar. Zegar NIGDY się nie przesuwa przy otwieraniu okien.
+    // --- Date/time: ALWAYS in the same place (right edge, beside the > arrow). ---
+    // The clock area is reserved: window handles never overlap it. The clock
+    // NEVER shifts when windows are opened.
     time_t now = time(nullptr);
     struct tm *ti = localtime(&now);
     if (ti) {
-        // taskbar_seconds=1 → z "sekundami", inaczej jak dotad.
+        // taskbar_seconds=1 includes seconds; otherwise, use the usual format.
         char tbuf[24];
         const char* fmt = settings::active.taskbarSeconds ? "%Y-%m-%d %H:%M:%S" : "%Y-%m-%d %H:%M";
         strftime(tbuf, sizeof(tbuf), fmt, ti);
         std::string clockStr(tbuf);
-        int clockX = screen.width() - 1 - static_cast<int>(clockStr.size()); // przyklejony do prawej
+        int clockX = screen.width() - 1 - static_cast<int>(clockStr.size()); // right-aligned
         if (clockX < leftArrowWidth) clockX = leftArrowWidth;
         if (clockX + static_cast<int>(clockStr.size()) <= screen.width()) {
             screen.putText(clockX, y, std::u32string(clockStr.begin(), clockStr.end()), accent, barBg);
@@ -905,17 +913,22 @@ void Desktop::drawTaskBar(Screen& screen) {
 }
 
 void Desktop::positionGuiCursor() {
-    // W trybie Edit ORAZ Keyboard kursor GUI podazza za wewnetrzna pozycja
-    // widgetu (np. kursor malowania / zaznaczona komorka palety w Malowance).
-    // W Keyboard wczesniej kursor stawial w oknie — teraz migotanie od razu
-    // pokazuje, gdzie sie edytuje/wybiera. Tryb Desktop = wolny wskaznik (bez zmian).
+    // In Edit and Keyboard modes, the GUI cursor follows the widget's internal
+    // position (e.g. the paint cursor or selected palette cell in Paint).
+    // In Keyboard mode the cursor used to sit in the window; now its blink shows
+    // what is being edited or selected. Desktop mode keeps the free pointer.
+    bool widgetWantsCursor = true;
     if (mode_ == CursorMode::Edit || mode_ == CursorMode::Keyboard) {
         Window* f = wm_.focused();
-        auto pos = (f && !f->minimized()) ? f->content()->cursorPosition() : std::nullopt;
-        if (pos) cursor_.moveTo(pos->first, pos->second);
+        Widget* content = (f && !f->minimized()) ? f->content() : nullptr;
+        if (content) {
+            widgetWantsCursor = content->wantsGuiCursor();
+            auto pos = content->cursorPosition();
+            if (pos) cursor_.moveTo(pos->first, pos->second);
+        }
     }
-    // W trybie Desktop/WindowMove/Resize kursor stoi tam, gdzie ostatnio ustawiono.
-    cursor_.setVisible(cursorBlinkState_);
+    // In Desktop/WindowMove/Resize mode, the cursor stays where it was last placed.
+    cursor_.setVisible(cursorBlinkState_ && widgetWantsCursor);
     cursor_.render(screen_);
 }
 
@@ -929,9 +942,9 @@ void Desktop::removeFdSource(int fd) {
 }
 
 void Desktop::tickOnce() {
-    // Asynchroniczne zrodla (AppContext::addFdSource, np. PTY terminala):
-    // poll bez blokowania; callback moze przeczytac dane i usunac zrodlo,
-    // wiec iterujemy po kopii wektora.
+    // Asynchronous sources (AppContext::addFdSource, e.g. terminal PTY):
+    // poll without blocking. A callback may read data and remove its source,
+    // so iterate over a copy of the vector.
     auto sources = fdSources_;
     for (const auto& [fd, cb] : sources) {
         struct pollfd pfd { fd, POLLIN, 0 };
@@ -939,28 +952,29 @@ void Desktop::tickOnce() {
     }
 
     char buf[64];
-    // Gdy zarejestrowane sa zrodla (okno terminala) — krotszy interwal, zeby
-    // wyjscie potomka pojawialo sie gladko; bez zrodel klasyczne 400ms.
+    // With registered sources (terminal window), use a shorter interval so
+    // child-process output appears smoothly; without sources, use the usual 400ms.
     const int timeout = fdSources_.empty() ? 400 : 30;
     std::size_t n = terminal_.read(buf, sizeof(buf), timeout);
 
     if (terminal_.consumeResizeFlag()) {
         auto sz = terminal_.size();
         screen_.resize(sz.columns, sz.rows);
+        for (const auto& window : wm_.windows()) window->constrainTo(desktopArea());
         renderer_.forceFullRedraw();
         cursor_.clamp(screenWidth(), screenHeight());
     }
 
-    // Migotanie kursora: przełącznik liczony ze steady_clock, nie z ticków —
-    // tick przy otwartym terminalu trwa ~30ms (fd sources) zamiast ~400ms,
-    // więc migotanie liczone per tick byłoby kilkanaście razy za szybkie.
+    // Cursor blinking uses steady_clock, not a tick counter —
+    // a tick with the terminal open takes ~30ms (fd sources) instead of ~400ms,
+    // so per-tick blinking would be more than ten times too fast.
     const auto now = std::chrono::steady_clock::now();
     if (n > 0) {
-        cursorBlinkState_ = true; // kursor staly podczas pisania
+        cursorBlinkState_ = true; // Keep the cursor visible while typing.
         lastBlinkToggle_ = now;
         for (const KeyEvent& ev : keyParser_.feed(buf, n)) handleKey(ev);
     } else if (settings::active.cursorBlink) {
-        // cursor_blink=0 w ustawieniach → kursor statyczny.
+        // cursor_blink=0 in settings makes the cursor static.
         constexpr auto kBlinkInterval = std::chrono::milliseconds(400);
         if (now - lastBlinkToggle_ >= kBlinkInterval) {
             cursorBlinkState_ = !cursorBlinkState_;
@@ -983,11 +997,11 @@ void Desktop::tickOnce() {
     drawTaskBar(screen_);   // taskbar on top of everything
 
     if (appMenu_) {
-        drawBox(screen_, appMenuBounds_, U"Aplikacje");
+        drawBox(screen_, appMenuBounds_, U"Applications");
         appMenu_->draw(screen_);
     }
 
-    // Menu konkretnej aplikacji — dropdown pod paskiem tytułu okna.
+    // Per-application menu — dropdown below the window title bar.
     if (winMenu_) {
         drawBox(screen_, winMenuBounds_, winMenuTitle_);
         winMenu_->draw(screen_);

@@ -11,14 +11,14 @@ namespace fenrir {
 
 TextArea::TextArea() { editable_ = true; }
 
-// --- Layout (linie logiczne -> wiersze wizualne) -----------------------------
+// --- Layout (logical lines -> visual rows) -----------------------------------
 
 int TextArea::gutterW() const {
     if (!lineNumbers_) return 0;
     int n = static_cast<int>(lines_.size());
     int digits = 1;
     while (n >= 10) { n /= 10; ++digits; }
-    return digits + 1; // liczba + jedna spacja odstepu
+    return digits + 1; // number + one space of padding
 }
 
 void TextArea::rebuildLayout() const {
@@ -28,12 +28,12 @@ void TextArea::rebuildLayout() const {
     for (int li = 0; li < static_cast<int>(lines_.size()); ++li) {
         const std::u32string& line = lines_[static_cast<std::size_t>(li)];
         if (line.empty()) {
-            layout_.push_back(Seg{li, 0, 0}); // pusta linia = jeden pusty wiersz
+            layout_.push_back(Seg{li, 0, 0}); // an empty line = one empty visual row
             continue;
         }
         if (!wrap_) {
-            // Bez owijania: cala linia logiczna = jeden wiersz wizualny
-            // (dluzszy niz ekran — rysowanie przewija go poziomo, scrollCol_).
+            // Without wrapping: the whole logical line is one visual row
+            // (if wider than the screen, drawing scrolls it horizontally via scrollCol_).
             layout_.push_back(Seg{li, 0, static_cast<int>(line.size())});
             continue;
         }
@@ -45,13 +45,13 @@ void TextArea::rebuildLayout() const {
                 layout_.push_back(Seg{li, pos, remain});
                 break;
             }
-            // Lam na ostatniej spacji w oknie; spacja zostaje na koncu wiersza
-            // (dzieki temu segmenty sa ciagle i kazdy znak wystepuje raz).
+            // Break at the last space in the window; keep the space at the end
+            // of the row (so segments remain contiguous and each character appears once).
             int brk = -1;
             for (int k = pos + layoutW_ - 1; k > pos; --k) {
                 if (line[static_cast<std::size_t>(k)] == U' ') { brk = k; break; }
             }
-            const int len = (brk > pos) ? (brk - pos + 1) : layoutW_; // brak spacji = twardy lam
+            const int len = (brk > pos) ? (brk - pos + 1) : layoutW_; // no space = hard break
             layout_.push_back(Seg{li, pos, len});
             pos += len;
         }
@@ -66,8 +66,8 @@ void TextArea::ensureLayout() const {
 }
 
 int TextArea::visualRowOf(int row, int col) const {
-    // Zwraca index wiersza wizualnego dla (row, col). Kolumna na koncu linii
-    // (i dalej) trafia do OSTATNIEGO wiersza wizualnego tej linii.
+    // Return the visual row index for (row, col). A column at or past the end
+    // of a line maps to the LAST visual row of that line.
     int found = 0;
     for (int i = 0; i < static_cast<int>(layout_.size()); ++i) {
         const Seg& s = layout_[static_cast<std::size_t>(i)];
@@ -97,7 +97,7 @@ void TextArea::syncGoal() {
     goalCol_ = visualOffset();
 }
 
-// --- Edycja ------------------------------------------------------------------
+// --- Editing -----------------------------------------------------------------
 
 void TextArea::loadFile(const std::string& path) {
     path_ = path;
@@ -107,7 +107,7 @@ void TextArea::loadFile(const std::string& path) {
         lines_.push_back(std::u32string());
         dirty_ = false;
         markDirty();
-        if (onStatus) onStatus("Nowy plik: " + path);
+        if (onStatus) onStatus("New file: " + path);
         return;
     }
     std::string raw((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
@@ -132,27 +132,41 @@ void TextArea::loadFile(const std::string& path) {
     goalCol_ = 0;
     dirty_ = false;
     markDirty();
-    if (onStatus) onStatus("Wczytano: " + path + " (" + std::to_string(lines_.size()) + " linii)");
+    if (onStatus) onStatus("Loaded: " + path + " (" + std::to_string(lines_.size()) + " lines)");
 }
 
 void TextArea::saveFile(const std::string& path) {
     std::ofstream f(path, std::ios::binary | std::ios::trunc);
     if (!f) {
-        if (onStatus) onStatus("Blad zapisu: " + path);
+        if (onStatus) onStatus("Save failed: " + path);
         return;
     }
     for (std::size_t i = 0; i < lines_.size(); ++i) {
         f << text::toUtf8(lines_[i]);
         if (i + 1 < lines_.size()) f << '\n';
+        if (!f) {
+            if (onStatus) onStatus("Save failed: " + path);
+            return;
+        }
+    }
+    f.flush();
+    if (!f) {
+        if (onStatus) onStatus("Save failed: " + path);
+        return;
+    }
+    f.close();
+    if (f.fail()) {
+        if (onStatus) onStatus("Save failed: " + path);
+        return;
     }
     path_ = path;
     dirty_ = false;
-    if (onStatus) onStatus("Zapisano: " + path);
+    if (onStatus) onStatus("Saved: " + path);
 }
 
 void TextArea::saveToCurrentPath() {
     if (path_.empty()) {
-        if (onStatus) onStatus("Brak nazwy pliku - uzyj saveFile(sciezka)");
+        if (onStatus) onStatus("No file name - use saveFile(path)");
         return;
     }
     saveFile(path_);
@@ -169,7 +183,7 @@ void TextArea::newFile() {
     path_.clear();
     dirty_ = false;
     markDirty();
-    if (onStatus) onStatus("Nowy plik");
+    if (onStatus) onStatus("New file");
 }
 
 void TextArea::clearText() {
@@ -182,7 +196,7 @@ void TextArea::clearText() {
     goalCol_ = 0;
     dirty_ = true;
     markDirty();
-    if (onStatus) onStatus("Wyczyszczono");
+    if (onStatus) onStatus("Cleared");
 }
 
 void TextArea::insertChar(char32_t ch) {
@@ -238,7 +252,7 @@ void TextArea::del() {
     }
 }
 
-// --- Ruch kursorem -----------------------------------------------------------
+// --- Cursor movement ---------------------------------------------------------
 
 void TextArea::clampCursor() {
     cursorRow_ = std::clamp(cursorRow_, 0, static_cast<int>(lines_.size()) - 1);
@@ -270,7 +284,7 @@ void TextArea::moveVert(int dSeg) {
     ensureLayout();
     const int cur = visualRowOf(cursorRow_, cursorCol_);
     const int target = std::clamp(cur + dSeg, 0, static_cast<int>(layout_.size()) - 1);
-    auto [row, col] = logicalOf(target, goalCol_); // lepki cel: ten sam offset wizualny
+    auto [row, col] = logicalOf(target, goalCol_); // sticky goal: the same visual offset
     cursorRow_ = row;
     cursorCol_ = col;
     ensureVisible();
@@ -284,20 +298,20 @@ void TextArea::ensureVisible() {
     if (seg >= scrollRow_ + visible) scrollRow_ = seg - visible + 1;
     scrollRow_ = std::clamp(scrollRow_, 0, std::max(0, static_cast<int>(layout_.size()) - 1));
 
-    // Poziomo: tylko gdy brak owijania (przy owijaniu wiersz nigdy nie
-    // przekracza szerokosci, scrollCol_ zawsze 0).
+    // Horizontally only when wrapping is disabled (wrapped rows never exceed
+    // the width, so scrollCol_ is always 0).
     if (wrap_) {
         scrollCol_ = 0;
         return;
     }
-    const int off = visualOffset(); // kolumna kursora w jego wierszu wizualnym
+    const int off = visualOffset(); // cursor column in its visual row
     const int textW = std::max(1, bounds_.w - gutterW());
     if (off < scrollCol_) scrollCol_ = off;
     if (off >= scrollCol_ + textW) scrollCol_ = off - textW + 1;
     scrollCol_ = std::max(0, scrollCol_);
 }
 
-// --- Klawiatura --------------------------------------------------------------
+// --- Keyboard ----------------------------------------------------------------
 
 KeyEventResult TextArea::handleKey(const KeyEvent& ev) {
     if (ev.ctrl && ev.key == Key::Char && (ev.character == U's' || ev.character == U'S')) {
@@ -309,7 +323,7 @@ KeyEventResult TextArea::handleKey(const KeyEvent& ev) {
         if (onOpenRequested) onOpenRequested();
         return KeyEventResult::Consumed;
     }
-    // Ctrl+E = przelacznik owijania linii (wl. domyslnie / wyl. z przewijaniem poziomym).
+    // Ctrl+E toggles line wrapping (on by default; off enables horizontal scrolling).
     if (ev.ctrl && ev.key == Key::Char && (ev.character == U'e' || ev.character == U'E')) {
         toggleWrap();
         return KeyEventResult::Consumed;
@@ -319,14 +333,14 @@ KeyEventResult TextArea::handleKey(const KeyEvent& ev) {
         case Key::Down:  moveVert(+1); return KeyEventResult::Consumed;
         case Key::Left:  moveHoriz(-1); return KeyEventResult::Consumed;
         case Key::Right: moveHoriz(+1); return KeyEventResult::Consumed;
-        case Key::Home: { // Home = poczatek biezacego wiersza wizualnego
+        case Key::Home: { // Home = start of the current visual row
             ensureLayout();
             cursorCol_ = layout_[static_cast<std::size_t>(visualRowOf(cursorRow_, cursorCol_))].col0;
             syncGoal();
-            ensureVisible(); // przy braku owijania przewija tez do kolumny 0
+            ensureVisible(); // also scrolls to column 0 when wrapping is disabled
             return KeyEventResult::Consumed;
         }
-        case Key::End: { // End = koniec biezacego wiersza wizualnego
+        case Key::End: { // End = end of the current visual row
             ensureLayout();
             const Seg& s = layout_[static_cast<std::size_t>(visualRowOf(cursorRow_, cursorCol_))];
             cursorCol_ = s.col0 + s.len;
@@ -340,9 +354,9 @@ KeyEventResult TextArea::handleKey(const KeyEvent& ev) {
         case Key::Backspace: backspace(); ensureVisible(); return KeyEventResult::Consumed;
         case Key::Delete:   del(); ensureVisible(); return KeyEventResult::Consumed;
         case Key::Tab:
-            // Zmodyfikowany Tab (Alt+Tab/Ctrl+Tab = globalne przelaczanie
-            // okien) przepuszczamy do Desktopu; zwykly Tab wstawia tabulator
-            // albo odstep spacji (setInsertsSpaces).
+            // Pass modified Tab (Alt+Tab/Ctrl+Tab switches windows globally)
+            // through to the Desktop; plain Tab inserts a tab character or
+            // spaces (setInsertsSpaces).
             if (ev.ctrl || ev.alt) return KeyEventResult::Ignored;
             if (insertsSpaces_) {
                 const int n = 4 - (cursorCol_ % 4);
@@ -359,7 +373,7 @@ KeyEventResult TextArea::handleKey(const KeyEvent& ev) {
     }
 }
 
-// --- Rysowanie ---------------------------------------------------------------
+// --- Drawing -----------------------------------------------------------------
 
 void TextArea::draw(Screen& screen) {
     ensureLayout();
@@ -371,12 +385,12 @@ void TextArea::draw(Screen& screen) {
     for (int row = 0; row < bounds_.h; ++row) {
         screen.fillRect(Rect{bounds_.x, bounds_.y + row, bounds_.w, 1}, fill);
         const int segIdx = scrollRow_ + row;
-        if (segIdx >= static_cast<int>(layout_.size())) continue; // za tekstem - samo tlo
+        if (segIdx >= static_cast<int>(layout_.size())) continue; // beyond the text — leave the background
         const Seg& s = layout_[static_cast<std::size_t>(segIdx)];
         const std::u32string& line = lines_[static_cast<std::size_t>(s.line)];
 
-        // Gutter: numer linii logycznej na PIERWSZYM wierszu wizualnym
-        // (przy owijaniu kontynuacje zostaja puste). Prawostronnie + spacja.
+        // Gutter: logical line number on the FIRST visual row
+        // (continuation rows remain blank when wrapping). Right-aligned + space.
         if (gut > 0) {
             const bool firstRow =
                 segIdx == 0 || layout_[static_cast<std::size_t>(segIdx - 1)].line != s.line;
@@ -392,15 +406,15 @@ void TextArea::draw(Screen& screen) {
         if (s.len <= 0) continue;
         int start = s.col0;
         int len = s.len;
-        if (!wrap_) { // wiersz dluzszy niz ekran — przesuwamy poczatek o scrollCol_
+        if (!wrap_) { // row wider than the screen — shift the start by scrollCol_
             start += scrollCol_;
             len -= scrollCol_;
             if (len <= 0) continue;
         }
         const int n = std::min(len, textW);
-        // Znaki sterujace w buforze (np. '\t' z wczytanego pliku) musza byc
-        // podmienione PRZED rysowaniem — inaczej trafilby do terminala jako
-        // surowy bajt i rozjechalby kursor. Tab widoczny jako '→'.
+        // Control characters in the buffer (e.g. '\t' from a loaded file) must
+        // be replaced BEFORE drawing; otherwise they reach the terminal as raw
+        // bytes and disrupt cursor positioning. Tabs are shown as '→'.
         std::u32string cell(line.substr(static_cast<std::size_t>(start),
                                         static_cast<std::size_t>(n)));
         for (char32_t& c : cell)
@@ -417,9 +431,9 @@ std::optional<std::pair<int, int>> TextArea::cursorPosition() const {
     const int textW = std::max(1, bounds_.w - gut);
     if (screenRow < 0 || screenRow >= bounds_.h || bounds_.w <= 0) return std::nullopt;
     int offset = visualOffset();
-    if (!wrap_) offset -= scrollCol_; // pozycja na ekranie (kolumna moze byc przewiniete)
+    if (!wrap_) offset -= scrollCol_; // screen position (the column may be scrolled)
     if (offset < 0) offset = 0;
-    if (offset >= textW) offset = textW - 1; // koniec pelnego wiersza wizualnego
+    if (offset >= textW) offset = textW - 1; // end of a full visual row
     return std::make_pair(bounds_.x + gut + offset, bounds_.y + screenRow);
 }
 

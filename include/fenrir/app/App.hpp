@@ -11,23 +11,23 @@
 
 namespace fenrir {
 
-// App = abstrakcja programu na pulpicie: nazwa, widok, preferowane okno.
-// Menu i skróty pochodzą Z WIDGETU ZAWARTOŚCI (Widget::menuTabs / shortcuts),
-// który zostaje ustawiony przez createView() (setMenuTabs/pushShortcut) —
-// dlatego App nie ma własnych menuTabs()/shortcuts().
+// App = abstraction of a program on the desktop: name, view, preferred window.
+// Menus and shortcuts come FROM THE CONTENT WIDGET (Widget::menuTabs / shortcuts),
+// which is set up by createView() (setMenuTabs/pushShortcut) —
+// that's why App has no menuTabs()/shortcuts() of its own.
 
 class App {
 public:
     virtual ~App() = default;
 
-    // Nazwa widoczna w pasku menu / menu aplikacji.
+    // Name shown in the menu bar / applications menu.
     virtual std::string name() const = 0;
 
-    // Tworzy NOWY widok (stan) aplikacji - wywolywane przy kazdym uruchomieniu,
-    // wiec mozna miec kilka niezaleznych okien tej samej aplikacji naraz.
+    // Creates a NEW view (state) of the app - called on every launch, so several
+    // independent windows of the same app can coexist at once.
     virtual std::unique_ptr<Widget> createView(AppContext& ctx) = 0;
 
-    // Preferowany rozmiar/pozycja startowa okna wzgledem obszaru pulpitu.
+    // Preferred starting size/position of the window relative to the desktop area.
     virtual Rect preferredBounds(const Rect& desktopArea) const {
         int w = std::min(60, std::max(20, desktopArea.w - 4));
         int h = std::min(20, std::max(6, desktopArea.h - 4));

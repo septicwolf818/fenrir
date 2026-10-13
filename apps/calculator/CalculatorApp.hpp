@@ -9,40 +9,41 @@ namespace fenrir::apps {
 
 class CalculatorApp : public App {
 public:
-    std::string name() const override { return "Kalkulator"; }
+    std::string name() const override { return "Calculator"; }
 
     std::unique_ptr<Widget> createView(AppContext& ctx) override {
         auto view = std::make_unique<CalculatorView>();
         CalculatorView* raw = view.get();
 
-        // Menu Plik: Clear display, Reset to zero
-        MenuItem clearItem{U"Czyść ekran (Ctrl+C)", [raw]() { raw->resetEngine(); }};
-        MenuItem resetItem{U"Resetuj do zera", [raw]() { raw->resetEngine(); }};
+        // File menu: clear the calculator (same action as Ctrl+C).
+        MenuItem clearItem{U"Clear (Ctrl+C)", [raw]() { raw->resetEngine(); }};
 
-        // Menu Pomoc: About — dialog z biblioteki (AppContext::showMessage).
-        MenuItem aboutItem{U"O kalkulatorze", [&ctx]() {
-            ctx.showMessage(U"Fenrir Kalkulator v1.0\n\nCyfry i operatory z klawiatury,\n"
-                            U"Enter/strzałki nawigują po przyciskach.");
+        // Help menu: About — dialog from the library (AppContext::showMessage).
+        MenuItem aboutItem{U"About", [&ctx]() {
+            ctx.showMessage(U"Fenrir Calculator v1.0\n\nType digits and operators from the keyboard,\n"
+                            U"arrows move between buttons; Enter/Space activates one.");
         }};
 
         raw->setMenuTabs({
-            {U"Plik", std::vector<MenuItem>{std::move(clearItem), std::move(resetItem)}},
-            {U"Pomoc", std::vector<MenuItem>{std::move(aboutItem)}}
+            {U"File", std::vector<MenuItem>{std::move(clearItem)}},
+            {U"Help", std::vector<MenuItem>{std::move(aboutItem)}}
         });
 
-        // Ctrl+C = Clear (skrot rejestrowany na widgetcie — Desktop wywoluje
-        // skróty przed handleKey, wiec handleKey sie tym nie zajmuje).
+        // Ctrl+C = Clear (shortcut registered on the widget — Desktop runs the
+        // shortcuts before handleKey, so handleKey doesn't deal with it).
         raw->pushShortcut({true, Key::Char, U'c'}, [raw]() { raw->resetEngine(); });
 
         return view;
     }
 
     Rect preferredBounds(const Rect& desktopArea) const override {
-        // x+5 + w nie moze wyjsc poza obszar (margines 2 po prawej jak w pionie);
-        // minima 24x11 = tresc minWidth/minHeight + ramka + pas menu.
-        int w = std::min(32, std::max(24, desktopArea.w - 7));
+        // Keep the preferred inset when possible, but slide toward the edge
+        // on narrow areas. Minimums 32x11 include the frame and menu strip.
+        int w = 32;
         int h = std::min(14, std::max(11, desktopArea.h - 4));
-        return Rect{desktopArea.x + 5, desktopArea.y + 2, w, h};
+        int x = desktopArea.x + std::min(5, std::max(0, desktopArea.w - w));
+        int y = desktopArea.y + std::min(2, std::max(0, desktopArea.h - h));
+        return Rect{x, y, w, h};
     }
 };
 

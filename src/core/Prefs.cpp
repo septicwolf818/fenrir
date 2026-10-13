@@ -37,13 +37,13 @@ std::string Prefs::path() const {
 void Prefs::load(std::string_view appId) {
     appId_ = std::string(appId);
     kv_.clear();
-    // Bezpieczna nazwa pliku: appId bez '/' (aplikacje podaja stale slugi,
-    // ale obrona przed sciezka z zewnatrz nie zaszkodzi).
+    // Safe file name: appId without '/' (applications pass stable slugs,
+    // but defense in depth against a path from outside doesn't hurt).
     for (char& c : appId_)
         if (c == '/' || c == '\\') c = '_';
-    const std::string file = path(); // lokalna kopia — strumien nie trzyma temporara
+    const std::string file = path(); // local copy — the stream doesn't hold the temporary
     std::ifstream f(file);
-    if (!f) return; // brak pliku = pusta mapa (aplikacja uzywa defaultow)
+    if (!f) return; // no file = empty map (application uses defaults)
 
     std::string line;
     while (std::getline(f, line)) {

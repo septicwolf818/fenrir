@@ -3,11 +3,11 @@
 
 namespace fenrir {
 
-// Własny kursor GUI. NIE używa systemowego kursora terminala (ten jest
-// trwale ukryty przez Terminal). render() jest wywoływane PO tym, jak
-// wszystko inne narysowało się do Screen — bierze komórkę pod (x,y) i
-// zamienia miejscami jej fg/bg. To overlay: nie modyfikuje trwałej
-// zawartości Screen (bo Screen jest czyszczony i rysowany od nowa co klatkę).
+// Custom GUI cursor. Does NOT use the terminal's system cursor (that one is
+// permanently hidden by Terminal). render() is called AFTER everything else
+// has drawn to Screen — it takes the cell under (x,y) and
+// swaps its fg/bg. This is an overlay: it does not modify the persistent
+// Screen contents (Screen is cleared and redrawn from scratch every frame).
 class Cursor {
 public:
     int x() const { return x_; }

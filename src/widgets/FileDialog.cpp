@@ -8,17 +8,17 @@
 namespace fenrir {
 
 FileDialog::FileDialog(FileDialogMode mode, std::string startDir, std::string suggestedName)
-    : mode_(mode), view_(std::move(startDir)), nameEdit_(text::toUtf32(suggestedName), U"Nazwa: ") {
-    // Lista: Enter na pliku zalezy od trybu dialogu.
+    : mode_(mode), view_(std::move(startDir)), nameEdit_(text::toUtf32(suggestedName), U"Name: ") {
+    // In the list, Enter on a file depends on the dialog mode.
     view_.onFileActivate = [this](const std::string& path) {
         if (mode_ == FileDialogMode::OpenFile) {
             if (onConfirm) onConfirm(path);
         } else if (mode_ == FileDialogMode::SaveFile) {
-            // Podstawiamy nazwe zaznaczonego pliku i przeskakujemy do pola.
+            // Set the selected file name and move focus to the name field.
             nameEdit_.setValue(text::toUtf32(fs::nameOf(path)));
             zone_ = Zone::NameField;
         }
-        // OpenFolder: Enter na pliku nic nie robi (wybieramy sam katalog, np. 'S').
+        // OpenFolder: Enter on a file does nothing (select the directory itself, e.g. with 'S').
     };
     nameEdit_.onSubmit = [this](const std::u32string&) { confirmSave(); };
 }
@@ -52,31 +52,31 @@ void FileDialog::draw(Screen& screen) {
 
     std::u32string hint;
     switch (mode_) {
-        case FileDialogMode::OpenFile:   hint = U"Enter: wejdz/wybierz plik | Tab: pole nazwy | Esc: anuluj"; break;
-        case FileDialogMode::OpenFolder: hint = U"Enter: wejdz | S: wybierz ten folder | Esc: anuluj"; break;
-        case FileDialogMode::SaveFile:   hint = U"Enter: wejdz/wpisz nazwe | Tab: pole nazwy | Esc: anuluj"; break;
+        case FileDialogMode::OpenFile:   hint = U"Enter: open/select file | Tab: name field | Esc: cancel"; break;
+        case FileDialogMode::OpenFolder: hint = U"Enter: open | S: select this folder | Esc: cancel"; break;
+        case FileDialogMode::SaveFile:   hint = U"Enter: open/enter name | Tab: name field | Esc: cancel"; break;
     }
     status_.setText(std::move(hint));
     status_.draw(screen);
 }
 
 KeyEventResult FileDialog::handleKey(const KeyEvent& ev) {
-    // Esc = anuluj zawsze (dialog jest modalny; Desktop przekazuje Esc widgetowi
-    // pierw — patrz applyWidgetResult — wiec faktycznie tu dociera).
+    // Esc always cancels (the dialog is modal; Desktop now sends Esc to the
+    // widget first — see applyWidgetResult — so it reaches this handler).
     if (ev.key == Key::Escape) {
         if (onCancel) onCancel();
         return KeyEventResult::Activated;
     }
 
-    // Tab = przelaczenie strefy (wcześniej martwy klawisz — Desktop przekazuje
-    // teraz Tab widgetowi przed fallbackiem focusNext).
+    // Tab switches zones (previously unused; Desktop now sends Tab to the widget
+    // before falling back to focusNext).
     if (ev.key == Key::Tab && mode_ == FileDialogMode::SaveFile) {
         zone_ = (zone_ == Zone::List) ? Zone::NameField : Zone::List;
         return zone_ == Zone::NameField ? KeyEventResult::EnteredEdit : KeyEventResult::Consumed;
     }
 
     if (zone_ == Zone::NameField) {
-        // Strzalka gore/dol = powrot do listy (w polu nie ma nawigacji pionowej).
+        // Up/Down returns to the list (the field has no vertical navigation).
         if (ev.key == Key::Up || ev.key == Key::Down) {
             zone_ = Zone::List;
             return KeyEventResult::Consumed;
@@ -93,7 +93,7 @@ KeyEventResult FileDialog::handleKey(const KeyEvent& ev) {
 
     const Zone before = zone_;
     KeyEventResult r = view_.handleKey(ev);
-    // Enter na pliku w trybie Save przeskoczyl do pola nazwy -> chcemy kursor.
+    // Enter on a file in Save mode moved to the name field; show its cursor.
     if (zone_ != before) return KeyEventResult::EnteredEdit;
     return r;
 }
