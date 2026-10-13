@@ -951,12 +951,24 @@ void Desktop::tickOnce() {
         cursor_.clamp(screenWidth(), screenHeight());
     }
 
-    if (n == 0) {
-        // Migotanie kursora wylaczalne w ustawieniach (cursor_blink=0 → statyczny).
-        cursorBlinkState_ = settings::active.cursorBlink ? !cursorBlinkState_ : true;
+    // Migotanie kursora: przełącznik liczony ze steady_clock, nie z ticków —
+    // tick przy otwartym terminalu trwa ~30ms (fd sources) zamiast ~400ms,
+    // więc migotanie liczone per tick byłoby kilkanaście razy za szybkie.
+    const auto now = std::chrono::steady_clock::now();
+    if (n > 0) {
+        cursorBlinkState_ = true; // kursor staly podczas pisania
+        lastBlinkToggle_ = now;
+        for (const KeyEvent& ev : keyParser_.feed(buf, n)) handleKey(ev);
+    } else if (settings::active.cursorBlink) {
+        // cursor_blink=0 w ustawieniach → kursor statyczny.
+        constexpr auto kBlinkInterval = std::chrono::milliseconds(400);
+        if (now - lastBlinkToggle_ >= kBlinkInterval) {
+            cursorBlinkState_ = !cursorBlinkState_;
+            lastBlinkToggle_ = now;
+        }
     } else {
         cursorBlinkState_ = true;
-        for (const KeyEvent& ev : keyParser_.feed(buf, n)) handleKey(ev);
+        lastBlinkToggle_ = now;
     }
 
     // === DRAW ORDER (DO NOT REORDER — each layer overlaps the one before): ===

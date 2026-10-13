@@ -1,4 +1,5 @@
 #pragma once
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -73,7 +74,11 @@ private:
     std::string desktopName_ = "Fenrir";
     bool running_ = true;
     CursorMode mode_ = CursorMode::Desktop;
+    // Migotanie kursora sterowane zegarem (steady_clock), NIE liczba ticków:
+    // tick przy otwartym terminalu trwa ~30ms zamiast ~400ms, więc licznik
+    // ticków migotałby kilkanaście razy za szybko.
     bool cursorBlinkState_ = true;
+    std::chrono::steady_clock::time_point lastBlinkToggle_;
 
     // --- Taskbar state ----------------------------------------------------
     int taskbarScroll_{0};  // index of first visible handle on task bar
