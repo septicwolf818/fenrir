@@ -40,7 +40,10 @@ struct CalEvent {
 // miesiaca. Ctrl+Up/Down = rok. Enter: z miesiaca otwiera widok dnia,
 // z widokow dnia/tygodnia edytuje zdarzenie pod kursorem (a gdy go brak —
 // tworzy nowe). Delete: usuwa zdarzenie pod kursorem (z potwierdzeniem).
-// Ctrl+N = nowe zdarzenie, Ctrl+T = tydzien, Ctrl+D = dzien (menu: F2).
+// Kilka zdarzen na ta sama godzine: komorka rysuje wszystkie (wybrane
+// z markerem '>' na poczatku), a Tab przełacza wybor — Enter/Del dzialaja
+// na wybranym. Ctrl+N = nowe zdarzenie, Ctrl+T = tydzien, Ctrl+D = dzien
+// (menu: F2).
 // Zdarzenia trwale w ~/.config/fenrir/apps/calendar.conf (Prefs).
 class CalendarView : public Widget {
 public:
@@ -73,15 +76,24 @@ public:
         } else if (view_ == View::Month) {
             status_.setText(U"Ent:dzien N:zdarz PgUp/Dn:mies");
         } else if (view_ == View::Week) {
-            status_.setText(U"Ent:edyt/dodaj Del:usun PgUp/Dn:tydz");
+            status_.setText(multiAtCursor() ? U"Ent:edyt Tab:wyb Del:usun PgUp/Dn:tydz"
+                                            : U"Ent:edyt/dodaj Del:usun PgUp/Dn:tydz");
         } else {
-            status_.setText(U"Ent:edyt/dodaj Del:usun PgUp/Dn:7d");
+            status_.setText(multiAtCursor() ? U"Ent:edyt Tab:wyb Del:usun PgUp/Dn:7d"
+                                            : U"Ent:edyt/dodaj Del:usun PgUp/Dn:7d");
         }
         status_.draw(screen);
     }
 
     KeyEventResult handleKey(const KeyEvent& ev) override {
         statusMsg_.clear();
+
+        // Zmiana kursora daty/godziny kasuje wybor w slocie — Tab wybiera
+        // miedzy zdarzeniami tej samej godziny, wiec po ruchu wracamy do 0.
+        if (year_ != selY_ || month_ != selM_ || curD_ != selD_ || hourCur_ != selH_) {
+            selY_ = year_; selM_ = month_; selD_ = curD_; selH_ = hourCur_;
+            slotSel_ = 0;
+        }
 
         // Ctrl+Up/Down = rok (ESC[1;5A / ESC[1;5B) — dziala w kazdym widoku.
         if (ev.ctrl && ev.key == Key::Up)   { shiftYear(-1); return KeyEventResult::Consumed; }
@@ -91,8 +103,9 @@ public:
             case Key::Home: jumpToToday(); return KeyEventResult::Consumed;
             case Key::Enter: {
                 if (view_ == View::Month) { view_ = View::Day; return KeyEventResult::Consumed; }
-                // Pod kursorem zdarzenie? Edytuj je; w przeciwnym razie nowe.
-                if (const CalEvent* e = eventAt(year_, month_, curD_, hourCur_))
+                // Pod kursorem zdarzenie? Edytuj wybrane (Tab = kolejne);
+                // w przeciwnym razie nowe.
+                if (const CalEvent* e = selectedEvent(year_, month_, curD_, hourCur_))
                     eventDialog(e);
                 else
                     newEvent();
@@ -124,8 +137,16 @@ public:
             case Key::Down:    hourCur_ = std::min(23, hourCur_ + 1); return KeyEventResult::Consumed;
             case Key::PageUp:   moveCursor(-7); return KeyEventResult::Consumed;
             case Key::PageDown: moveCursor(7);  return KeyEventResult::Consumed;
+            case Key::Tab: {
+                // Wybor miedzy zdarzeniami tej samej godziny (Enter/Del go uzywaja).
+                auto list = slotEvents(year_, month_, curD_, hourCur_);
+                if (list.size() < 2) return KeyEventResult::Ignored;
+                if (slotSel_ >= static_cast<int>(list.size())) slotSel_ = 0;
+                slotSel_ = (slotSel_ + 1) % static_cast<int>(list.size());
+                return KeyEventResult::Consumed;
+            }
             case Key::Delete: {
-                if (const CalEvent* e = eventAt(year_, month_, curD_, hourCur_)) confirmDelete(*e);
+                if (const CalEvent* e = selectedEvent(year_, month_, curD_, hourCur_)) confirmDelete(*e);
                 return KeyEventResult::Consumed;
             }
             default: return KeyEventResult::Ignored;
@@ -405,29 +426,85 @@ private:
         screen.putText(bounds_.x + 3, y, cur ? U">" : U" ", fg, bg, cur ? StyleBold : StyleNone);
     }
 
-    // Komorka zdarzenia: tytul na wierszu startu, '|' na kontynuacji.
+    // Komorka zdarzenia: tytuly zdarzen STARTUJACYCH w tej godzinie — wybrane
+    // z markerem '>' na poczatku (widoczne mimo przyciecia), pozostale po nim.
+    // Godziny kontynuacji (bez startu) = '|' jak dotychczas.
     void drawEventCell(Screen& screen, int x, int w, int y, int ey, int em, int ed, int hour) {
         if (w <= 0) return;
         const auto& t = theme::active;
-        const CalEvent* e = eventAt(ey, em, ed, hour);
-        if (!e) return;
+        const auto list = slotEvents(ey, em, ed, hour);
+        if (list.empty()) return;
         screen.fillRect(Rect{x, y, w, 1}, Cell{U' ', t.surfaceText, t.surfaceBg, 0});
-        if (hour == e->startMin / 60) {
-            std::u32string txt = text::clip(text::toUtf32(e->title), w);
-            screen.putText(x, y, txt, t.surfaceText, t.surfaceBg, StyleBold);
-        } else {
+
+        bool startsHere = false;
+        for (const auto* e : list)
+            if (e->startMin / 60 == hour) { startsHere = true; break; }
+        if (!startsHere) {
             screen.putText(x, y, U"|", t.dimText, t.surfaceBg);
+            return;
         }
+
+        // Znacznik '>' tylko w komorce kursora (tam dziala wybor z Tab).
+        const bool cursorSlot = (ey == year_ && em == month_ && ed == curD_ && hour == hourCur_);
+        const CalEvent* sel = nullptr;
+        if (cursorSlot && slotSel_ >= 0 && slotSel_ < static_cast<int>(list.size()))
+            sel = list[static_cast<std::size_t>(slotSel_)];
+        if (sel && sel->startMin / 60 != hour) sel = nullptr; // wybrane nie startuje tu — bez znacznika
+
+        if (sel) {
+            const std::u32string head = U">" + text::toUtf32(sel->title);
+            const int headLen = std::min(w, static_cast<int>(head.size()));
+            screen.putText(x, y, text::clip(head, w), t.highlightText, t.surfaceBg, StyleBold);
+            std::u32string rest;
+            for (const auto* e : list) {
+                if (e == sel || e->startMin / 60 != hour) continue;
+                rest += U"; " + text::toUtf32(e->title);
+            }
+            if (!rest.empty() && headLen < w)
+                screen.putText(x + headLen, y, text::clip(rest, w - headLen),
+                               t.surfaceText, t.surfaceBg, StyleBold);
+            return;
+        }
+
+        std::u32string txt;
+        bool first = true;
+        for (const auto* e : list) {
+            if (e->startMin / 60 != hour) continue;
+            if (!first) txt += U"; ";
+            first = false;
+            txt += text::toUtf32(e->title);
+        }
+        screen.putText(x, y, text::clip(txt, w), t.surfaceText, t.surfaceBg, StyleBold);
     }
 
     // --- Stan / nawigacja -----------------------------------------------------
 
-    const CalEvent* eventAt(int y, int m, int d, int hour) const {
+    // Wszystkie zdarzenia nakladajace sie na dana godzine, posortowane po
+    // starcie (a przy remisie po id — stabilna kolejnosc tworzenia).
+    std::vector<const CalEvent*> slotEvents(int y, int m, int d, int hour) const {
         const int from = hour * 60, to = from + 60;
+        std::vector<const CalEvent*> out;
         for (const auto& e : events_)
             if (e.y == y && e.m == m && e.d == d && e.startMin < to && e.endMin > from)
-                return &e;
-        return nullptr;
+                out.push_back(&e);
+        std::sort(out.begin(), out.end(), [](const CalEvent* a, const CalEvent* b) {
+            if (a->startMin != b->startMin) return a->startMin < b->startMin;
+            return a->id < b->id;
+        });
+        return out;
+    }
+
+    // Wybrane zdarzenie w slocie kursora (Tab zmienia wybor) — nullptr = brak.
+    const CalEvent* selectedEvent(int y, int m, int d, int hour) {
+        auto list = slotEvents(y, m, d, hour);
+        if (list.empty()) return nullptr;
+        if (slotSel_ >= static_cast<int>(list.size())) slotSel_ = static_cast<int>(list.size()) - 1;
+        if (slotSel_ < 0) slotSel_ = 0;
+        return list[static_cast<std::size_t>(slotSel_)];
+    }
+
+    bool multiAtCursor() const { // >=2 zdarzenia na kursorze godziny (widok dzien/tydzien)
+        return slotEvents(year_, month_, curD_, hourCur_).size() > 1;
     }
 
     bool hasEvents(int y, int m, int d) const {
@@ -567,6 +644,8 @@ private:
     int hourCur_ = 0;     // kursor godziny (widoki dzien/tydzien)
     int hourScroll_ = 0;  // pierwszy widoczny wiersz godziny
     std::vector<CalEvent> events_;
+    int slotSel_ = 0;                      // wybor w slocie godziny (Tab)
+    int selY_ = -1, selM_ = -1, selD_ = -1, selH_ = -1; // kursor z ostatniego resetu wyboru
     std::string draftTitle_, draftStart_, draftEnd_; // zachowane po bledzie walidacji
     int draftEditId_ = -1;                           // id edycji z tych szkicow (-1 = tworzenie)
     std::string statusMsg_;                          // przelotowy komunikat (np. "Dodano: ...")
