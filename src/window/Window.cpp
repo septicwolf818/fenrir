@@ -97,34 +97,102 @@ bool Window::onBorder(int x, int y) const {
 // zeby rysowanie i klikanie sie zgadzaly co do celi.
 // Pasek menu = WLASNY wiersz pod paskiem tytulu (kласyczne okno: tytul / menu / tresc).
 
-std::vector<std::pair<int, int>> tabStripLayout(int x0, int w, const std::vector<MenuTab>& tabs) {
-    std::vector<std::pair<int, int>> out;
-    if (w < 12 || tabs.empty()) return out;
+Window::MenuStrip Window::menuStrip() const {
+    MenuStrip out;
+    if (!content_ || bounds_.w < kMinWidth) return out;
+    const auto& tabs = content_->menuTabs();
+    if (tabs.empty()) return out;
 
-    // Karty od lewej krawedzi wiersza menu.
-    int cursor = x0 + 1;
-    for (auto& tab : tabs) {
-        int labW = 2 + static_cast<int>(tab.first.size());
-        if (cursor + labW > x0 + w - 1) break;
-        out.push_back({cursor, labW});
-        cursor += labW;
+    // Logiczne offsety kart (bez scrolla): " Etykieta " — 2 spacje + tekst.
+    int total = 0;
+    out.tabs.reserve(tabs.size());
+    for (const auto& tab : tabs) {
+        const int labW = 2 + static_cast<int>(tab.first.size());
+        out.tabs.push_back({total, labW});
+        total += labW;
     }
+
+    const int inner = bounds_.w - 2; // miedzy ramkami okna
+    const int x0 = bounds_.x + 1;
+    if (total <= inner) {
+        // Miesci sie — bez przyciskow i scrolla (jak wczesniej).
+        out.tabAreaX0 = x0;
+        out.tabAreaX1 = x0 + inner;
+        return out;
+    }
+
+    // Przepełnienie: '<' przy lewej krawedzi wnetrza, '>' przy prawej,
+    // karty miedzy nimi (przewijane poziomo).
+    out.leftBtnX = x0;
+    out.rightBtnX = x0 + inner - 1;
+    out.tabAreaX0 = x0 + 1;
+    out.tabAreaX1 = x0 + inner - 1;
+    const int vis = out.tabAreaX1 - out.tabAreaX0;
+    out.maxScroll = std::max(0, total - vis);
+    out.scroll = std::clamp(menuScrollX_, 0, out.maxScroll);
     return out;
+}
+
+void Window::scrollMenuTabs(int dir) {
+    const auto strip = menuStrip();
+    if (strip.maxScroll <= 0 || strip.tabs.empty()) return;
+    const int vis = strip.tabAreaX1 - strip.tabAreaX0;
+    int ns = strip.scroll;
+    if (dir > 0) {
+        // Do przodu: do poczatku pierwszej karty wystajacej za prawa krawedz.
+        for (const auto& [off, tw] : strip.tabs) {
+            if (off + tw > strip.scroll + vis) { ns = off; break; }
+        }
+    } else {
+        // Do tylu: do poczatku ostatniej karty ukrytej za lewa krawedzia.
+        int lastHidden = -1;
+        for (const auto& [off, tw] : strip.tabs) {
+            (void)tw;
+            if (off < strip.scroll) lastHidden = off;
+        }
+        if (lastHidden >= 0) ns = lastHidden;
+    }
+    menuScrollX_ = std::clamp(ns, 0, strip.maxScroll);
+}
+
+void Window::ensureMenuTabVisible(int tab) {
+    const auto strip = menuStrip();
+    if (strip.maxScroll <= 0 || tab < 0 || tab >= static_cast<int>(strip.tabs.size())) return;
+    const int vis = strip.tabAreaX1 - strip.tabAreaX0;
+    const auto& [off, tw] = strip.tabs[static_cast<std::size_t>(tab)];
+    int sx = strip.scroll;
+    if (off < sx) sx = off;
+    if (off + tw > sx + vis) sx = off + tw - vis;
+    menuScrollX_ = std::clamp(sx, 0, strip.maxScroll);
+}
+
+int Window::menuTabScreenX(int tab) const {
+    const auto strip = menuStrip();
+    if (tab < 0 || tab >= static_cast<int>(strip.tabs.size())) return bounds_.x;
+    return strip.tabAreaX0 + strip.tabs[static_cast<std::size_t>(tab)].first - strip.scroll;
 }
 
 int Window::menuTabIndexAt(int x, int y) const {
     if (!onMenuRow(x, y)) return -1;
-    auto strips = tabStripLayout(bounds_.x, bounds_.w, content_ ? content_->menuTabs() : std::vector<MenuTab>{});
-    for (std::size_t i = 0; i < strips.size(); ++i) {
-        if (x >= strips[i].first && x < strips[i].first + strips[i].second)
+    const auto strip = menuStrip();
+    for (std::size_t i = 0; i < strip.tabs.size(); ++i) {
+        const int ax = strip.tabAreaX0 + strip.tabs[i].first - strip.scroll;
+        // Karta klikalna tylko w widocznym zakresie (komorki <> sa przyciskami).
+        if (x >= ax && x < ax + strip.tabs[i].second &&
+            x >= strip.tabAreaX0 && x < strip.tabAreaX1)
             return static_cast<int>(i);
     }
     return -1;
 }
 
 TitleBarZone Window::titleBarZoneAt(int x, int y) const {
-    // Pasek menu (wlasny wiersz): karta pod kursorem otwiera dropdown.
-    if (menuTabIndexAt(x, y) >= 0) return TitleBarZone::MenuTab;
+    // Pasek menu (wlasny wiersz): przyciski <> przy przepełnieniu, karta = dropdown.
+    if (onMenuRow(x, y)) {
+        const auto strip = menuStrip();
+        if (strip.leftBtnX >= 0 && x == strip.leftBtnX) return TitleBarZone::MenuScrollLeft;
+        if (strip.rightBtnX >= 0 && x == strip.rightBtnX) return TitleBarZone::MenuScrollRight;
+        if (menuTabIndexAt(x, y) >= 0) return TitleBarZone::MenuTab;
+    }
     if (onTitleBar(x, y)) {
         const int closeX = bounds_.x + bounds_.w - 2;
         const int maxX = bounds_.x + bounds_.w - 3;
@@ -234,12 +302,24 @@ void Window::draw(Screen& screen) {
         for (int x = x0 + 1; x < x0 + w - 1; ++x)
             screen.set(x, ym, Cell{' ', menuFg, menuBg, StyleBold});
 
-        auto strips = tabStripLayout(x0, w, content_->menuTabs());
-        for (std::size_t i = 0; i < strips.size(); ++i) {
+        // Przy przepełnieniu karty sie przewijaja — <> na krawędziach wnetrza.
+        const auto strip = menuStrip();
+        const auto& tabs = content_->menuTabs();
+        for (std::size_t i = 0; i < strip.tabs.size(); ++i) {
             std::u32string lab(U" ", 1);
-            lab += content_->menuTabs()[i].first;
+            lab += tabs[i].first;
             lab += U' ';
-            screen.putText(strips[i].first, ym, lab, menuFg, menuBg, StyleBold);
+            const int ax = strip.tabAreaX0 + strip.tabs[i].first - strip.scroll;
+            // Etykieta rysowana tylko w widocznym zakresie kart (przyciecie).
+            for (std::size_t c = 0; c < lab.size(); ++c) {
+                const int cx = ax + static_cast<int>(c);
+                if (cx >= strip.tabAreaX0 && cx < strip.tabAreaX1)
+                    screen.set(cx, ym, Cell{lab[c], menuFg, menuBg, StyleBold});
+            }
+        }
+        if (strip.leftBtnX >= 0) {
+            screen.set(strip.leftBtnX, ym, Cell{U'<', menuFg, menuBg, StyleBold});
+            screen.set(strip.rightBtnX, ym, Cell{U'>', menuFg, menuBg, StyleBold});
         }
     }
 

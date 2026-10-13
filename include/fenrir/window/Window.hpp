@@ -11,11 +11,8 @@ namespace fenrir {
 // Trzy "przyciski" w prawym gornym rogu paska tytulu, w kolejnosci od lewej:
 // [_] minimalizuj, [ ] maksymalizuj/przywroc, [X] zamknij. Framework (Desktop)
 // hit-testuje wg tych stalych, zeby wiedziec co zrobic po Enter/Space pod kursorem.
-enum class TitleBarZone { None, Drag, MinimizeButton, MaximizeButton, CloseButton, MenuTab, Border };
-
-// Shared tab-strip layout: returns {cursor_x, width} for each tab label in a menu strip.
-// Used by Window::draw(), Window::menuTabIndexAt() hit-test, and Desktop::buildWinMenu().
-std::vector<std::pair<int,int>> tabStripLayout(int x0, int w, const std::vector<MenuTab>& tabs);
+enum class TitleBarZone { None, Drag, MinimizeButton, MaximizeButton, CloseButton, MenuTab,
+                          MenuScrollLeft, MenuScrollRight, Border };
 
 class Window {
 public:
@@ -57,6 +54,12 @@ public:
     int menuTabIndexAt(int x, int y) const;
     // Czy pasek tytulu tego okna zawiera karty menu (do szybkiego sprawdzenia).
     bool hasMenuTabs() const { return content_ && content_->menuTabs().size() > 0; }
+    // Przesuwa pasek menu o jedna karte (przyciski <> przy przepełnieniu).
+    void scrollMenuTabs(int dir);
+    // Ustawia scroll tak, zeby karta byla widoczna (otwieranie dropdownu).
+    void ensureMenuTabVisible(int tab);
+    // Ekranowa kolumna karty menu — do umieszczenia dropdownu (Desktop).
+    int menuTabScreenX(int tab) const;
 
     Widget* content() { return content_.get(); }
     const Widget* content() const { return content_.get(); }
@@ -78,6 +81,20 @@ private:
     int zOrder_ = 0;
     bool minimized_ = false;
     bool maximized_ = false;
+    int menuScrollX_ = 0; // przewijanie paska menu przy przepełnieniu (kolumny)
+
+    // Pasek menu z obsluga przewijania: gdy karty nie mieszcza sie w wierszu,
+    // rysowane sa przyciski <> na krawędziach, a karty przewija menuScrollX_.
+    struct MenuStrip {
+        std::vector<std::pair<int,int>> tabs; // logiczne {offset od tabAreaX0, szerokosc}
+        int leftBtnX = -1; // kolumna '<' na ekranie; -1 = brak przyciskow
+        int rightBtnX = -1;  // kolumna '>'
+        int tabAreaX0 = 0;   // widoczny zakres kart (miedzy przyciskami)
+        int tabAreaX1 = 0;
+        int scroll = 0;      // sklamlowany scroll (kolumny)
+        int maxScroll = 0;
+    };
+    MenuStrip menuStrip() const;
 
     static constexpr int kMinWidth = 12;
     static constexpr int kMinHeight = 4;

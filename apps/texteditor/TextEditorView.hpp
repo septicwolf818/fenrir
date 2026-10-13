@@ -151,10 +151,8 @@ public:
         const int areaH = std::max(0, bodyH - tabH);
 
         // Drzewo po lewej (gdy otwarte), prawa kolumna: karty + tekst.
-        int treeW = 0;
-        if (treeOpen_) {
-            treeW = std::clamp(bounds_.w / 3, 12, 28);
-            if (bounds_.w - treeW < 20) treeW = std::max(0, bounds_.w - 20);
+        const int treeW = treeWidth();
+        if (treeOpen_ && treeW > 0) {
             tree_.setBounds(Rect{bounds_.x, bounds_.y, treeW, bodyH});
             tree_.setFocused(focused_ && treeFocused_);
             tree_.draw(screen);
@@ -210,11 +208,23 @@ public:
         return false;
     }
 
-    // Klik wirtualnym kursorem (Enter/Spacja w trybie Desktop): pas kart
-    // przelecza na karte pod kursorem; reszta tresci = standardowe
-    // wejscie do okna (false).
+    // Klik wirtualnym kursorem (Enter/Spacja w trybie Desktop):
+    // - panel drzewa: fokus do drzewa i wejscie do okna (false = Desktop
+    //   wlacza tryb okna; klawisze trafia do drzewa, bo treeFocused_),
+    // - pas kart: przelecza na karte pod kursorem (true),
+    // - reszta tresci (tekst): fokus w tekscie, standardowe wejscie (false).
     bool clickAt(int x, int y) override {
+        const int treeW = treeWidth();
+        const int bodyH = std::max(0, bounds_.h - 1); // bez paska statusu
+        if (treeOpen_ && treeW > 0 &&
+            x >= bounds_.x && x < bounds_.x + treeW &&
+            y >= bounds_.y && y < bounds_.y + bodyH) {
+            treeFocused_ = true;
+            return false; // wejscie do okna z fokusem w drzewie
+        }
+        treeFocused_ = false; // klik w tresc = fokus w tekscie
         if (tabBar_.count() == 0 || y != tabBar_.bounds().y) return false;
+        if (tabBar_.scrollHit(x)) return true; // przyciski <> — scroll bez zmiany karty
         const int i = tabBar_.tabAt(x);
         if (i < 0) return false;
         if (i != current_) switchTo(i);
@@ -233,6 +243,14 @@ public:
 private:
     TextArea& cur() { return *tabs_[static_cast<std::size_t>(current_)]; }
     const TextArea& cur() const { return *tabs_[static_cast<std::size_t>(current_)]; }
+
+    // Szerokosc panelu drzewa — ta sama geometria w draw() i clickAt().
+    int treeWidth() const {
+        if (!treeOpen_) return 0;
+        int treeW = std::clamp(bounds_.w / 3, 12, 28);
+        if (bounds_.w - treeW < 20) treeW = std::max(0, bounds_.w - 20);
+        return treeW;
+    }
 
     void openNewTab(const std::string& path) {
         auto area = std::make_unique<TextArea>();

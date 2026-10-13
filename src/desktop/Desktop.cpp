@@ -222,13 +222,13 @@ void Desktop::buildWinMenu(Window& w, int tab) {
     for (auto& it : items) labels.push_back(it.label);
 
     // Dropdown POD paskiem menu okna (wiersz menu = y+1), pod konkretna kartą.
-    // Pobieramy pozycję karty z tabStripLayout().
+    // Klawiatura moze otworzyc menu karty poza widokiem — najpierw przewijamy.
     int h = static_cast<int>(labels.size()) + 2;
     int menuW = dropdownWidth(labels, tabs[static_cast<std::size_t>(tab)].first);
 
     Rect wb = w.bounds();
-    auto strips = tabStripLayout(wb.x, wb.w, content->menuTabs());
-    int x = strips.empty() ? wb.x : (strips[static_cast<std::size_t>(tab)].first + 1);
+    w.ensureMenuTabVisible(tab);
+    int x = w.menuTabScreenX(tab) + 1;
     int y = wb.y + 2; // pod paskiem tytulu (y+0) i paskiem menu (y+1)
     // Trzymamy dropdown w granicach ekranu.
     x = std::max(0, std::min(x, screenWidth() - menuW));
@@ -528,6 +528,8 @@ void Desktop::activateAtCursor() {
         case TitleBarZone::MenuTab:
             openWinMenu(*w, w->menuTabIndexAt(cursor_.x(), cursor_.y()));
             break;
+        case TitleBarZone::MenuScrollLeft:  w->scrollMenuTabs(-1); break;
+        case TitleBarZone::MenuScrollRight: w->scrollMenuTabs(+1); break;
         case TitleBarZone::Border:
             // Krawedz okna (oprocz gornej) = tryb Resize, jak F6.
             mode_ = CursorMode::WindowResize;
