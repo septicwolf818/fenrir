@@ -36,8 +36,8 @@ struct CalEvent {
 //   Dzien   — to samo, jedna kolumna na pelnej szerokosci.
 // Nawigacja: strzalki = kursor daty (L/P: dzien, G/D: tydzien) w widoku
 // miesiaca, a w widokach tygodnia/dnia L/P = dzien, G/D = przewijanie
-// godzin. PgUp/PgDn = miesiac/tydzien/7 dni, Home = dzis, Esc = powrot do
-// miesiaca. Ctrl+Up/Down = rok. Enter: z miesiaca otwiera widok dnia,
+// godzin. PgUp/PgDn = miesiac/tydzien/7 dni, Home = dzis, Backspace = powrot
+// do miesiaca. Ctrl+Up/Down = rok. Enter: z miesiaca otwiera widok dnia,
 // z widokow dnia/tygodnia edytuje zdarzenie pod kursorem (a gdy go brak —
 // tworzy nowe). Delete: usuwa zdarzenie pod kursorem (z potwierdzeniem).
 // Kilka zdarzen na ta sama godzine: komorka rysuje wszystkie (wybrane
@@ -111,9 +111,12 @@ public:
                     newEvent();
                 return KeyEventResult::Consumed;
             }
-            case Key::Escape:
+            // Backspace = wroc z dnia/tygodnia do miesiaca. Esc celowo NIE —
+            // rezerwuje go Desktop na zmiane trybow kursora (Edit->Keyboard->
+            // Desktop); aplikacje moga uzywac Esc tylko w popupach (Dialog).
+            case Key::Backspace:
                 if (view_ != View::Month) { view_ = View::Month; return KeyEventResult::Consumed; }
-                return KeyEventResult::Ignored; // z miesiaca Esc = globalne
+                return KeyEventResult::Ignored; // z miesiaca Backspace = globalne
             default: break;
         }
 

@@ -187,9 +187,10 @@ public:
         // znika przy pierwszym klawiszu, zeby pasek wrocil do "Plik: <sciezka>".
         statusMsg_.clear();
         if (treeOpen_ && treeFocused_) {
-            // Esc/Tab z drzewa wraca do tekstu (dalej dziala globalne Alt+Tab —
-            // te przechwytuje Desktop, nie drzewo).
-            if (ev.key == Key::Escape || (ev.key == Key::Tab && !ev.ctrl && !ev.alt)) {
+            // Tab z drzewa wraca do tekstu (Alt+Tab tez — ale przechwytuje
+            // go Desktop, nie drzewo). Esc celowo NIE — rezerwuje go Desktop
+            // na zmiane trybow kursora (Edit -> Keyboard -> Desktop).
+            if (ev.key == Key::Tab && !ev.ctrl && !ev.alt) {
                 treeFocused_ = false;
                 return KeyEventResult::Consumed;
             }
