@@ -82,6 +82,17 @@ bool Window::onMenuRow(int x, int y) const {
     return hasBorder_ && hasMenuTabs() && y == bounds_.y + 1 && x >= bounds_.x && x < bounds_.x + bounds_.w;
 }
 
+bool Window::onBorder(int x, int y) const {
+    if (!hasBorder_) return false;
+    const int topRows = 1 + (hasMenuTabs() ? 1 : 0); // tytul (+ pasek menu) = gorа
+    const int y0 = bounds_.y;
+    // Boki ponizej gory (do wiersza nad dolnym) lub caly dolny wiersz.
+    const bool side = (x == bounds_.x || x == bounds_.x + bounds_.w - 1)
+                   && y >= y0 + topRows && y < y0 + bounds_.h - 1;
+    const bool bottom = y == y0 + bounds_.h - 1 && x >= bounds_.x && x <= bounds_.x + bounds_.w - 1;
+    return side || bottom;
+}
+
 // Wspolna geometria paska menu — uzywana i w draw(), i w hit-testach,
 // zeby rysowanie i klikanie sie zgadzaly co do celi.
 // Pasek menu = WLASNY wiersz pod paskiem tytulu (kласyczne okno: tytul / menu / tresc).
@@ -114,16 +125,20 @@ int Window::menuTabIndexAt(int x, int y) const {
 TitleBarZone Window::titleBarZoneAt(int x, int y) const {
     // Pasek menu (wlasny wiersz): karta pod kursorem otwiera dropdown.
     if (menuTabIndexAt(x, y) >= 0) return TitleBarZone::MenuTab;
-    if (!onTitleBar(x, y)) return TitleBarZone::None;
-    const int closeX = bounds_.x + bounds_.w - 2;
-    const int maxX = bounds_.x + bounds_.w - 3;
-    const int minX = bounds_.x + bounds_.w - 4;
-    if (bounds_.w >= kMinWidth) {
-        if (x == closeX) return TitleBarZone::CloseButton;
-        if (x == maxX) return TitleBarZone::MaximizeButton;
-        if (x == minX) return TitleBarZone::MinimizeButton;
+    if (onTitleBar(x, y)) {
+        const int closeX = bounds_.x + bounds_.w - 2;
+        const int maxX = bounds_.x + bounds_.w - 3;
+        const int minX = bounds_.x + bounds_.w - 4;
+        if (bounds_.w >= kMinWidth) {
+            if (x == closeX) return TitleBarZone::CloseButton;
+            if (x == maxX) return TitleBarZone::MaximizeButton;
+            if (x == minX) return TitleBarZone::MinimizeButton;
+        }
+        return TitleBarZone::Drag;
     }
-    return TitleBarZone::Drag;
+    // Krawedzie boczne/dolna (bez gory) = tryb Resize przy kliknieciu.
+    if (onBorder(x, y)) return TitleBarZone::Border;
+    return TitleBarZone::None;
 }
 
 void Window::relayoutContent() {

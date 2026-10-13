@@ -42,9 +42,10 @@ public:
         view->pushShortcut({true, Key::Char, U'y'}, [raw] { raw->toggleSpaces(); });
         view->pushShortcut({true, Key::Char, U'd'}, [raw] { raw->openFolder(); });
         view->pushShortcut({true, Key::Char, U'b'}, [raw] { raw->toggleTreeFocus(); });
-        // F4/F9 = nastepna/poprzednia karta (dziala tez z fokusem w polu tekstu).
-        view->pushShortcut({false, Key::F4, std::nullopt}, [raw] { raw->nextTab(); });
-        view->pushShortcut({false, Key::F9, std::nullopt}, [raw] { raw->prevTab(); });
+        // Ctrl+PgDn/PgUp = nastepna/poprzednia karta — standard z przegladarek
+        // i editorow (ESC[6;5~ / ESC[5;5~), dziala tez z fokusem w polu tekstu.
+        view->pushShortcut({true, Key::PageDown, std::nullopt}, [raw] { raw->nextTab(); });
+        view->pushShortcut({true, Key::PageUp, std::nullopt}, [raw] { raw->prevTab(); });
 
         return view;
     }

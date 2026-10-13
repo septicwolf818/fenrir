@@ -92,28 +92,29 @@ KeyEvent KeyParser::parseEscapeSequence(std::string_view seq) const {
             }
         }
         // sekwencje CSI zakończone '~', np. ESC[3~ (Delete), ESC[5~ (PgUp)
-        if (seq.back() == '~') {            std::string_view num = seq.substr(1, seq.size() - 2);
+        if (seq.back() == '~') {
+            std::string_view num = seq.substr(1, seq.size() - 2);
+            // Parsujemy cyfry recznie (string_view), bez <string> — na
+            // libstdc++ nie wolno liczyc na transisywne dosylki naglowkow.
+            auto digits = [](std::string_view s) -> int {
+                if (s.empty()) return -1;
+                int v = 0;
+                for (char c : s) {
+                    if (c < '0' || c > '9') return -1;
+                    v = v * 10 + (c - '0');
+                    if (v > 99) return -1; // sekwencje CSI sa krotkie
+                }
+                return v;
+            };
             // modifyOtherKeys / CSI-u: ESC[27;<mods>;<code>~ (np. 27;5;9~ =
             // Ctrl+Tab). Dostarczaja to emulatory i keymapy obslugujace
             // modyfikatory; na golym TTY (Linux VC) taka sekwencja po prostu
             // sie nie pojawia i ta sciezka jest martwa — ale kosztuje zero.
-            // Parsujemy cyfry recznie (string_view), bez <string> — na
-            // libstdc++ nie wolno liczyc na transisywne dosylki naglowkow.
             if (num.size() > 3 && num.substr(0, 2) == "27") {
                 auto s1 = num.find(';');
                 auto s2 = (s1 == std::string_view::npos) ? std::string_view::npos
                                                          : num.find(';', s1 + 1);
                 if (s1 != std::string_view::npos && s2 != std::string_view::npos) {
-                    auto digits = [](std::string_view s) -> int {
-                        if (s.empty()) return -1;
-                        int v = 0;
-                        for (char c : s) {
-                            if (c < '0' || c > '9') return -1;
-                            v = v * 10 + (c - '0');
-                            if (v > 99) return -1; // sekwencje CSI sa krotkie
-                        }
-                        return v;
-                    };
                     const int mods = digits(num.substr(s1 + 1, s2 - s1 - 1));
                     const int code = digits(num.substr(s2 + 1));
                     if (mods >= 0 && code >= 0) {
@@ -129,23 +130,39 @@ KeyEvent KeyParser::parseEscapeSequence(std::string_view seq) const {
                     }
                 }
             }
-            if (num == "1" || num == "7") ev.key = Key::Home;
-            else if (num == "3") ev.key = Key::Delete;
-            else if (num == "4" || num == "8") ev.key = Key::End;
-            else if (num == "5") ev.key = Key::PageUp;
-            else if (num == "6") ev.key = Key::PageDown;
-            else if (num == "11") ev.key = Key::F1;
-            else if (num == "12") ev.key = Key::F2;
-            else if (num == "13") ev.key = Key::F3;
-            else if (num == "14") ev.key = Key::F4;
-            else if (num == "15") ev.key = Key::F5;
-            else if (num == "17") ev.key = Key::F6;
-            else if (num == "18") ev.key = Key::F7;
-            else if (num == "19") ev.key = Key::F8;
-            else if (num == "20") ev.key = Key::F9;
-            else if (num == "21") ev.key = Key::F10;
-            else if (num == "23") ev.key = Key::F11;
-            else if (num == "24") ev.key = Key::F12;
+            // Zmodyfikowane klawisze '~': ESC[5;5~ = Ctrl+PgUp, ESC[6;5~ =
+            // Ctrl+PgDn (xterm i wiekszosc emulatorow dosyla tak PgUp/PgDn/
+            // Home/End z modyfikatorem). Bez modyfikatora num jest czysto
+            // numeryczny i ten blok sie nie wlacza.
+            std::string_view code = num;
+            const auto msemi = num.find(';');
+            if (msemi != std::string_view::npos) {
+                const int mods = digits(num.substr(msemi + 1));
+                if (mods >= 0) {
+                    ev.ctrl = (mods & 4) != 0;
+                    ev.alt = (mods & 2) != 0;
+                    code = num.substr(0, msemi);
+                } else {
+                    return ev; // nieznana kombinacja — nie udajemy znanych klawiszy
+                }
+            }
+            if (code == "1" || code == "7") ev.key = Key::Home;
+            else if (code == "3") ev.key = Key::Delete;
+            else if (code == "4" || code == "8") ev.key = Key::End;
+            else if (code == "5") ev.key = Key::PageUp;
+            else if (code == "6") ev.key = Key::PageDown;
+            else if (code == "11") ev.key = Key::F1;
+            else if (code == "12") ev.key = Key::F2;
+            else if (code == "13") ev.key = Key::F3;
+            else if (code == "14") ev.key = Key::F4;
+            else if (code == "15") ev.key = Key::F5;
+            else if (code == "17") ev.key = Key::F6;
+            else if (code == "18") ev.key = Key::F7;
+            else if (code == "19") ev.key = Key::F8;
+            else if (code == "20") ev.key = Key::F9;
+            else if (code == "21") ev.key = Key::F10;
+            else if (code == "23") ev.key = Key::F11;
+            else if (code == "24") ev.key = Key::F12;
             return ev;
         }
     }

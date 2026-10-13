@@ -67,6 +67,12 @@ public:
     // okna wyboru plikow sa zawsze czyste, wiec nie wymagaja override.
     virtual bool dirty() const { return false; }
 
+    // Klik wirtualnym kursorem (Enter/Spacja w trybie Desktop) w tresc okna.
+    // Widget moze obsluzyc trafienie we wlasny obszar (np. karta w pasku
+    // kart edytora) i zwrocic true; domyslnie false = Desktop robi
+    // standardowa aktywacje okna (wejscie do trybu Keyboard).
+    virtual bool clickAt(int /*x*/, int /*y*/) { return false; }
+
     // --- Menu / shortcuts API (używane przez Desktop przy renderowaniu i skróty) ---
 
     // Wszystkie karty menu tej aplikacji (zapisywane przez createView() w Widget).

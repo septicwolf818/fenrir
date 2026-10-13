@@ -189,8 +189,8 @@ public:
         // znika przy pierwszym klawiszu, zeby pasek wrocil do "Plik: <sciezka>".
         statusMsg_.clear();
         if (treeOpen_ && treeFocused_) {
-            // Esc/Tab z drzewa wraca do tekstu (dalej dzialaja globalne
-            // Alt+Tab/ctrl+Tab — te przechwytuje Desktop, nie drzewo).
+            // Esc/Tab z drzewa wraca do tekstu (dalej dziala globalne Alt+Tab —
+            // te przechwytuje Desktop, nie drzewo).
             if (ev.key == Key::Escape || (ev.key == Key::Tab && !ev.ctrl && !ev.alt)) {
                 treeFocused_ = false;
                 return KeyEventResult::Consumed;
@@ -208,6 +208,17 @@ public:
         for (const auto& t : tabs_)
             if (t->dirty()) return true;
         return false;
+    }
+
+    // Klik wirtualnym kursorem (Enter/Spacja w trybie Desktop): pas kart
+    // przelecza na karte pod kursorem; reszta tresci = standardowe
+    // wejscie do okna (false).
+    bool clickAt(int x, int y) override {
+        if (tabBar_.count() == 0 || y != tabBar_.bounds().y) return false;
+        const int i = tabBar_.tabAt(x);
+        if (i < 0) return false;
+        if (i != current_) switchTo(i);
+        return true;
     }
 
     std::optional<std::pair<int, int>> cursorPosition() const override {

@@ -13,9 +13,10 @@ namespace fenrir {
 
 // Pasek kart (tabs) — np. otwarte pliki w edytorze. Widget biblioteczny:
 // rysuje karty "etykieta[*]" z podswietleniem biezacej (accentBg + bold),
-// przewija poziomo tak, by zaznaczona karta byla widoczna. Przełączanie
-// strzalkami L/P (gdy widget ma fokus) albo skrotami aplikacji (F4/F9) —
-// zmiana zaznaczenia wolaa onSwitch(nowyIndex).
+// przewija poziomo tak, zeby zaznaczona karta byla widoczna. Przelaczanie
+// strzalkami L/P (gdy widget ma fokus), skrotami aplikacji (Ctrl+PgDn/PgUp)
+// albo kliknieciem wirtualnym kursorem (tabAt) — zmiana zaznaczenia wola
+// onSwitch(nowyIndex).
 class TabBar : public Widget {
 public:
     struct Tab {
@@ -32,6 +33,21 @@ public:
 
     int selected() const { return selected_; }
     int count() const { return static_cast<int>(tabs_.size()); }
+
+    // Indeks karty pod kolumna ekranu (klik wirtualnym kursorem), -1 gdy
+    // kolumna lezy za pasem kart. Uwzglednia przewijanie poziome (scrollX_).
+    int tabAt(int screenX) const {
+        if (tabs_.empty() || bounds_.w <= 0) return -1;
+        if (screenX < bounds_.x || screenX >= bounds_.x + bounds_.w) return -1;
+        const int sx = screenX - bounds_.x + scrollX_;
+        int start = 0;
+        for (int i = 0; i < static_cast<int>(tabs_.size()); ++i) {
+            const int tw = tabWidth(tabs_[static_cast<std::size_t>(i)]);
+            if (sx < start + tw) return i;
+            start += tw;
+        }
+        return -1;
+    }
 
     // Wymuszone zaznaczenie (po otwarciu/zamknieciu karty) — bez callbacku.
     void select(int idx) {

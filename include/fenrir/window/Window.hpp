@@ -11,7 +11,7 @@ namespace fenrir {
 // Trzy "przyciski" w prawym gornym rogu paska tytulu, w kolejnosci od lewej:
 // [_] minimalizuj, [ ] maksymalizuj/przywroc, [X] zamknij. Framework (Desktop)
 // hit-testuje wg tych stalych, zeby wiedziec co zrobic po Enter/Space pod kursorem.
-enum class TitleBarZone { None, Drag, MinimizeButton, MaximizeButton, CloseButton, MenuTab };
+enum class TitleBarZone { None, Drag, MinimizeButton, MaximizeButton, CloseButton, MenuTab, Border };
 
 // Shared tab-strip layout: returns {cursor_x, width} for each tab label in a menu strip.
 // Used by Window::draw(), Window::menuTabIndexAt() hit-test, and Desktop::buildWinMenu().
@@ -48,6 +48,9 @@ public:
     bool onTitleBar(int x, int y) const;
     // Wiersz paska menu (wlasny wiersz pod paskiem tytulu, jak w systemach okienkowych).
     bool onMenuRow(int x, int y) const;
+    // Krawedzie okna: boki i dol — BEZ gory (tytul/menu maja wlasne strefy).
+    // Klik wirtualnym kursorem na krawedzi otwiera tryb Resize.
+    bool onBorder(int x, int y) const;
     // Ktora strefa paska tytulu jest pod (x,y) - do obslugi kursora GUI.
     TitleBarZone titleBarZoneAt(int x, int y) const;
     // Ktorej karcie menu odpowiada pozycja (x,y) paska tytulu; -1 = zadnej.

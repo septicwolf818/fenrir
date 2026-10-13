@@ -52,6 +52,17 @@ void drawBox(Screen& screen, const Rect& r, std::u32string_view title) {
     }
 }
 
+// Szerokosc ramki dropdownu dopasowana do tresci, zawsze miesci najszersza
+// kolumne: ramka + wypelnienie + tekst (etykieta LUB tytul paska) + wypelnienie
+// + ramka = +4. Minimum 12, zeby pusty dropdown byl czytelny.
+int dropdownWidth(const std::vector<std::u32string>& labels, std::u32string_view title) {
+    int w = 12;
+    for (const auto& l : labels)
+        w = std::max<int>(w, static_cast<int>(l.size()) + 4);
+    w = std::max<int>(w, static_cast<int>(title.size()) + 4);
+    return w;
+}
+
 // Guard zamykania okna: okno z brudna trescia (Widget::dirty) nie zamyka sie
 // od razu — pytamy uzytkownika (AppContext::confirm = Dialog Ok/Anuluj), a
 // zamkniecie enkuje dopiero na OK; przy Anuluj/Esc nic sie nie dzieje.
@@ -137,8 +148,7 @@ void Desktop::openAppMenu() {
     }
     items.push_back(U"Zamknij pulpit");
 
-    int w = 24;
-    for (auto& s : items) w = std::max<int>(w, static_cast<int>(s.size()) + 4);
+    int w = std::max(24, dropdownWidth(items, U"Aplikacje"));
     int h = static_cast<int>(items.size()) + 2;
     appMenuBounds_ = Rect{1, kMenuBarHeight + 1, w, h}; // 1 wiersz odstepu od paska - na wysokosci 1szego wiersza okien
 
@@ -211,10 +221,8 @@ void Desktop::buildWinMenu(Window& w, int tab) {
 
     // Dropdown POD paskiem menu okna (wiersz menu = y+1), pod konkretna kartą.
     // Pobieramy pozycję karty z tabStripLayout().
-    int itemW = 4;
-    for (auto& l : labels) itemW = std::max<int>(itemW, static_cast<int>(l.size()) + 2);
     int h = static_cast<int>(labels.size()) + 2;
-    int menuW = std::max(itemW, 12);
+    int menuW = dropdownWidth(labels, tabs[static_cast<std::size_t>(tab)].first);
 
     Rect wb = w.bounds();
     auto strips = tabStripLayout(wb.x, wb.w, content->menuTabs());
@@ -270,9 +278,9 @@ void Desktop::restoreFocusTo(Window* requester) {
 void Desktop::applyWidgetResult(KeyEventResult r, const KeyEvent& ev) {
     if (r == KeyEventResult::EnteredEdit) { mode_ = CursorMode::Edit; return; }
     if (r != KeyEventResult::Ignored) return;
-    // Widget nie chce tego klawisza — globalne fallbacki:
-    // Tab = kolejne okno, Escape = cofniecie trybu (Edit -> Keyboard -> Desktop).
-    if (ev.key == Key::Tab) { wm_.focusNext(); return; }
+    // Widget nie chce tego klawisza — globalny fallback to TYLKO Escape
+    // (cofniecie trybu Edit -> Keyboard -> Desktop). Zwykly Tab celowo nic
+    // nie robi: przełączanie okien wylacznie przez Alt+Tab.
     if (ev.key == Key::Escape) {
         if (mode_ == CursorMode::Edit) mode_ = CursorMode::Keyboard;
         else leaveWindowMode();
@@ -518,7 +526,16 @@ void Desktop::activateAtCursor() {
         case TitleBarZone::MenuTab:
             openWinMenu(*w, w->menuTabIndexAt(cursor_.x(), cursor_.y()));
             break;
-        case TitleBarZone::None: mode_ = enterWindowMode(*w); break;
+        case TitleBarZone::Border:
+            // Krawedz okna (oprocz gornej) = tryb Resize, jak F6.
+            mode_ = CursorMode::WindowResize;
+            break;
+        case TitleBarZone::None:
+            // Klik w tresc: widget moze obsluzyc trafienie (np. karta w pasku
+            // kart edytora); wpp. standardowe wejscie do trybu okna.
+            if (w->content() && w->content()->clickAt(cursor_.x(), cursor_.y())) break;
+            mode_ = enterWindowMode(*w);
+            break;
     }
 }
 
@@ -562,14 +579,13 @@ void Desktop::handleKeyEvent(const KeyEvent& ev) {
 
     // --- Globalne skróty klawiszowe — zawsze działają, niezależnie od trybu ---
     // Uwaga: zwykly Tab NIE jest globalny — najpierw dostaje go widget (np.
-    // edytor wstawia tabulator, menedzer plikow przelacza panele), a
-    // focusNext() jest fallbackiem gdy widget zwraca Ignored (patrz
-    // applyWidgetResult / sekcja Desktop). Globalne sa tylko ZMODYFIKOWANE
-    // warianty: Alt+Tab (gola konsola Linux wysyla to jako ESC+Tab — jedyne
-    // combo z modyfikatorem, jakie da sie odebrac na TTY; Ctrl+Tab nie
-    // produkuje ZADNEGO bajtu w domyslnej keymapie) i Ctrl+Tab dla
-    // keymapow/emulatorow, ktore dostarczaja odrębna sekwencje.
-    if (ev.key == Key::Tab && (ev.alt || ev.ctrl)) { wm_.focusNext(); return; }
+    // edytor wstawia tabulator, menedzer plikow przelacza panele), a gdy
+    // widget zwraca Ignored — nic (zwykly Tab juz NIE przełącza okien).
+    // Globalne przełączanie okien to WYLACZNIE Alt+Tab (gola konsola Linux
+    // wysyla to jako ESC+Tab — jedyne combo z modyfikatorem, jakie da sie
+    // odebrac na TTY; Ctrl+Tab nie produkuje ZADNEGO bajtu w domyslnej
+    // keymapie, a keymapy z odrębna sekwencją tez nie zmieniają okien).
+    if (ev.key == Key::Tab && ev.alt) { wm_.focusNext(); return; }
     if (ev.key == Key::F1) { openAppMenu(); return; }
     if (ev.ctrl && ev.key == Key::Char && ev.character == U'w') {
         // Guard: brudne okno (Widget::dirty) pyta o potwierdzenie przed zamknieciem.
@@ -651,9 +667,9 @@ void Desktop::handleKeyEvent(const KeyEvent& ev) {
             mode_ = CursorMode::Edit;
         }
 
-        // Delegujemy do widgetu-zawartosci; Ignored + Esc/Tab = fallbacki globalne
-        // (Esc -> pulpit, Tab -> kolejne okno). Widget moze tez zaprosic do Edit
-        // zwrotem EnteredEdit (np. LineEdit).
+        // Delegujemy do widgetu-zawartosci; Ignored + Esc = fallback globalny
+        // (Esc -> pulpit; zwykly Tab celowo bez akcji — patrz applyWidgetResult).
+        // Widget moze tez zaprosic do Edit zwrotem EnteredEdit (np. LineEdit).
         applyWidgetResult(f->handleKey(ev), ev);
         return;
     }
@@ -674,9 +690,9 @@ void Desktop::handleKeyEvent(const KeyEvent& ev) {
         return;
     }
 
-    // Tab na pulpicie = kolejne okno (widgety w oknach dostaja Tab najpierw —
-    // patrz applyWidgetResult — wiec ta sciezka dotyczy trybu Desktop).
-    if (ev.key == Key::Tab) { wm_.focusNext(); return; }
+    // Zwykly Tab na pulpicie celowo NIE przełącza okien — jedyna sciezka
+    // przełączania to Alt+Tab (globalny, patrz wyzej) oraz taskbar (Enter
+    // na uchwycie okna).
 
     // --- Taskbar — nawigacja i aktywacja okien ------------------
     if (cursor_.y() >= screenHeight() - kTaskBarHeight) {
