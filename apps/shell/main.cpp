@@ -13,6 +13,7 @@
 #include "../settings/SettingsApp.hpp"
 #include "../calendar/CalendarApp.hpp"
 #include "../paint/PaintApp.hpp"
+#include "../terminal/TerminalApp.hpp"
 
 int main() {
     try {
@@ -28,6 +29,7 @@ int main() {
         desktop.apps().registerApp(std::make_unique<fenrir::apps::SettingsApp>());
         desktop.apps().registerApp(std::make_unique<fenrir::apps::CalendarApp>());
         desktop.apps().registerApp(std::make_unique<fenrir::apps::PaintApp>());
+        desktop.apps().registerApp(std::make_unique<fenrir::apps::TerminalApp>());
         // Kolejne aplikacje dopisujesz tutaj.
 
         return desktop.run();

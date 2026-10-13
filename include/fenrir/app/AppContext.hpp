@@ -43,6 +43,13 @@ public:
     virtual void openDialog(std::u32string title, std::unique_ptr<Dialog> content,
                             OnDialogResult onResult) = 0;
 
+    // --- Asynchroniczne zrodla danych (np. PTY terminala) --------------------
+    // Rejestruje fd sprawdzany co tick (poll POLLIN, bez blokowania); onReady
+    // jest wolane gdy na fd sa dane. Zrodlo MUSA sie usunac (removeFdSource)
+    // ZWROT zanim fd zostanie zamkniete — destruktor widgetu jest miejscem.
+    virtual void addFdSource(int fd, std::function<void()> onReady) = 0;
+    virtual void removeFdSource(int fd) = 0;
+
     // --- Wysokopoziomowe helpery (buduja Dialog i otwieraja go przez openDialog) ---
 
     // Komunikat "OK" (np. "O kalkulatorze").

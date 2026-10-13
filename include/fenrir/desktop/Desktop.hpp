@@ -57,6 +57,9 @@ public:
                   OnPick onPick, OnCancel onCancel) override;
     void openDialog(std::u32string title, std::unique_ptr<Dialog> content,
                     OnDialogResult onResult) override;
+    // Asynchroniczne zrodla (np. PTY terminala) — pollowane w tickOnce.
+    void addFdSource(int fd, std::function<void()> onReady) override;
+    void removeFdSource(int fd) override;
 
 private:
     Terminal terminal_;
@@ -96,6 +99,10 @@ private:
     // z wewnatrz jego wlasnego handleKey zniszczyloby widget na stosie wywolan —
     // flagujemy, a Desktop zamyka po dispatchu (patrz flushPendingCloses).
     std::vector<Window*> closePending_;
+
+    // Zarejestrowane fd-y (AppContext::addFdSource): poll(POLLIN) co tick,
+    // przed odczytem klawiatury — zrodla maja krotszy interwal odswiezania.
+    std::vector<std::pair<int, std::function<void()>>> fdSources_;
 
     void handleKey(const KeyEvent& ev);          // wrapper: dispatch + flush zamkniec
     void handleKeyEvent(const KeyEvent& ev);     // wlasciwa obsluga klawiszy

@@ -37,6 +37,11 @@ target_include_directories(fenrir PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+# forkpty (terminal) — libutil na Linuksie; na macOS jest w libc.
+if(UNIX AND NOT APPLE)
+    target_link_libraries(fenrir PUBLIC util)
+endif()
+
 
 
 # --- shell: den ------------------------------------------------------------

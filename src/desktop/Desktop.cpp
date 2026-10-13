@@ -5,6 +5,7 @@
 #include <chrono>
 #include <ctime>
 #include <cstdio>
+#include <poll.h>
 #include <string>
 
 #include "fenrir/core/FileSystem.hpp"
@@ -918,9 +919,30 @@ void Desktop::positionGuiCursor() {
     cursor_.render(screen_);
 }
 
+void Desktop::addFdSource(int fd, std::function<void()> onReady) {
+    if (fd < 0 || !onReady) return;
+    fdSources_.emplace_back(fd, std::move(onReady));
+}
+
+void Desktop::removeFdSource(int fd) {
+    std::erase_if(fdSources_, [fd](const auto& s) { return s.first == fd; });
+}
+
 void Desktop::tickOnce() {
+    // Asynchroniczne zrodla (AppContext::addFdSource, np. PTY terminala):
+    // poll bez blokowania; callback moze przeczytac dane i usunac zrodlo,
+    // wiec iterujemy po kopii wektora.
+    auto sources = fdSources_;
+    for (const auto& [fd, cb] : sources) {
+        struct pollfd pfd { fd, POLLIN, 0 };
+        if (poll(&pfd, 1, 0) > 0 && (pfd.revents & (POLLIN | POLLHUP | POLLERR)) && cb) cb();
+    }
+
     char buf[64];
-    std::size_t n = terminal_.read(buf, sizeof(buf), 400 /*ms - tempo migania kursora*/);
+    // Gdy zarejestrowane sa zrodla (okno terminala) — krotszy interwal, zeby
+    // wyjscie potomka pojawialo sie gladko; bez zrodel klasyczne 400ms.
+    const int timeout = fdSources_.empty() ? 400 : 30;
+    std::size_t n = terminal_.read(buf, sizeof(buf), timeout);
 
     if (terminal_.consumeResizeFlag()) {
         auto sz = terminal_.size();
