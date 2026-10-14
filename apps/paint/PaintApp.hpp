@@ -544,6 +544,8 @@ public:
             {U"Undo (Ctrl+Z)", [raw] { raw->undoLast(); }},
             {U"Colors (F3)", [raw] { raw->showPalette(); }},
         }}});
+        addAboutMenu(*view, ctx, U"Paint",
+                     U"Draw character-cell images using the 16-color ANSI palette.");
 
         view->pushShortcut({true, Key::Char, U'n'}, [raw] { raw->newCanvas(); });
         view->pushShortcut({true, Key::Char, U'o'}, [raw] { raw->openFile(); });

@@ -85,6 +85,11 @@ editing/navigation modes; the Terminal app forwards it to the shell instead.
 | `Ctrl+Y` | Toggle spaces instead of tab characters |
 | `Alt+PgUp` / `Alt+PgDn` | Previous / next tab |
 
+Syntax highlighting for C/C++, JavaScript/TypeScript, Java, Go, Rust, Python,
+shell, JSON, HTML/XML, CSS, INI/TOML/YAML, CMake, and Markdown is enabled by
+default. Toggle it from the editor's **Format** menu; the choice is saved in
+editor preferences.
+
 ### File Manager
 
 | Key | Action |

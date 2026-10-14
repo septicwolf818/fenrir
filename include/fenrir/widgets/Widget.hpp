@@ -78,6 +78,7 @@ public:
     // All menu tabs for this app (set by createView() in Widget).
     const std::vector<MenuTab>& menuTabs() const { return menuTabs_; }
     void setMenuTabs(std::vector<MenuTab> tabs) { menuTabs_ = std::move(tabs); }
+    void pushMenuTab(MenuTab tab) { menuTabs_.push_back(std::move(tab)); }
 
     // Keyboard shortcuts for this app.
     const std::vector<std::pair<KeyShortcut, std::function<void()>>>& shortcuts() const { return shortcuts_; }

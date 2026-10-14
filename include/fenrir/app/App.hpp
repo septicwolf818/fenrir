@@ -43,6 +43,14 @@ public:
         int h = std::min(20, std::max(6, desktopArea.h - 4));
         return Rect{desktopArea.x + 2, desktopArea.y + 1, w, h};
     }
+
+    static void addAboutMenu(Widget& view, AppContext& ctx, std::u32string appName,
+                             std::u32string description) {
+        view.pushMenuTab({U"Help", {{U"About", [&ctx, name = std::move(appName),
+                                                text = std::move(description)] {
+            ctx.showAbout(name, text);
+        }}}});
+    }
 };
 
 } // namespace fenrir

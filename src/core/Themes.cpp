@@ -37,6 +37,9 @@ const std::vector<NamedTheme>& catalog() {
             .statusBg = colors::Blue, .statusText = colors::BrightWhite,
             .editorBg = colors::Black, .editorText = colors::BrightCyan,
             .errorText = colors::BrightRed,
+            .syntaxKeyword = colors::BrightBlue, .syntaxType = colors::BrightCyan,
+            .syntaxString = colors::BrightGreen, .syntaxNumber = colors::BrightYellow,
+            .syntaxComment = colors::Cyan, .syntaxDirective = colors::BrightYellow,
         }},
 
         // Amber — monochrome "old amber monitor" theme.
@@ -61,6 +64,9 @@ const std::vector<NamedTheme>& catalog() {
             .statusBg = colors::Yellow, .statusText = colors::Black,
             .editorBg = colors::Black, .editorText = colors::BrightYellow,
             .errorText = colors::BrightRed,
+            .syntaxKeyword = colors::BrightYellow, .syntaxType = colors::BrightYellow,
+            .syntaxString = colors::Yellow, .syntaxNumber = colors::BrightYellow,
+            .syntaxComment = colors::Yellow, .syntaxDirective = colors::BrightYellow,
         }},
 
         // Forest — green terminal, black background + green frames and headers.
@@ -85,6 +91,9 @@ const std::vector<NamedTheme>& catalog() {
             .statusBg = colors::Green, .statusText = colors::Black,
             .editorBg = colors::Black, .editorText = colors::BrightGreen,
             .errorText = colors::BrightRed,
+            .syntaxKeyword = colors::BrightCyan, .syntaxType = colors::BrightWhite,
+            .syntaxString = colors::BrightGreen, .syntaxNumber = colors::BrightYellow,
+            .syntaxComment = colors::Green, .syntaxDirective = colors::BrightYellow,
         }},
 
         // High contrast — black/white + yellow accents (readability first).
@@ -109,6 +118,9 @@ const std::vector<NamedTheme>& catalog() {
             .statusBg = colors::Black, .statusText = colors::BrightYellow,
             .editorBg = colors::Black, .editorText = colors::BrightWhite,
             .errorText = colors::BrightRed,
+            .syntaxKeyword = colors::BrightYellow, .syntaxType = colors::BrightWhite,
+            .syntaxString = colors::BrightGreen, .syntaxNumber = colors::BrightCyan,
+            .syntaxComment = colors::Gray, .syntaxDirective = colors::BrightYellow,
         }},
     };
     return cats;

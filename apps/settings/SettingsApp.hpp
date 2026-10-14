@@ -153,7 +153,10 @@ public:
     std::string name() const override { return "Settings"; }
 
     std::unique_ptr<Widget> createView(AppContext& ctx) override {
-        return std::make_unique<SettingsView>(ctx);
+        auto view = std::make_unique<SettingsView>(ctx);
+        addAboutMenu(*view, ctx, U"Settings",
+                     U"Choose the desktop theme, clock, cursor, and editor preferences.");
+        return view;
     }
 
     Rect preferredBounds(const Rect& desktopArea) const override {

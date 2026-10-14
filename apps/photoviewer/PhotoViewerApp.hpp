@@ -361,6 +361,8 @@ public:
                 {U"Fit to window (F)", [raw] { raw->fitToView(); }},
             }},
         });
+        addAboutMenu(*view, ctx, U"Photo Viewer",
+                     U"View common image formats with ANSI colors and terminal shading.");
         view->pushShortcut({true, Key::Char, U'o'}, [raw] { raw->openImage(); });
         return view;
     }

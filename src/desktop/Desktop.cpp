@@ -283,6 +283,7 @@ void Desktop::flushPendingCloses() {
     closePending_.clear();
     for (Window* w : pending)
         if (windowAlive(w)) wm_.closeWindow(w);
+    renderer_.forceFullRedraw();
 }
 
 void Desktop::restoreFocusTo(Window* requester) {
@@ -430,6 +431,7 @@ void Desktop::openDialogWindow(FileDialogMode mode, const std::string& startDir,
     Window* w = wm_.createWindow(title, bounds, std::move(dialog));
     w->constrainTo(area);
     wm_.focus(w);
+    renderer_.forceFullRedraw();
     mode_ = enterWindowMode(*w);
 
     // Deferred close (closePending_): the callback is invoked from inside the
@@ -539,6 +541,7 @@ void Desktop::openDialog(std::u32string title, std::unique_ptr<Dialog> content, 
     Window* win = wm_.createWindow(text::toUtf8(title), bounds, std::move(content));
     win->constrainTo(area);
     wm_.focus(win);
+    renderer_.forceFullRedraw();
     mode_ = enterWindowMode(*win);
 
     // Widget callback: result -> app callback -> focus -> DEFERRED window close

@@ -76,6 +76,14 @@ struct Theme {
 
     // --- errors ---
     Color errorText{colors::BrightRed};
+
+    // --- syntax tokens in the Text Editor ---
+    Color syntaxKeyword{colors::BrightBlue};
+    Color syntaxType{colors::BrightCyan};
+    Color syntaxString{colors::BrightGreen};
+    Color syntaxNumber{colors::BrightMagenta};
+    Color syntaxComment{colors::Gray};
+    Color syntaxDirective{colors::BrightYellow};
 };
 
 // The current theme. Swapping it = a new theme for the entire UI.

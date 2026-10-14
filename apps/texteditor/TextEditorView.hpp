@@ -12,6 +12,7 @@
 #include "fenrir/widgets/TabBar.hpp"
 #include "fenrir/widgets/TextArea.hpp"
 #include "fenrir/widgets/Widget.hpp"
+#include "SyntaxHighlighter.hpp"
 
 namespace fenrir::apps {
 
@@ -21,14 +22,15 @@ namespace fenrir::apps {
 // Ctrl+O = open in a new tab (already open = switches), Ctrl+T =
 // close tab (dirty asks for confirmation), Alt+PgDn/PgUp = next/previous.
 // dirty() = ANY tab is dirty — the window-close guard protects everything.
-// Settings (line numbers, spaces instead of tabs) are shared by all tabs, stored
-// permanently in prefs::forApp("editor").
+// Settings (line numbers, spaces instead of tabs, syntax highlighting) are
+// shared by all tabs and stored in prefs::forApp("editor").
 class TextEditorView : public Widget {
 public:
     TextEditorView(AppContext& ctx, std::string startPath) : ctx_(ctx) {
         auto& p = prefs::forApp("editor");
         lineNumbers_ = p.getBool("line_numbers", false);
         insertsSpaces_ = p.getBool("insert_spaces", false);
+        syntaxHighlighting_ = p.getBool("syntax_highlighting", true);
         openNewTab(std::move(startPath));
         refreshTabBar();
         // Enter in the tree opens the file in a new tab (already open = switch)
@@ -141,6 +143,14 @@ public:
         applyToAll([](TextArea& a, bool, bool sp) { a.setInsertsSpaces(sp); });
         prefs::forApp("editor").setBool("insert_spaces", insertsSpaces_);
         status_.setMessage(insertsSpaces_ ? U"Tab = spaces (4): on" : U"Tab = tab: spaces off");
+    }
+
+    void toggleSyntaxHighlighting() {
+        syntaxHighlighting_ = !syntaxHighlighting_;
+        prefs::forApp("editor").setBool("syntax_highlighting", syntaxHighlighting_);
+        for (auto& area : tabs_) applySyntax(*area);
+        status_.setMessage(syntaxHighlighting_ ? U"Syntax highlighting: on"
+                                               : U"Syntax highlighting: off");
     }
 
     // --- Widget ----------------------------------------------------------------
@@ -259,10 +269,15 @@ private:
 
     void openNewTab(const std::string& path) {
         auto area = std::make_unique<TextArea>();
-        area->onStatus = [this](const std::string& m) { status_.setMessage(text::toUtf32(m)); };
+        TextArea* raw = area.get();
+        area->onStatus = [this, raw](const std::string& m) {
+            applySyntax(*raw);
+            status_.setMessage(text::toUtf32(m));
+        };
         area->setShowLineNumbers(lineNumbers_);
         area->setInsertsSpaces(insertsSpaces_);
         if (!path.empty()) area->loadFile(path);
+        applySyntax(*area);
         tabs_.push_back(std::move(area));
         current_ = static_cast<int>(tabs_.size()) - 1;
         refreshTabBar();
@@ -307,6 +322,11 @@ private:
         for (auto& t : tabs_) f(*t, lineNumbers_, insertsSpaces_);
     }
 
+    void applySyntax(TextArea& area) {
+        area.setSyntaxHighlighter(syntaxHighlighting_ ? syntax::forPath(area.path())
+                                                      : TextArea::SyntaxHighlighter{});
+    }
+
     AppContext& ctx_;
     std::vector<std::unique_ptr<TextArea>> tabs_;
     int current_ = 0;
@@ -317,6 +337,7 @@ private:
     StatusBar status_;
     bool lineNumbers_ = false;
     bool insertsSpaces_ = false;
+    bool syntaxHighlighting_ = true;
     bool currentDirtyShown_ = false;
 };
 

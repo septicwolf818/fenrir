@@ -1,12 +1,22 @@
 #pragma once
+#include <cstdint>
 #include <functional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 #include "fenrir/widgets/Widget.hpp"
 
 namespace fenrir {
+
+enum class SyntaxToken : uint8_t { Identifier, Keyword, Type, String, Number, Comment, Directive };
+
+struct SyntaxSpan {
+    std::size_t begin = 0;
+    std::size_t end = 0; // exclusive
+    SyntaxToken token = SyntaxToken::Keyword;
+};
 
 // Multiline text editor with word wrapping. The buffer stores LOGICAL lines
 // (std::u32string, full Unicode); layout converts them to VISUAL ROWS of width
@@ -20,6 +30,14 @@ public:
     void loadFile(const std::string& path);
     void saveFile(const std::string& path);
     void saveToCurrentPath(); // Save to the path used for the last load or save.
+
+    // Optional line lexer. It receives a logical line and returns token spans;
+    // plain-text buffers leave this unset.
+    using SyntaxHighlighter =
+        std::function<void(std::u32string_view, std::vector<SyntaxSpan>&)>;
+    void setSyntaxHighlighter(SyntaxHighlighter highlighter) {
+        syntaxHighlighter_ = std::move(highlighter);
+    }
 
     void newFile();   // Create a new empty document.
     void clearText(); // Clear all text.
@@ -88,6 +106,7 @@ private:
 
     std::string path_;
     bool dirty_ = false;
+    SyntaxHighlighter syntaxHighlighter_;
 
     int cursorRow_ = 0, cursorCol_ = 0; // Cursor position in the LOGICAL LINE.
     int scrollRow_ = 0;                 // First visible VISUAL ROW.

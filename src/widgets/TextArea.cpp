@@ -412,6 +412,37 @@ void TextArea::draw(Screen& screen) {
             if (len <= 0) continue;
         }
         const int n = std::min(len, textW);
+        if (syntaxHighlighter_) {
+            std::vector<SyntaxSpan> spans;
+            syntaxHighlighter_(line, spans);
+            std::size_t spanIndex = 0;
+            for (int i = 0; i < n; ++i) {
+                const std::size_t logicalCol = static_cast<std::size_t>(start + i);
+                while (spanIndex < spans.size() && spans[spanIndex].end <= logicalCol)
+                    ++spanIndex;
+
+                Color fg = t.editorText;
+                uint8_t style = StyleNone;
+                if (spanIndex < spans.size() && spans[spanIndex].begin <= logicalCol &&
+                    logicalCol < spans[spanIndex].end) {
+                    switch (spans[spanIndex].token) {
+                        case SyntaxToken::Identifier: break;
+                        case SyntaxToken::Keyword: fg = t.syntaxKeyword; style = StyleBold; break;
+                        case SyntaxToken::Type: fg = t.syntaxType; style = StyleBold; break;
+                        case SyntaxToken::String: fg = t.syntaxString; break;
+                        case SyntaxToken::Number: fg = t.syntaxNumber; break;
+                        case SyntaxToken::Comment: fg = t.syntaxComment; break;
+                        case SyntaxToken::Directive: fg = t.syntaxDirective; style = StyleBold; break;
+                    }
+                }
+                char32_t ch = line[logicalCol];
+                if (ch == U'\t') ch = U'→';
+                screen.set(bounds_.x + gut + i, bounds_.y + row,
+                           Cell{ch, fg, t.editorBg, style});
+            }
+            continue;
+        }
+
         // Control characters in the buffer (e.g. '\t' from a loaded file) must
         // be replaced BEFORE drawing; otherwise they reach the terminal as raw
         // bytes and disrupt cursor positioning. Tabs are shown as '→'.

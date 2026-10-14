@@ -18,16 +18,12 @@ public:
         // File menu: clear the calculator (same action as Ctrl+C).
         MenuItem clearItem{U"Clear (Ctrl+C)", [raw]() { raw->resetEngine(); }};
 
-        // Help menu: About — dialog from the library (AppContext::showMessage).
-        MenuItem aboutItem{U"About", [&ctx]() {
-            ctx.showMessage(U"Fenrir Calculator v1.0\n\nType digits and operators from the keyboard,\n"
-                            U"arrows move between buttons; Enter/Space activates one.");
-        }};
-
         raw->setMenuTabs({
-            {U"File", std::vector<MenuItem>{std::move(clearItem)}},
-            {U"Help", std::vector<MenuItem>{std::move(aboutItem)}}
+            {U"File", std::vector<MenuItem>{std::move(clearItem)}}
         });
+        addAboutMenu(*view, ctx, U"Calculator",
+                     U"A keyboard-driven four-function calculator. Type numbers and operators, "
+                     U"or navigate buttons with arrows and activate them with Enter/Space.");
 
         // Ctrl+C = Clear (shortcut registered on the widget — Desktop runs the
         // shortcuts before handleKey, so handleKey doesn't deal with it).

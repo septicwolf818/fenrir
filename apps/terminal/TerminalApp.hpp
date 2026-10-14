@@ -796,7 +796,10 @@ public:
     [[nodiscard]] std::string name() const override { return "Terminal"; }
 
     std::unique_ptr<Widget> createView(AppContext& ctx) override {
-        return std::make_unique<TerminalView>(ctx);
+        auto view = std::make_unique<TerminalView>(ctx);
+        addAboutMenu(*view, ctx, U"Terminal",
+                     U"Run a shell in a window inside the Fenrir workspace.");
+        return view;
     }
 
     Rect preferredBounds(const Rect& desktopArea) const override {

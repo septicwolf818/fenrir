@@ -787,6 +787,8 @@ public:
         {U"Event", std::vector<MenuItem>{
             {U"New (Ctrl+N)", [raw] { raw->newEvent(); }},
         }}});
+        addAboutMenu(*view, ctx, U"Calendar",
+                     U"Plan events in month, week, and day views.");
 
         view->pushShortcut({true, Key::Char, U'n'}, [raw] { raw->newEvent(); });
         view->pushShortcut({true, Key::Char, U't'}, [raw] { raw->setView(CalendarView::View::Week); });

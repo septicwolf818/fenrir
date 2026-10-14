@@ -33,6 +33,8 @@ public:
         {U"Navigation", std::vector<MenuItem>{
             {U"Up (Backspace)", [raw] { raw->goUp(); }},
         }}});
+        addAboutMenu(*view, ctx, U"File Manager",
+                     U"Browse, copy, move, rename, and open files in a dual-panel workspace.");
 
         // Shortcuts: registered on the widget — Desktop checks them before handleKey.
         view->pushShortcut({true, Key::Char, U'o'}, [raw] { raw->openWithSelected(); });

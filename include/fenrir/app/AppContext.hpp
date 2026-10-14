@@ -67,6 +67,13 @@ public:
                    });
     }
 
+    // Consistent About dialog shared by every app's Help > About menu.
+    void showAbout(std::u32string appName, std::u32string description) {
+        std::u32string message = U"Fenrir " + appName + U"\nVersion 1.0\n\n" + description;
+        auto dlg = std::make_unique<Dialog>(std::move(message), Dialog::Buttons::Ok);
+        openDialog(U"About " + std::move(appName), std::move(dlg), [](int) {});
+    }
+
     // Yes/no question (OK/Cancel): true = OK, false = Cancel/Esc.
     void confirm(std::u32string text, std::function<void(bool)> onAnswer) {
         auto dlg = std::make_unique<Dialog>(std::move(text), Dialog::Buttons::OkCancel);

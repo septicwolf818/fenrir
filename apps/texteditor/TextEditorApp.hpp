@@ -16,7 +16,9 @@ public:
 
     std::vector<std::string> fileExtensions() const override {
         return {"txt", "md", "log", "ini", "cfg", "conf", "csv", "json", "xml",
-                "yaml", "yml", "c", "h", "cc", "cpp", "hpp", "py", "sh", "html", "css"};
+                "markdown", "yaml", "yml", "toml", "properties", "cmake", "c", "h", "cc",
+                "cpp", "cxx", "hpp", "hxx", "js", "mjs", "cjs", "ts", "tsx", "java",
+                "go", "rs", "py", "sh", "bash", "zsh", "html", "htm", "css"};
     }
 
     std::unique_ptr<Widget> createView(AppContext& ctx) override {
@@ -39,7 +41,10 @@ public:
             {U"Line wrap (Ctrl+E)", [raw] { raw->toggleWrap(); }},
             {U"Line numbers (Ctrl+G)", [raw] { raw->toggleLineNumbers(); }},
             {U"Tab = spaces (Ctrl+Y)", [raw] { raw->toggleSpaces(); }},
+            {U"Toggle syntax highlighting", [raw] { raw->toggleSyntaxHighlighting(); }},
         }}});
+        addAboutMenu(*view, ctx, U"Text Editor",
+                     U"Edit plain-text files with tabs, a file tree, and optional syntax highlighting.");
 
         view->pushShortcut({true, Key::Char, U'n'}, [raw] { raw->newFile(); });
         view->pushShortcut({true, Key::Char, U'o'}, [raw] { raw->openFile(); });
