@@ -23,9 +23,11 @@ public:
 
     void draw(Screen& screen) override {
         const auto& t = theme::active;
-        const bool hot = focused_ || highlighted_;
-        const Color fg = hot ? t.buttonTextHot : t.buttonText;
+        const bool hot = (focused_ || highlighted_) && enabled_;
+        // A disabled button is drawn dimmed (inactive) and never goes hot.
+        const Color fg = enabled_ ? (hot ? t.buttonTextHot : t.buttonText) : t.dimText;
         const Color bg = t.buttonBg;
+        const uint8_t style = enabled_ ? (hot ? StyleBold : StyleNone) : StyleDim;
 
         screen.fillRect(bounds_, Cell{U' ', fg, bg, 0});
 
@@ -34,15 +36,17 @@ public:
         std::u32string text = U"[ " + label + U" ]";
         if (static_cast<int>(text.size()) > bounds_.w) text = text::clip(text, bounds_.w);
         int cx = bounds_.x + std::max(0, (bounds_.w - static_cast<int>(text.size())) / 2);
-        screen.putText(cx, bounds_.y + bounds_.h / 2, text, fg, bg, hot ? StyleBold : StyleNone);
+        screen.putText(cx, bounds_.y + bounds_.h / 2, text, fg, bg, style);
     }
 
     bool activate() override {
+        if (!enabled_) return false;
         if (onActivate) onActivate();
         return true;
     }
 
     KeyEventResult handleKey(const KeyEvent& ev) override {
+        if (!enabled_) return KeyEventResult::Ignored;
         if (ev.key == Key::Enter) return activate() ? KeyEventResult::Activated : KeyEventResult::Ignored;
         if (ev.key == Key::Char && !ev.ctrl && ev.character == U' ')
             return activate() ? KeyEventResult::Activated : KeyEventResult::Ignored;

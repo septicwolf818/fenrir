@@ -54,10 +54,17 @@ public:
     void setHighlighted(bool h) { highlighted_ = h; }
     bool highlighted() const { return highlighted_; }
 
+    // Enabled/disabled (inactive) status. A disabled widget is drawn dimmed
+    // and is skipped by container navigation (selectable() is false) and
+    // never enters Edit mode (editable() is false) — e.g. settings rows
+    // that only apply while their feature is switched on. Defaults to enabled.
+    void setEnabled(bool e) { enabled_ = e; }
+    bool enabled() const { return enabled_; }
+
     // Does this widget accept text directly (is it editable)? true means pressing a character
     // enters Edit mode for this widget. Defaults to false; only widgets with actual editing
     // (e.g. TextArea and text fields) set it. Containers (Frame) inherit their child's editability.
-    virtual bool editable() const { return editable_; }
+    virtual bool editable() const { return enabled_ && editable_; }
     void setEditable(bool e) { editable_ = e; }
 
     // Does this widget contain unsaved changes? Desktop asks for confirmation before
@@ -110,8 +117,10 @@ public:
     virtual bool activate() { return false; }
 
     // Can this widget be selected during container navigation? Panel skips
-    // elements where selectable() == false, such as labels.
-    virtual bool selectable() const { return true; }
+    // elements where selectable() == false, such as labels. A disabled
+    // widget is never selectable. Subclasses with their own conditions
+    // (e.g. LineEdit's read-only) AND them with enabled().
+    virtual bool selectable() const { return enabled_; }
 
     // Absolute GUI cursor position (in screen cells), if the widget has an editing
     // context (e.g. TextArea). std::nullopt means the widget has no cursor of its own.
@@ -141,6 +150,7 @@ protected:
     bool focused_ = false;
     bool highlighted_ = false;
     bool editable_ = false;
+    bool enabled_ = true;
 
     // App metadata — set by createView() in Widget.
     std::vector<MenuTab> menuTabs_;

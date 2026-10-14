@@ -133,7 +133,7 @@ public:
         return true;
     }
 
-    bool selectable() const override { return !readOnly_; }
+    bool selectable() const override { return enabled_ && !readOnly_; }
 
 private:
     void ensureVisible(int fieldW) {

@@ -149,7 +149,7 @@ public:
         return panel_->activate();
     }
 
-    bool selectable() const override { return true; }
+    bool selectable() const override { return enabled_; }
 
 private:
     enum class Zone { Input, Buttons };

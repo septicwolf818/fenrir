@@ -20,6 +20,10 @@ public:
         std::u32string text;    // main column
         std::u32string detail;  // right column (optional)
         bool dim = false;       // dimmed row (e.g. "..")
+        // Disabled (inactive) row: drawn dimmed, skipped by Up/Down/Home/End
+        // navigation, and Enter/Space does nothing on it (e.g. settings that
+        // only apply while their feature is switched on). Defaults to enabled.
+        bool enabled = true;
     };
 
     std::function<void(int index)> onActivate; // Enter/Space on the selection
@@ -28,6 +32,7 @@ public:
         items_ = std::move(items);
         if (selected_ >= static_cast<int>(items_.size())) selected_ = static_cast<int>(items_.size()) - 1;
         if (selected_ < 0) selected_ = 0;
+        snapToEnabled();
     }
     void setHeader(std::u32string h) { header_ = std::move(h); }
 
@@ -36,6 +41,7 @@ public:
     void setSelectedIndex(int idx) {
         selected_ = idx;
         clampSelection();
+        snapToEnabled();
     }
     int scrollOffset() const { return scroll_; }
     bool empty() const { return items_.empty(); }
@@ -46,12 +52,16 @@ public:
         return &items_[static_cast<std::size_t>(selected_)];
     }
 
-    // Moves the selection by delta (wrapping). Returns the new index.
+    // Moves the selection by delta (wrapping), skipping disabled rows.
+    // Returns the new index. A list with only disabled rows keeps its index.
     int moveSelection(int delta) {
         if (items_.empty()) return -1;
         clampSelection();
         const int n = static_cast<int>(items_.size());
-        selected_ = ((selected_ + delta) % n + n) % n;
+        for (int step = 0; step < n; ++step) {
+            selected_ = ((selected_ + delta) % n + n) % n;
+            if (items_[static_cast<std::size_t>(selected_)].enabled) break;
+        }
         ensureVisible();
         return selected_;
     }
@@ -101,7 +111,8 @@ public:
             Color fg = sel ? t.accentText : t.surfaceText;
             Color bg = sel ? t.accentBg : t.surfaceBg;
             if (!sel && it.dim) fg = t.dimText; // dimmed row (e.g. "..")
-            const uint8_t style = sel ? StyleBold : StyleNone;
+            uint8_t style = sel ? StyleBold : StyleNone;
+            if (!it.enabled) { fg = t.dimText; style = StyleDim; } // inactive row
 
             screen.fillRect(Rect{bounds_.x, y + row, bounds_.w, 1}, Cell{U' ', fg, bg, style});
 
@@ -132,10 +143,18 @@ public:
             case Key::PageUp:   moveSelection(-rows); return KeyEventResult::Consumed;
             case Key::PageDown: moveSelection(rows); return KeyEventResult::Consumed;
             case Key::Home:
-                if (!items_.empty()) { selected_ = 0; ensureVisible(); }
+                if (!items_.empty()) {
+                    selected_ = 0;
+                    snapToEnabled();
+                    ensureVisible();
+                }
                 return KeyEventResult::Consumed;
             case Key::End:
-                if (!items_.empty()) { selected_ = static_cast<int>(items_.size()) - 1; ensureVisible(); }
+                if (!items_.empty()) {
+                    selected_ = static_cast<int>(items_.size()) - 1;
+                    snapToEnabledReverse();
+                    ensureVisible();
+                }
                 return KeyEventResult::Consumed;
             case Key::Enter:
             case Key::Char:
@@ -148,6 +167,9 @@ public:
 
     bool activate() override {
         if (items_.empty()) return false;
+        clampSelection();
+        // Enter/Space on a disabled row does nothing (still Consumed by handleKey).
+        if (!items_[static_cast<std::size_t>(selected_)].enabled) return false;
         if (onActivate) onActivate(selected_);
         return true;
     }
@@ -161,6 +183,29 @@ private:
     void clampSelection() {
         if (items_.empty()) { selected_ = 0; return; }
         selected_ = std::clamp(selected_, 0, static_cast<int>(items_.size()) - 1);
+    }
+
+    // Moves the selection forward (wrapping) to the first enabled row.
+    // A list with only disabled rows keeps its index.
+    void snapToEnabled() {
+        if (items_.empty()) return;
+        clampSelection();
+        const int n = static_cast<int>(items_.size());
+        for (int step = 0; step < n; ++step) {
+            if (items_[static_cast<std::size_t>(selected_)].enabled) return;
+            selected_ = (selected_ + 1) % n;
+        }
+    }
+
+    // Same, scanning backward (for End).
+    void snapToEnabledReverse() {
+        if (items_.empty()) return;
+        clampSelection();
+        const int n = static_cast<int>(items_.size());
+        for (int step = 0; step < n; ++step) {
+            if (items_[static_cast<std::size_t>(selected_)].enabled) return;
+            selected_ = ((selected_ - 1) % n + n) % n;
+        }
     }
 
     std::vector<Item> items_;

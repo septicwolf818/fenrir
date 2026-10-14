@@ -907,9 +907,17 @@ void Desktop::handleKeyEvent(const KeyEvent& ev) {
 
 void Desktop::drawDesktopBackground(Screen& screen) {
     const auto& t = theme::active;
+    const auto& wp = settings::active.wallpaper;
+    // Disabled wallpaper = the classic theme-colored fill. Enabled solid =
+    // the chosen background color. Enabled pattern = the chosen glyph
+    // repeated in the pattern color on the background color.
+    const bool pattern = wp.enabled && wp.mode == wallpaper::Wallpaper::Mode::Pattern;
+    const char32_t ch = pattern ? wp.glyph : U' ';
+    const Color fg = pattern ? Color{static_cast<uint8_t>(wp.fg & 15)} : t.desktopText;
+    const Color bg = wp.enabled ? Color{static_cast<uint8_t>(wp.bg & 15)} : t.desktopBg;
     for (int y = kMenuBarHeight; y < screen.height() - kTaskBarHeight; ++y)
         for (int x = 0; x < screen.width(); ++x)
-            screen.set(x, y, Cell{U' ', t.desktopText, t.desktopBg, 0});
+            screen.set(x, y, Cell{ch, fg, bg, 0});
 }
 
 void Desktop::drawMenuBar(Screen& screen) {

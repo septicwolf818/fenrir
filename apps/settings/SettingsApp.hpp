@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <fstream>
 #include <memory>
 #include <string>
@@ -8,6 +9,7 @@
 #include "fenrir/core/Settings.hpp"
 #include "fenrir/core/Text.hpp"
 #include "fenrir/core/Theme.hpp"
+#include "fenrir/core/Wallpaper.hpp"
 #include "fenrir/widgets/ListView.hpp"
 #include "fenrir/widgets/StatusBar.hpp"
 
@@ -43,8 +45,8 @@ public:
     bool editable() const override { return false; }
 
     // Minimum: header + settings rows + status bar.
-    int minWidth() const override { return 30; }
-    int minHeight() const override { return 6; }
+    int minWidth() const override { return 34; }
+    int minHeight() const override { return 11; }
 
 private:
     void showStatus(std::u32string message) {
@@ -52,11 +54,28 @@ private:
     }
 
     void rebuild() {
+        const wallpaper::Wallpaper& wp = settings::active.wallpaper;
+        const bool pattern = wp.mode == wallpaper::Wallpaper::Mode::Pattern;
         std::vector<ListView::Item> items;
         items.push_back({U"Theme", text::toUtf32(currentThemeLabel())});
         items.push_back({U"Taskbar clock seconds", settings::active.taskbarSeconds ? U"On" : U"Off"});
         items.push_back({U"Desktop name", text::toUtf32(settings::active.desktopName)});
         items.push_back({U"Cursor blink", settings::active.cursorBlink ? U"On" : U"Off"});
+        items.push_back({U"Wallpaper", wp.enabled ? U"On" : U"Off"});
+        // Wallpaper detail rows are inactive (dimmed + unselectable) while the
+        // wallpaper is off; the pattern-only rows additionally require pattern mode.
+        items.push_back({U"Wallpaper style",
+                         text::toUtf32(pattern ? "Pattern" : "Solid"),
+                         false, wp.enabled});
+        items.push_back({U"Background color",
+                         text::toUtf32(wallpaper::colorName(wp.bg)),
+                         false, wp.enabled});
+        items.push_back({U"Pattern color",
+                         text::toUtf32(wallpaper::colorName(wp.fg)),
+                         false, wp.enabled && pattern});
+        items.push_back({U"Pattern character",
+                         std::u32string(1, wp.glyph),
+                         false, wp.enabled && pattern});
         list_.setItems(std::move(items));
     }
 
@@ -78,6 +97,30 @@ private:
                 settings::active.cursorBlink = !settings::active.cursorBlink;
                 ok = saveChecked("cursor_blink", settings::active.cursorBlink ? "1" : "0");
                 break;
+            case 4:
+                settings::active.wallpaper.enabled = !settings::active.wallpaper.enabled;
+                ok = saveChecked("wallpaper_enabled", settings::active.wallpaper.enabled ? "1" : "0");
+                break;
+            case 5:
+                settings::active.wallpaper.mode =
+                    (settings::active.wallpaper.mode == wallpaper::Wallpaper::Mode::Pattern)
+                        ? wallpaper::Wallpaper::Mode::Solid
+                        : wallpaper::Wallpaper::Mode::Pattern;
+                ok = saveChecked("wallpaper_mode",
+                                 settings::active.wallpaper.mode == wallpaper::Wallpaper::Mode::Pattern
+                                     ? "pattern" : "solid");
+                break;
+            case 6:
+                settings::active.wallpaper.bg =
+                    static_cast<uint8_t>((settings::active.wallpaper.bg + 1) & 15);
+                ok = saveChecked("wallpaper_bg", std::to_string(settings::active.wallpaper.bg));
+                break;
+            case 7:
+                settings::active.wallpaper.fg =
+                    static_cast<uint8_t>((settings::active.wallpaper.fg + 1) & 15);
+                ok = saveChecked("wallpaper_fg", std::to_string(settings::active.wallpaper.fg));
+                break;
+            case 8: ok = cycleWallpaperGlyph(); break;
             default: return;
         }
         rebuild();
@@ -100,6 +143,19 @@ private:
         theme::apply(next.id);
         settings::active.theme = next.id;
         return saveChecked("theme", settings::active.theme);
+    }
+
+    // Cycles the pattern glyph through wallpaper::glyphPresets (wrapping).
+    bool cycleWallpaperGlyph() {
+        char32_t next = wallpaper::glyphPresets[0];
+        for (std::size_t i = 0; i < wallpaper::glyphPresetCount; ++i) {
+            if (wallpaper::glyphPresets[i] == settings::active.wallpaper.glyph) {
+                next = wallpaper::glyphPresets[(i + 1) % wallpaper::glyphPresetCount];
+                break;
+            }
+        }
+        settings::active.wallpaper.glyph = next;
+        return saveChecked("wallpaper_glyph", text::toUtf8(std::u32string(1, next)));
     }
 
     // settings::save() returns void and stays silent when the file can't be written
@@ -156,13 +212,13 @@ public:
         auto view = std::make_unique<SettingsView>(ctx);
         addExitMenu(*view, ctx);
         addAboutMenu(*view, ctx, U"Settings",
-                     U"Choose the desktop theme, clock, cursor, and editor preferences.");
+                     U"Choose the desktop theme, clock, cursor, and wallpaper.");
         return view;
     }
 
     Rect preferredBounds(const Rect& desktopArea) const override {
-        int w = std::min(52, std::max(32, desktopArea.w - 4));
-        int h = std::min(10, std::max(8, desktopArea.h - 4));
+        int w = std::min(56, std::max(36, desktopArea.w - 4));
+        int h = std::min(15, std::max(13, desktopArea.h - 4));
         return Rect{desktopArea.x + std::max(0, (desktopArea.w - w) / 2),
                     desktopArea.y + std::max(0, (desktopArea.h - h) / 2), w, h};
     }

@@ -6,6 +6,7 @@
 #include <string_view>
 
 #include "fenrir/core/FileSystem.hpp"
+#include "fenrir/core/Text.hpp"
 #include "fenrir/core/Theme.hpp"
 
 namespace fenrir::settings {
@@ -23,6 +24,18 @@ bool parseBool(std::string_view v, bool fallback) {
     if (v == "1" || v == "true" || v == "on" || v == "yes") return true;
     if (v == "0" || v == "false" || v == "off" || v == "no") return false;
     return fallback;
+}
+
+// ANSI palette index 0..15; garbled values keep the current setting.
+uint8_t parseIndex(std::string_view v, uint8_t fallback) {
+    if (v.empty()) return fallback;
+    unsigned long n = 0;
+    for (char c : v) {
+        if (c < '0' || c > '9') return fallback;
+        n = n * 10 + static_cast<unsigned long>(c - '0');
+        if (n > 15) return fallback;
+    }
+    return static_cast<uint8_t>(n);
 }
 
 } // namespace
@@ -56,6 +69,18 @@ void load() {
             active.desktopName = val; // empty -> the taskbar shows the startup name (fallback in Desktop)
         } else if (key == "cursor_blink") {
             active.cursorBlink = parseBool(val, active.cursorBlink);
+        } else if (key == "wallpaper_enabled") {
+            active.wallpaper.enabled = parseBool(val, active.wallpaper.enabled);
+        } else if (key == "wallpaper_mode") {
+            active.wallpaper.mode = (val == "pattern") ? wallpaper::Wallpaper::Mode::Pattern
+                                                      : wallpaper::Wallpaper::Mode::Solid;
+        } else if (key == "wallpaper_bg") {
+            active.wallpaper.bg = parseIndex(val, active.wallpaper.bg);
+        } else if (key == "wallpaper_fg") {
+            active.wallpaper.fg = parseIndex(val, active.wallpaper.fg);
+        } else if (key == "wallpaper_glyph") {
+            const std::u32string u = text::toUtf32(val);
+            if (!u.empty()) active.wallpaper.glyph = u.front();
         }
         // Unknown keys are ignored — forward compatibility.
     }
@@ -72,7 +97,12 @@ void save() {
       << "theme=" << active.theme << "\n"
       << "taskbar_seconds=" << (active.taskbarSeconds ? "1" : "0") << "\n"
       << "desktop_name=" << active.desktopName << "\n"
-      << "cursor_blink=" << (active.cursorBlink ? "1" : "0") << "\n";
+      << "cursor_blink=" << (active.cursorBlink ? "1" : "0") << "\n"
+      << "wallpaper_enabled=" << (active.wallpaper.enabled ? "1" : "0") << "\n"
+      << "wallpaper_mode=" << (active.wallpaper.mode == wallpaper::Wallpaper::Mode::Pattern ? "pattern" : "solid") << "\n"
+      << "wallpaper_bg=" << static_cast<int>(active.wallpaper.bg) << "\n"
+      << "wallpaper_fg=" << static_cast<int>(active.wallpaper.fg) << "\n"
+      << "wallpaper_glyph=" << text::toUtf8(std::u32string(1, active.wallpaper.glyph)) << "\n";
 }
 
 } // namespace fenrir::settings

@@ -167,7 +167,7 @@ public:
         }
     }
 
-    bool selectable() const override { return true; }
+    bool selectable() const override { return enabled_; }
 
 private:
     static int tabWidth(const Tab& t) {

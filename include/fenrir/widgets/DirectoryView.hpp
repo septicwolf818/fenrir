@@ -99,7 +99,7 @@ public:
 
     bool activate() override { return list_.activate(); }
 
-    bool selectable() const override { return true; }
+    bool selectable() const override { return enabled_; }
 
 private:
     void refresh(bool keepSelection) {

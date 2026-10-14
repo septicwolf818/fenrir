@@ -1,6 +1,8 @@
 #pragma once
 #include <string>
 
+#include "fenrir/core/Wallpaper.hpp"
+
 namespace fenrir::settings {
 
 // Desktop settings, persistently stored in ~/.config/fenrir/settings.ini
@@ -13,6 +15,7 @@ struct Settings {
     bool taskbarSeconds = false;   // taskbar clock shows seconds
     std::string desktopName = "Fenrir"; // name in the menu bar (right side)
     bool cursorBlink = true;       // blinking GUI cursor
+    wallpaper::Wallpaper wallpaper; // desktop background (color or glyph pattern)
 };
 
 // Active settings (loaded once by Desktop at startup).
