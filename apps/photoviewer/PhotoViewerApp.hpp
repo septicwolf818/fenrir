@@ -120,14 +120,38 @@ private:
             {0, 0, 238}, {205, 0, 205}, {0, 205, 205}, {229, 229, 229},
             {127, 127, 127}, {255, 0, 0}, {0, 255, 0}, {255, 255, 0},
             {92, 92, 255}, {255, 0, 255}, {0, 255, 255}, {255, 255, 255}};
+        struct Hsv { double hue, saturation, value; };
+        const auto toHsv = [](int r, int g, int b) {
+            const double rf = r / 255.0, gf = g / 255.0, bf = b / 255.0;
+            const double hi = std::max({rf, gf, bf});
+            const double lo = std::min({rf, gf, bf});
+            const double delta = hi - lo;
+            double hue = 0.0;
+            if (delta > 0.0) {
+                if (hi == rf) hue = 60.0 * std::fmod((gf - bf) / delta, 6.0);
+                else if (hi == gf) hue = 60.0 * ((bf - rf) / delta + 2.0);
+                else hue = 60.0 * ((rf - gf) / delta + 4.0);
+                if (hue < 0.0) hue += 360.0;
+            }
+            return Hsv{hue, hi == 0.0 ? 0.0 : delta / hi, hi};
+        };
+        const Hsv source = toHsv(p.r, p.g, p.b);
         int best = 0;
-        long bestDistance = std::numeric_limits<long>::max();
+        double bestDistance = std::numeric_limits<double>::max();
         for (int i = 0; i < 16; ++i) {
-            const long dr = static_cast<int>(p.r) - palette[i][0];
-            const long dg = static_cast<int>(p.g) - palette[i][1];
-            const long db = static_cast<int>(p.b) - palette[i][2];
-            // Human vision is more sensitive to green than red or blue.
-            const long distance = 3 * dr * dr + 6 * dg * dg + 2 * db * db;
+            const Hsv candidate = toHsv(palette[i][0], palette[i][1], palette[i][2]);
+            const bool neutral = candidate.saturation < 0.05;
+            // Keep a visible hue for colored pixels instead of collapsing muted
+            // greens, blues, and reds to gray just because their RGB distance is small.
+            if (source.saturation > 0.18 && source.value > 0.12 && neutral) continue;
+            double hueDistance = std::abs(source.hue - candidate.hue);
+            hueDistance = std::min(hueDistance, 360.0 - hueDistance) / 180.0;
+            if (neutral) hueDistance = 0.0;
+            const double ds = source.saturation - candidate.saturation;
+            const double dv = source.value - candidate.value;
+            const double distance = 2.0 * ds * ds + dv * dv +
+                                    2.0 * hueDistance * hueDistance *
+                                        std::max(source.saturation, candidate.saturation);
             if (distance < bestDistance) { bestDistance = distance; best = i; }
         }
         return Color{static_cast<uint8_t>(best)};
