@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <vector>
@@ -75,6 +76,11 @@ public:
 
     void nextTab() { switchTo(current_ + 1); }
     void prevTab() { switchTo(current_ - 1); }
+    // Direct access (Alt+1..Alt+9): out-of-range numbers clamp to the last tab.
+    void goToTab(int idx) {
+        if (tabs_.empty()) return;
+        switchTo(std::clamp(idx, 0, static_cast<int>(tabs_.size()) - 1));
+    }
 
     // --- Folder / file tree ------------------------------------------------
 

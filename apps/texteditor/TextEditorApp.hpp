@@ -61,6 +61,13 @@ public:
         // to PgUp/PgDn (text control) — per the kernel keymap.
         view->pushShortcut({false, Key::PageDown, std::nullopt, true}, [raw] { raw->nextTab(); });
         view->pushShortcut({false, Key::PageUp, std::nullopt, true}, [raw] { raw->prevTab(); });
+        // Alt+1..Alt+9 = go directly to tab N. A single ESC + digit on every
+        // console and emulator, so it keeps working where the keymap eats or
+        // rewrites the PgUp/PgDn combinations (e.g. console scrollback).
+        for (char32_t d = U'1'; d <= U'9'; ++d) {
+            view->pushShortcut({false, Key::Char, d, true},
+                               [raw, idx = static_cast<int>(d - U'1')] { raw->goToTab(idx); });
+        }
 
         return view;
     }
