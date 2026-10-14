@@ -143,7 +143,7 @@ private:
             const bool neutral = candidate.saturation < 0.05;
             // Keep a visible hue for colored pixels instead of collapsing muted
             // greens, blues, and reds to gray just because their RGB distance is small.
-            if (source.saturation > 0.18 && source.value > 0.12 && neutral) continue;
+            if (source.saturation > 0.10 && source.value > 0.12 && neutral) continue;
             double hueDistance = std::abs(source.hue - candidate.hue);
             hueDistance = std::min(hueDistance, 360.0 - hueDistance) / 180.0;
             if (neutral) hueDistance = 0.0;
@@ -155,6 +155,10 @@ private:
             if (distance < bestDistance) { bestDistance = distance; best = i; }
         }
         return Color{static_cast<uint8_t>(best)};
+    }
+
+    static int luminance(const RgbPixel& p) {
+        return (2126 * p.r + 7152 * p.g + 722 * p.b) / 10000;
     }
 
     RgbPixel averageRegion(double x0, double y0, double x1, double y1) const {
@@ -176,7 +180,7 @@ private:
     }
 
     void drawImage(Screen& screen, int viewH) {
-        static constexpr char32_t ramp[] = U" .:-=+*#%@";
+        static constexpr char32_t shadeRamp[] = U" .:|░▒▓█";
         const double sourceW = 100.0 / zoomPercent_;
         const double sourceH = 200.0 / zoomPercent_;
         const double maxX = std::max(0.0, image_.width() - bounds_.w * sourceW);
@@ -197,10 +201,41 @@ private:
                     static_cast<uint8_t>((static_cast<unsigned>(top.r) + bottom.r) / 2),
                     static_cast<uint8_t>((static_cast<unsigned>(top.g) + bottom.g) / 2),
                     static_cast<uint8_t>((static_cast<unsigned>(top.b) + bottom.b) / 2)};
-                const int luminance = (2126 * color.r + 7152 * color.g + 722 * color.b) / 10000;
-                const std::size_t shade = static_cast<std::size_t>(luminance) * 10 / 256;
-                screen.set(bounds_.x + x, bounds_.y + y,
-                           Cell{ramp[shade], nearestAnsi(top), nearestAnsi(bottom), StyleNone});
+                const int topLuma = luminance(top);
+                const int bottomLuma = luminance(bottom);
+                const int maxChannel = std::max({color.r, color.g, color.b});
+                const int minChannel = std::min({color.r, color.g, color.b});
+                const double saturation = maxChannel == 0 ? 0.0
+                    : static_cast<double>(maxChannel - minChannel) / maxChannel;
+
+                char32_t glyph;
+                Color fg, bg;
+                if (saturation > 0.15 || std::abs(topLuma - bottomLuma) > 24) {
+                    // Use a half-block to preserve both source colors in one cell.
+                    // The brighter half determines whether it is an upper or lower block.
+                    if (bottomLuma > topLuma) {
+                        glyph = U'▄';
+                        fg = nearestAnsi(bottom);
+                        bg = nearestAnsi(top);
+                    } else {
+                        glyph = U'▀';
+                        fg = nearestAnsi(top);
+                        bg = nearestAnsi(bottom);
+                    }
+                } else {
+                    // Low-chroma areas use a small brightness ramp for fine detail,
+                    // with two related ANSI colors instead of a flat black background.
+                    const std::size_t shade = static_cast<std::size_t>(topLuma + bottomLuma) * 8 / 512;
+                    glyph = shadeRamp[shade];
+                    fg = nearestAnsi(color);
+                    const RgbPixel darker{
+                        static_cast<uint8_t>(color.r * 0.45),
+                        static_cast<uint8_t>(color.g * 0.45),
+                        static_cast<uint8_t>(color.b * 0.45)};
+                    bg = nearestAnsi(darker);
+                    if (bg == fg && fg.index != colors::Black.index) bg = colors::Black;
+                }
+                screen.set(bounds_.x + x, bounds_.y + y, Cell{glyph, fg, bg, StyleNone});
             }
         }
     }
