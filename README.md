@@ -127,9 +127,9 @@ erases. `F3` opens the color palette. `Ctrl+N`, `Ctrl+O`, `Ctrl+S`, and
 
 Open PNG, JPEG, GIF, BMP, TGA, PSD/HDR, PIC, or PNM files (PBM/PGM/PPM). The
 decoder is bundled, so no system image libraries are required. Each terminal
-cell combines foreground/background ANSI colors sampled from the image. Colored
-areas use half-blocks; subtle areas use a brightness ramp (`.`, `|`, and shade
-blocks). Use
+cell uses a foreground/background pair from the 16-color palette. Saturated
+colors are dithered with density blocks; strong vertical detail uses half-blocks,
+and low-chroma areas use a brightness ramp (`.`, `|`, and shade blocks). Use
 arrow keys to pan, `+`/`-` to zoom, `F` to fit the image, and `0` for actual size.
 
 ### Terminal

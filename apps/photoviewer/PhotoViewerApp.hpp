@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -114,45 +115,120 @@ public:
     int minHeight() const override { return 4; }
 
 private:
-    static Color nearestAnsi(const RgbPixel& p) {
-        static constexpr int palette[16][3] = {
-            {0, 0, 0}, {205, 0, 0}, {0, 205, 0}, {205, 205, 0},
-            {0, 0, 238}, {205, 0, 205}, {0, 205, 205}, {229, 229, 229},
-            {127, 127, 127}, {255, 0, 0}, {0, 255, 0}, {255, 255, 0},
-            {92, 92, 255}, {255, 0, 255}, {0, 255, 255}, {255, 255, 255}};
-        struct Hsv { double hue, saturation, value; };
-        const auto toHsv = [](int r, int g, int b) {
-            const double rf = r / 255.0, gf = g / 255.0, bf = b / 255.0;
-            const double hi = std::max({rf, gf, bf});
-            const double lo = std::min({rf, gf, bf});
-            const double delta = hi - lo;
-            double hue = 0.0;
-            if (delta > 0.0) {
-                if (hi == rf) hue = 60.0 * std::fmod((gf - bf) / delta, 6.0);
-                else if (hi == gf) hue = 60.0 * ((bf - rf) / delta + 2.0);
-                else hue = 60.0 * ((rf - gf) / delta + 4.0);
-                if (hue < 0.0) hue += 360.0;
+    struct Hsv { double hue, saturation, value; };
+    struct ColorBlend { Hsv hsv, fgHsv, bgHsv; Color fg, bg; char32_t glyph; };
+
+    // Default Linux virtual-console ANSI palette (VGA colors), rather than the
+    // brighter xterm palette. PhotoViewer is tuned for Fenrir's Linux TTY target.
+    static const std::array<RgbPixel, 16>& ansiPalette() {
+        static const std::array<RgbPixel, 16> palette{{
+            {0, 0, 0},       {170, 0, 0},     {0, 170, 0},     {170, 85, 0},
+            {0, 0, 170},     {170, 0, 170},   {0, 170, 170},   {170, 170, 170},
+            {85, 85, 85},    {255, 85, 85},   {85, 255, 85},   {255, 255, 85},
+            {85, 85, 255},   {255, 85, 255},  {85, 255, 255},  {255, 255, 255}}};
+        return palette;
+    }
+
+    static Hsv toHsv(const RgbPixel& p) {
+        const double r = p.r / 255.0, g = p.g / 255.0, b = p.b / 255.0;
+        const double hi = std::max({r, g, b});
+        const double lo = std::min({r, g, b});
+        const double delta = hi - lo;
+        double hue = 0.0;
+        if (delta > 0.0) {
+            if (hi == r) hue = 60.0 * std::fmod((g - b) / delta, 6.0);
+            else if (hi == g) hue = 60.0 * ((b - r) / delta + 2.0);
+            else hue = 60.0 * ((r - g) / delta + 4.0);
+            if (hue < 0.0) hue += 360.0;
+        }
+        return {hue, hi == 0.0 ? 0.0 : delta / hi, hi};
+    }
+
+    static double colorDistance(const Hsv& a, const Hsv& b) {
+        if (a.saturation > 0.15 && b.saturation < 0.05)
+            return std::numeric_limits<double>::max();
+        double hue = std::abs(a.hue - b.hue);
+        hue = std::min(hue, 360.0 - hue) / 180.0;
+        if (a.saturation < 0.05 || b.saturation < 0.05) hue = 0.0;
+        const double ds = a.saturation - b.saturation;
+        const double dv = a.value - b.value;
+        // Preserve hue first; value and saturation select the closest shade of it.
+        return 12.0 * hue * hue + 0.7 * dv * dv + 0.18 * ds * ds;
+    }
+
+    static bool hueCompatible(const Hsv& source, const Hsv& candidate) {
+        if (source.saturation <= 0.08 || candidate.saturation < 0.05) return true;
+        // Linux TTY ANSI yellow is the VGA brown slot; keep yellow-green pixels
+        // on green palette entries instead of turning tree foliage orange/brown.
+        if (source.hue >= 65.0 && source.hue <= 145.0)
+            return candidate.hue >= 90.0 && candidate.hue <= 150.0;
+        double hue = std::abs(source.hue - candidate.hue);
+        hue = std::min(hue, 360.0 - hue);
+        // Dither between nearby hues only. Mixing distant colors such as red
+        // and green can look brown even when their numeric RGB average is close.
+        return hue <= 55.0;
+    }
+
+    static const std::vector<ColorBlend>& colorBlends() {
+        static const std::vector<ColorBlend> blends = [] {
+            const auto& palette = ansiPalette();
+            std::vector<ColorBlend> result;
+            result.reserve(16 + 16 * 16 * 3);
+            for (int i = 0; i < 16; ++i) {
+                const Hsv hsv = toHsv(palette[i]);
+                result.push_back({hsv, hsv, hsv, Color{static_cast<uint8_t>(i)},
+                                  Color{static_cast<uint8_t>(i)}, U'█'});
             }
-            return Hsv{hue, hi == 0.0 ? 0.0 : delta / hi, hi};
-        };
-        const Hsv source = toHsv(p.r, p.g, p.b);
+            // Shade glyphs approximate these foreground coverage levels.
+            constexpr double coverage[] = {0.25, 0.5, 0.75};
+            constexpr char32_t glyphs[] = {U'░', U'▒', U'▓'};
+            for (int fg = 0; fg < 16; ++fg) {
+                for (int bg = 0; bg < 16; ++bg) {
+                    if (fg == bg) continue;
+                    for (std::size_t level = 0; level < 3; ++level) {
+                        const double f = coverage[level];
+                        const auto mix = [f](uint8_t a, uint8_t b) {
+                            return static_cast<uint8_t>(a * f + b * (1.0 - f) + 0.5);
+                        };
+                        const RgbPixel blended{mix(palette[fg].r, palette[bg].r),
+                                               mix(palette[fg].g, palette[bg].g),
+                                               mix(palette[fg].b, palette[bg].b)};
+                        result.push_back({toHsv(blended), toHsv(palette[fg]), toHsv(palette[bg]),
+                                          Color{static_cast<uint8_t>(fg)},
+                                          Color{static_cast<uint8_t>(bg)}, glyphs[level]});
+                    }
+                }
+            }
+            return result;
+        }();
+        return blends;
+    }
+
+    static Cell ditherColor(const RgbPixel& target) {
+        const Hsv source = toHsv(target);
+        const ColorBlend* best = nullptr;
+        double error = std::numeric_limits<double>::max();
+        for (const ColorBlend& candidate : colorBlends()) {
+            if (!hueCompatible(source, candidate.fgHsv) ||
+                !hueCompatible(source, candidate.bgHsv))
+                continue;
+            const double distance = colorDistance(source, candidate.hsv);
+            if (distance < error) { error = distance; best = &candidate; }
+        }
+        return best ? Cell{best->glyph, best->fg, best->bg, StyleNone}
+                    : Cell{U'█', colors::White, colors::Black, StyleNone};
+    }
+
+    static Color nearestAnsi(const RgbPixel& p) {
+        const auto& palette = ansiPalette();
+        const Hsv source = toHsv(p);
         int best = 0;
-        double bestDistance = std::numeric_limits<double>::max();
+        double error = std::numeric_limits<double>::max();
         for (int i = 0; i < 16; ++i) {
-            const Hsv candidate = toHsv(palette[i][0], palette[i][1], palette[i][2]);
-            const bool neutral = candidate.saturation < 0.05;
-            // Keep a visible hue for colored pixels instead of collapsing muted
-            // greens, blues, and reds to gray just because their RGB distance is small.
-            if (source.saturation > 0.10 && source.value > 0.12 && neutral) continue;
-            double hueDistance = std::abs(source.hue - candidate.hue);
-            hueDistance = std::min(hueDistance, 360.0 - hueDistance) / 180.0;
-            if (neutral) hueDistance = 0.0;
-            const double ds = source.saturation - candidate.saturation;
-            const double dv = source.value - candidate.value;
-            const double distance = 2.0 * ds * ds + dv * dv +
-                                    2.0 * hueDistance * hueDistance *
-                                        std::max(source.saturation, candidate.saturation);
-            if (distance < bestDistance) { bestDistance = distance; best = i; }
+            const Hsv candidate = toHsv(palette[i]);
+            if (!hueCompatible(source, candidate)) continue;
+            const double distance = colorDistance(source, candidate);
+            if (distance < error) { error = distance; best = i; }
         }
         return Color{static_cast<uint8_t>(best)};
     }
@@ -210,17 +286,19 @@ private:
 
                 char32_t glyph;
                 Color fg, bg;
-                if (saturation > 0.15 || std::abs(topLuma - bottomLuma) > 24) {
-                    // Use a half-block to preserve both source colors in one cell.
-                    // The brighter half determines whether it is an upper or lower block.
+                if (saturation > 0.15) {
+                    // Dither two ANSI colors with a block shade to approximate
+                    // hues that are between palette entries (such as olive green).
+                    const Cell blended = ditherColor(color);
+                    glyph = blended.character;
+                    fg = blended.fg;
+                    bg = blended.bg;
+                } else if (std::abs(topLuma - bottomLuma) > 24) {
+                    // Preserve strong vertical contrast with a two-color half block.
                     if (bottomLuma > topLuma) {
-                        glyph = U'▄';
-                        fg = nearestAnsi(bottom);
-                        bg = nearestAnsi(top);
+                        glyph = U'▄'; fg = nearestAnsi(bottom); bg = nearestAnsi(top);
                     } else {
-                        glyph = U'▀';
-                        fg = nearestAnsi(top);
-                        bg = nearestAnsi(bottom);
+                        glyph = U'▀'; fg = nearestAnsi(top); bg = nearestAnsi(bottom);
                     }
                 } else {
                     // Low-chroma areas use a small brightness ramp for fine detail,
