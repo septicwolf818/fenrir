@@ -797,6 +797,7 @@ public:
 
     std::unique_ptr<Widget> createView(AppContext& ctx) override {
         auto view = std::make_unique<TerminalView>(ctx);
+        addExitMenu(*view, ctx);
         addAboutMenu(*view, ctx, U"Terminal",
                      U"Run a shell in a window inside the Fenrir workspace.");
         return view;

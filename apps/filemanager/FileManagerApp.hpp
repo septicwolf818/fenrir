@@ -33,6 +33,7 @@ public:
         {U"Navigation", std::vector<MenuItem>{
             {U"Up (Backspace)", [raw] { raw->goUp(); }},
         }}});
+        addExitMenu(*view, ctx);
         addAboutMenu(*view, ctx, U"File Manager",
                      U"Browse, copy, move, rename, and open files in a dual-panel workspace.");
 

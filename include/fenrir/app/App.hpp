@@ -51,6 +51,11 @@ public:
             ctx.showAbout(name, text);
         }}}});
     }
+
+    // File > Exit in every app (closes the window, dirty-guarded like Ctrl+W).
+    static void addExitMenu(Widget& view, AppContext& ctx) {
+        view.pushMenuItem(U"File", {U"Exit (Ctrl+W)", [&ctx] { ctx.closeWindow(); }});
+    }
 };
 
 } // namespace fenrir

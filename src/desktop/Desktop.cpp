@@ -518,6 +518,14 @@ void Desktop::saveFile(const std::string& startDir, const std::string& suggested
                      std::move(onCancel));
 }
 
+void Desktop::closeWindow() {
+    // File > Exit in apps: the same dirty-guard as Ctrl+W (a dirty window
+    // asks for confirmation; the close itself is always deferred past the
+    // menu callback via closePending_).
+    Window* w = wm_.focused();
+    closeWithConfirm(*this, w, [this, w] { closePending_.push_back(w); });
+}
+
 void Desktop::openDialog(std::u32string title, std::unique_ptr<Dialog> content, OnDialogResult onResult) {
     Window* requester = wm_.focused();
     Dialog* raw = content.get();

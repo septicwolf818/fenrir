@@ -49,6 +49,10 @@ public:
     virtual void openDialog(std::u32string title, std::unique_ptr<Dialog> content,
                             OnDialogResult onResult) = 0;
 
+    // Closes the focused window (File > Exit in apps). Dirty content asks
+    // for confirmation first, exactly like Ctrl+W.
+    virtual void closeWindow() = 0;
+
     // --- Asynchronous data sources (e.g. a terminal PTY) --------------------
     // Registers an fd polled once per tick (poll POLLIN, non-blocking); onReady
     // is called when data is available on fd. The source MUST be removed

@@ -544,6 +544,7 @@ public:
             {U"Undo (Ctrl+Z)", [raw] { raw->undoLast(); }},
             {U"Colors (F3)", [raw] { raw->showPalette(); }},
         }}});
+        addExitMenu(*view, ctx);
         addAboutMenu(*view, ctx, U"Paint",
                      U"Draw character-cell images using the 16-color ANSI palette.");
 

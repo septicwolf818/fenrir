@@ -43,6 +43,7 @@ public:
             {U"Tab = spaces (Ctrl+Y)", [raw] { raw->toggleSpaces(); }},
             {U"Toggle syntax highlighting", [raw] { raw->toggleSyntaxHighlighting(); }},
         }}});
+        addExitMenu(*view, ctx);
         addAboutMenu(*view, ctx, U"Text Editor",
                      U"Edit plain-text files with tabs, a file tree, and optional syntax highlighting.");
 

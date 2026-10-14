@@ -21,6 +21,7 @@ public:
         raw->setMenuTabs({
             {U"File", std::vector<MenuItem>{std::move(clearItem)}}
         });
+        addExitMenu(*view, ctx);
         addAboutMenu(*view, ctx, U"Calculator",
                      U"A keyboard-driven four-function calculator. Type numbers and operators, "
                      U"or navigate buttons with arrows and activate them with Enter/Space.");

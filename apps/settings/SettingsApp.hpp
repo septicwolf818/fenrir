@@ -154,6 +154,7 @@ public:
 
     std::unique_ptr<Widget> createView(AppContext& ctx) override {
         auto view = std::make_unique<SettingsView>(ctx);
+        addExitMenu(*view, ctx);
         addAboutMenu(*view, ctx, U"Settings",
                      U"Choose the desktop theme, clock, cursor, and editor preferences.");
         return view;

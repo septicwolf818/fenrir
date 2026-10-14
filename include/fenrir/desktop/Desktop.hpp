@@ -61,6 +61,7 @@ public:
     void openFileWith(const std::string& path) override;
     void openDialog(std::u32string title, std::unique_ptr<Dialog> content,
                     OnDialogResult onResult) override;
+    void closeWindow() override;
     // Asynchronous sources (e.g. the terminal PTY) — polled in tickOnce.
     void addFdSource(int fd, std::function<void()> onReady) override;
     void removeFdSource(int fd) override;

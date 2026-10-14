@@ -787,6 +787,7 @@ public:
         {U"Event", std::vector<MenuItem>{
             {U"New (Ctrl+N)", [raw] { raw->newEvent(); }},
         }}});
+        addExitMenu(*view, ctx);
         addAboutMenu(*view, ctx, U"Calendar",
                      U"Plan events in month, week, and day views.");
 

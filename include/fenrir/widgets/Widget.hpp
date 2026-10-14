@@ -79,6 +79,17 @@ public:
     const std::vector<MenuTab>& menuTabs() const { return menuTabs_; }
     void setMenuTabs(std::vector<MenuTab> tabs) { menuTabs_ = std::move(tabs); }
     void pushMenuTab(MenuTab tab) { menuTabs_.push_back(std::move(tab)); }
+    // Appends an item to a tab (e.g. Exit to File); a missing tab is created
+    // FIRST so File stays ahead of the other tabs.
+    void pushMenuItem(std::u32string tabName, MenuItem item) {
+        for (auto& tab : menuTabs_) {
+            if (tab.first == tabName) {
+                tab.second.push_back(std::move(item));
+                return;
+            }
+        }
+        menuTabs_.insert(menuTabs_.begin(), {std::move(tabName), {std::move(item)}});
+    }
 
     // Keyboard shortcuts for this app.
     const std::vector<std::pair<KeyShortcut, std::function<void()>>>& shortcuts() const { return shortcuts_; }
