@@ -166,11 +166,17 @@ private:
             for (int x = 0; x < bounds_.w; ++x) {
                 const double x0 = panX_ + x * sourceW;
                 if (x0 >= image_.width()) break;
-                const RgbPixel color = averageRegion(x0, y0, x0 + sourceW, y0 + sourceH);
+                const double yMid = y0 + sourceH / 2.0;
+                const RgbPixel top = averageRegion(x0, y0, x0 + sourceW, yMid);
+                const RgbPixel bottom = averageRegion(x0, yMid, x0 + sourceW, y0 + sourceH);
+                const RgbPixel color{
+                    static_cast<uint8_t>((static_cast<unsigned>(top.r) + bottom.r) / 2),
+                    static_cast<uint8_t>((static_cast<unsigned>(top.g) + bottom.g) / 2),
+                    static_cast<uint8_t>((static_cast<unsigned>(top.b) + bottom.b) / 2)};
                 const int luminance = (2126 * color.r + 7152 * color.g + 722 * color.b) / 10000;
                 const std::size_t shade = static_cast<std::size_t>(luminance) * 10 / 256;
                 screen.set(bounds_.x + x, bounds_.y + y,
-                           Cell{ramp[shade], nearestAnsi(color), colors::Black, StyleNone});
+                           Cell{ramp[shade], nearestAnsi(top), nearestAnsi(bottom), StyleNone});
             }
         }
     }

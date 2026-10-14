@@ -126,8 +126,9 @@ erases. `F3` opens the color palette. `Ctrl+N`, `Ctrl+O`, `Ctrl+S`, and
 ### Photo Viewer
 
 Open PNG, JPEG, GIF, BMP, TGA, PSD/HDR, PIC, or PNM files (PBM/PGM/PPM). The
-decoder is bundled, so no system image libraries are required. The viewer maps
-image colors to the 16 ANSI colors and luminance to terminal characters. Use
+decoder is bundled, so no system image libraries are required. Each terminal
+cell combines foreground/background ANSI colors sampled from the image with a
+character shade based on average luminance. Use
 arrow keys to pan, `+`/`-` to zoom, `F` to fit the image, and `0` for actual size.
 
 ### Terminal
