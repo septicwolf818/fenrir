@@ -1,5 +1,7 @@
 #include "fenrir/input/KeyParser.hpp"
 
+#include <string>
+
 namespace fenrir {
 
 std::pair<char32_t, int> KeyParser::decodeUtf8(std::string_view data) {
@@ -170,8 +172,94 @@ KeyEvent KeyParser::parseEscapeSequence(std::string_view seq) const {
     return ev;
 }
 
+std::size_t KeyParser::incompleteTailStart(std::string_view s) {
+    const std::size_t n = s.size();
+    if (n == 0) return std::string_view::npos;
+
+    auto utf8Need = [](unsigned char lead) -> std::size_t {
+        if ((lead & 0xE0) == 0xC0) return 2;
+        if ((lead & 0xF0) == 0xE0) return 3;
+        if ((lead & 0xF8) == 0xF0) return 4;
+        return 0;
+    };
+
+    // Trailing incomplete UTF-8 (a cut multi-byte char, possibly Alt-prefixed).
+    std::size_t lead = n;
+    while (lead > 0 && (static_cast<unsigned char>(s[lead - 1]) & 0xC0) == 0x80) --lead;
+    if (lead < n) {
+        const std::size_t need = utf8Need(static_cast<unsigned char>(s[lead]));
+        if (need > 0 && n - lead < need) {
+            std::size_t start = lead;
+            if (start > 0 && static_cast<unsigned char>(s[start - 1]) == 0x1b) --start;
+            return start;
+        }
+    } else {
+        const std::size_t need = utf8Need(static_cast<unsigned char>(s[n - 1]));
+        if (need > 0) {
+            std::size_t start = n - 1;
+            if (start > 0 && static_cast<unsigned char>(s[start - 1]) == 0x1b) --start;
+            return start;
+        }
+    }
+
+    // Trailing incomplete escape sequence: the last ESC whose suffix has no
+    // final byte yet. Leading ESCs absorbed as Alt-prefixes belong to the
+    // stashed tail as well (e.g. the first half of a split Alt+PgUp).
+    for (std::size_t p = n; p-- > 0;) {
+        if (s[p] != 0x1b) continue;
+        std::size_t start = p;
+        while (start > 0 && s[start - 1] == 0x1b) --start;
+        std::size_t k = p + 1;
+        while (k < n && s[k] == 0x1b) ++k; // swallowed Alt-prefixes
+        if (k >= n) return start;          // trailing ESC(s)
+        const char c1 = s[k];
+        if (c1 == '[') {
+            std::size_t m = k + 1;
+            if (m < n && s[m] == '[') ++m; // Linux console [[ F-key intro
+            while (m < n && ((s[m] >= '0' && s[m] <= '9') || s[m] == ';')) ++m;
+            if (m >= n) return start; // parameters but no final byte yet
+            break;                    // complete sequence — stop looking left
+        }
+        if (c1 == 'O') {
+            if (k + 1 >= n) return start; // SS3 intro without its final byte
+            break;
+        }
+        // ESC + regular char = complete Alt+char; earlier bytes are settled.
+    }
+    return std::string_view::npos;
+}
+
 std::vector<KeyEvent> KeyParser::feed(const char* data, std::size_t len) {
     std::vector<KeyEvent> out;
+    std::string buf;
+    buf.reserve(pending_.size() + len);
+    buf += pending_;
+    buf.append(data, len);
+    pending_.clear();
+
+    std::size_t cut = buf.size();
+    const std::size_t tail = incompleteTailStart(buf);
+    if (tail != std::string_view::npos) {
+        pending_ = buf.substr(tail);
+        cut = tail;
+    }
+    parseComplete(buf.data(), cut, out);
+    return out;
+}
+
+std::vector<KeyEvent> KeyParser::flush() {
+    std::vector<KeyEvent> out;
+    if (pending_.empty()) return out;
+    // No continuation arrived (read timed out): the held bytes stand alone.
+    // A lone ESC becomes Escape; a partial CSI parses best-effort (Unknown,
+    // ignored downstream) — same as before reassembly existed.
+    std::string rest = std::move(pending_);
+    pending_.clear();
+    parseComplete(rest.data(), rest.size(), out);
+    return out;
+}
+
+void KeyParser::parseComplete(const char* data, std::size_t len, std::vector<KeyEvent>& out) {
     std::size_t i = 0;
     while (i < len) {
         unsigned char b = static_cast<unsigned char>(data[i]);
@@ -275,7 +363,6 @@ std::vector<KeyEvent> KeyParser::feed(const char* data, std::size_t len) {
         out.push_back(KeyEvent{Key::Char, cp, false});
         i += static_cast<std::size_t>(consumed);
     }
-    return out;
 }
 
 } // namespace fenrir

@@ -1077,7 +1077,14 @@ void Desktop::tickOnce() {
         cursorBlinkState_ = true; // Keep the cursor visible while typing.
         lastBlinkToggle_ = now;
         for (const KeyEvent& ev : keyParser_.feed(buf, n)) handleKey(ev);
-    } else if (settings::active.cursorBlink) {
+    } else {
+        // Read timed out: no more bytes are coming imminently, so any escape
+        // sequence the parser held back for reassembly stands alone (a lone
+        // Escape, or a truncated sequence). Drain it now rather than leaving
+        // a pressed Escape unhandled until the next keypress.
+        for (const KeyEvent& ev : keyParser_.flush()) handleKey(ev);
+    }
+    if (settings::active.cursorBlink) {
         // cursor_blink=0 in settings makes the cursor static.
         constexpr auto kBlinkInterval = std::chrono::milliseconds(400);
         if (now - lastBlinkToggle_ >= kBlinkInterval) {
