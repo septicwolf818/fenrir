@@ -12,18 +12,19 @@ namespace fenrir {
 // Escape sequences split across read() calls are reassembled: a trailing
 // incomplete sequence (a lone ESC, a partial CSI/SS3, a cut UTF-8 char) is
 // held in a pending buffer and prepended to the next feed(). This matters
-// for Alt+keys on a TTY (Alt+PgUp = ESC ESC [ 5 ~ — five bytes that may
+// for Alt+keys on a TTY (e.g. Alt+Left = ESC ESC [ D — bytes that may
 // arrive in two reads over SSH/tmux/latency): without reassembly the lone
 // ESC becomes a stray Escape and the rest a plain (unmodified) key.
 //
-// A held ESC is only released by flush(), which Desktop calls when a read
-// times out (no more bytes are coming imminently): a genuinely lone Escape
-// then arrives at most one idle tick late, while split sequences always
-// reassemble correctly. Callers must pump flush() on empty reads.
+// The holder never waits: use wantsMore() right after feed() to peek for
+// the missing bytes with a short timeout, and flush() to release a held
+// ESC as a lone Escape when nothing follows. Callers must drain via
+// flush() on empty reads as a safety net.
 class KeyParser {
 public:
     std::vector<KeyEvent> feed(const char* data, std::size_t len);
     std::vector<KeyEvent> flush();
+    bool wantsMore() const { return !pending_.empty(); }
 
 private:
     KeyEvent parseEscapeSequence(std::string_view seq) const;

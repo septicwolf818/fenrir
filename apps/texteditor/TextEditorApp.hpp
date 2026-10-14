@@ -34,8 +34,8 @@ public:
             {U"Save (Ctrl+S)", [raw] { raw->save(); }},
             {U"Save as...", [raw] { raw->saveAs(); }},
             {U"Close tab (Ctrl+T)", [raw] { raw->closeTab(); }},
-            {U"Previous tab (Alt+PgUp)", [raw] { raw->prevTab(); }},
-            {U"Next tab (Alt+PgDn)", [raw] { raw->nextTab(); }},
+            {U"Previous tab (F3)", [raw] { raw->prevTab(); }},
+            {U"Next tab (F4)", [raw] { raw->nextTab(); }},
         }},
         {U"Format", std::vector<MenuItem>{
             {U"Line wrap (Ctrl+E)", [raw] { raw->toggleWrap(); }},
@@ -55,12 +55,12 @@ public:
         view->pushShortcut({true, Key::Char, U'y'}, [raw] { raw->toggleSpaces(); });
         view->pushShortcut({true, Key::Char, U'd'}, [raw] { raw->openFolder(); });
         view->pushShortcut({true, Key::Char, U'b'}, [raw] { raw->toggleTreeFocus(); });
-        // Alt+PgUp/PgDn = previous/next tab. Bare console only.
-        // On Linux: Alt = ESC prefix, so the sequences stay distinguishable
-        // (Alt+Tab too, for windows). Ctrl+PgUp/PgDn on the console has IDENTICAL bytes
-        // to PgUp/PgDn (text control) — per the kernel keymap.
-        view->pushShortcut({false, Key::PageDown, std::nullopt, true}, [raw] { raw->nextTab(); });
-        view->pushShortcut({false, Key::PageUp, std::nullopt, true}, [raw] { raw->prevTab(); });
+        // F3/F4 = previous/next tab. Plain function keys reach the app on
+        // every console and emulator, unlike Alt+PgUp/PgDn (eaten or sent
+        // without the Alt bit by some keymaps) and Alt+Left/Right (the
+        // Linux console grabs those for VT switching before we see them).
+        view->pushShortcut({false, Key::F3, std::nullopt, false}, [raw] { raw->prevTab(); });
+        view->pushShortcut({false, Key::F4, std::nullopt, false}, [raw] { raw->nextTab(); });
         // Alt+1..Alt+9 = go directly to tab N. A single ESC + digit on every
         // console and emulator, so it keeps working where the keymap eats or
         // rewrites the PgUp/PgDn combinations (e.g. console scrollback).

@@ -1077,6 +1077,18 @@ void Desktop::tickOnce() {
         cursorBlinkState_ = true; // Keep the cursor visible while typing.
         lastBlinkToggle_ = now;
         for (const KeyEvent& ev : keyParser_.feed(buf, n)) handleKey(ev);
+        // A read ending mid-sequence (split Alt+key) holds its tail in the
+        // parser: peek briefly for the rest instead of stalling Escape until
+        // the next tick. 30 ms is imperceptible for a lone Escape and an
+        // eternity for transport-split bytes, which arrive back-to-back.
+        while (keyParser_.wantsMore()) {
+            const std::size_t m = terminal_.read(buf, sizeof(buf), 30);
+            if (m == 0) {
+                for (const KeyEvent& ev : keyParser_.flush()) handleKey(ev);
+            } else {
+                for (const KeyEvent& ev : keyParser_.feed(buf, m)) handleKey(ev);
+            }
+        }
     } else {
         // Read timed out: no more bytes are coming imminently, so any escape
         // sequence the parser held back for reassembly stands alone (a lone

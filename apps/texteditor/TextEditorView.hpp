@@ -21,7 +21,8 @@ namespace fenrir::apps {
 // Every open tab = its own TextArea (separate buffer, cursor, path).
 // Ctrl+N = new tab (nothing is lost — no guard needed, it's a fresh buffer),
 // Ctrl+O = open in a new tab (already open = switches), Ctrl+T =
-// close tab (dirty asks for confirmation), Alt+PgDn/PgUp = next/previous.
+// close tab (dirty asks for confirmation), F3/F4 = previous/next tab,
+// Alt+1..Alt+9 = go directly to a tab.
 // dirty() = ANY tab is dirty — the window-close guard protects everything.
 // Settings (line numbers, spaces instead of tabs, syntax highlighting) are
 // shared by all tabs and stored in prefs::forApp("editor").
