@@ -201,7 +201,8 @@ public:
     std::string name() const override { return "Photo Viewer"; }
     std::string id() const override { return "photo-viewer"; }
     std::vector<std::string> fileExtensions() const override {
-        return {"bmp", "pbm", "pgm", "ppm", "pnm"};
+        return {"bmp", "gif", "hdr", "jpeg", "jpg", "pbm", "pic", "pgm", "png",
+                "pnm", "ppm", "psd", "tga"};
     }
 
     std::unique_ptr<Widget> createView(AppContext& ctx) override {

@@ -16,14 +16,14 @@ features rather than system administration.
 - Built-in apps: Text Editor, File Manager, Calculator, Settings, Calendar,
   Paint, Terminal, and Photo Viewer.
 - File associations that open files in the selected app and persist globally.
-- Photo Viewer for uncompressed BMP and PNM images, rendered with ANSI colors
-  and a brightness-to-character ramp.
+- Photo Viewer for common raster formats, rendered with ANSI colors and a
+  brightness-to-character ramp.
 - Reusable widgets for menus, dialogs, lists, text input, file selection,
   directory trees, tabs, and status bars.
 - A terminal window that starts the user's shell in a pseudoterminal and
   supports a practical VT100/xterm subset.
-- No third-party libraries; the build uses C++20 and the platform's POSIX
-  terminal/PTY interfaces.
+- No external libraries are required; the small image decoder is vendored.
+  The build uses C++20 and the platform's POSIX terminal/PTY interfaces.
 - Persistent desktop settings and per-app preferences under
   `~/.config/fenrir/`.
 
@@ -125,9 +125,10 @@ erases. `F3` opens the color palette. `Ctrl+N`, `Ctrl+O`, `Ctrl+S`, and
 
 ### Photo Viewer
 
-Open BMP or PNM files (PBM/PGM/PPM). The viewer maps image colors to the 16 ANSI
-colors and luminance to terminal characters. Use arrow keys to pan, `+`/`-` to
-zoom, `F` to fit the image, and `0` for actual size.
+Open PNG, JPEG, GIF, BMP, TGA, PSD/HDR, PIC, or PNM files (PBM/PGM/PPM). The
+decoder is bundled, so no system image libraries are required. The viewer maps
+image colors to the 16 ANSI colors and luminance to terminal characters. Use
+arrow keys to pan, `+`/`-` to zoom, `F` to fit the image, and `0` for actual size.
 
 ### Terminal
 

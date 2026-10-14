@@ -11,6 +11,8 @@
 #include <system_error>
 #include <vector>
 
+#include "../../third_party/stb_image.h"
+
 namespace fenrir::apps {
 
 struct RgbPixel {
@@ -19,7 +21,7 @@ struct RgbPixel {
     uint8_t b = 0;
 };
 
-// Small dependency-free decoder for uncompressed BMP and PNM (PBM/PGM/PPM).
+// Decode common raster formats into a bounded RGB buffer for terminal rendering.
 class Image {
 public:
     bool load(const std::string& path, std::string& error) {
@@ -42,7 +44,12 @@ public:
         else if (!bytes.empty() && bytes[0] == 'P')
             decoded = decodePnm(bytes, error);
         else
-            error = "Unsupported image format. Use BMP or PNM (PGM/PPM).";
+            error = "Unsupported image format.";
+        if (!decoded) {
+            width_ = height_ = 0;
+            pixels_.clear();
+            decoded = decodeCommon(bytes, error);
+        }
         if (!decoded) {
             width_ = height_ = 0;
             pixels_.clear();
@@ -65,6 +72,51 @@ private:
 
     static bool validDimensions(uint64_t w, uint64_t h) {
         return w > 0 && h > 0 && w <= kMaxPixels && h <= kMaxPixels && w * h <= kMaxPixels;
+    }
+
+    bool decodeCommon(const std::vector<uint8_t>& bytes, std::string& error) {
+        if (bytes.empty() || bytes.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+            error = "Image data is too large or empty.";
+            return false;
+        }
+
+        int w = 0, h = 0, sourceChannels = 0;
+        if (!stbi_info_from_memory(bytes.data(), static_cast<int>(bytes.size()),
+                                   &w, &h, &sourceChannels)) {
+            error = "Unsupported or damaged image.";
+            return false;
+        }
+        if (!validDimensions(static_cast<uint64_t>(w), static_cast<uint64_t>(h))) {
+            error = "Image dimensions exceed the Photo Viewer limit.";
+            return false;
+        }
+
+        stbi_uc* rgba = stbi_load_from_memory(bytes.data(), static_cast<int>(bytes.size()),
+                                              &w, &h, &sourceChannels, STBI_rgb_alpha);
+        if (!rgba) {
+            const char* reason = stbi_failure_reason();
+            error = reason ? reason : "Could not decode image.";
+            return false;
+        }
+        if (!validDimensions(static_cast<uint64_t>(w), static_cast<uint64_t>(h))) {
+            stbi_image_free(rgba);
+            error = "Image dimensions exceed the Photo Viewer limit.";
+            return false;
+        }
+
+        width_ = w;
+        height_ = h;
+        pixels_.resize(static_cast<std::size_t>(w) * static_cast<std::size_t>(h));
+        for (std::size_t i = 0; i < pixels_.size(); ++i) {
+            const unsigned alpha = rgba[i * 4 + 3];
+            pixels_[i] = {
+                static_cast<uint8_t>((rgba[i * 4] * alpha) / 255),
+                static_cast<uint8_t>((rgba[i * 4 + 1] * alpha) / 255),
+                static_cast<uint8_t>((rgba[i * 4 + 2] * alpha) / 255)};
+        }
+        stbi_image_free(rgba);
+        error.clear();
+        return true;
     }
 
     static bool parsePositive(const std::string& token, int& value) {

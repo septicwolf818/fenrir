@@ -50,6 +50,7 @@ endif()
 # it connects Desktop to the registered apps (see apps/shell/main.cpp).
 add_executable(fenrir_desktop
     apps/shell/main.cpp
+    apps/photoviewer/ImageDecoder.cpp
 )
 target_link_libraries(fenrir_desktop PRIVATE fenrir)
 set_target_properties(fenrir_desktop PROPERTIES OUTPUT_NAME fenrir)
