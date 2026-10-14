@@ -22,8 +22,9 @@ struct Theme {
 
     // --- taskbar at the bottom ---
     Color taskbarBg{colors::Black};
-    Color taskbarText{colors::White};
+    Color taskbarText{colors::White}; // inactive window handles
     Color taskbarActiveBg{colors::Gray};
+    Color taskbarActiveText{colors::White}; // separate pair keeps active handles readable
     Color highlightText{colors::Yellow}; // clock, arrows, text accents
 
     // --- window ---

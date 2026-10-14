@@ -34,7 +34,10 @@ namespace fenrir::apps {
 // window shrinks, so the drawing survives resizes in both directions.
 class PaintView : public Widget {
 public:
-    explicit PaintView(AppContext& ctx) : ctx_(ctx) { rows_.assign(1, std::vector<Px>{}); }
+    explicit PaintView(AppContext& ctx, std::string path = {}) : ctx_(ctx) {
+        rows_.assign(1, std::vector<Px>{});
+        if (!path.empty()) loadFrom(path);
+    }
 
     // --- Operations from menu / shortcuts (App wires up the callbacks) --------------------
 
@@ -70,7 +73,7 @@ public:
     void saveAs() {
         const std::string startDir = path_.empty() ? fs::homeDir() : fs::parent(path_);
         const auto token = lifetimeToken();
-        ctx_.saveFile(startDir, "image.txt", [this, token](const std::string& picked) {
+        ctx_.saveFile(startDir, "image.fim", [this, token](const std::string& picked) {
             if (!token.lock()) return;
             if (writeTo(picked)) path_ = picked;
         });
@@ -524,6 +527,8 @@ private:
 class PaintApp : public App {
 public:
     std::string name() const override { return "Paint"; }
+    std::string id() const override { return "paint"; }
+    std::vector<std::string> fileExtensions() const override { return {"fim"}; }
 
     std::unique_ptr<Widget> createView(AppContext& ctx) override {
         auto view = std::make_unique<PaintView>(ctx);
@@ -546,6 +551,10 @@ public:
         view->pushShortcut({true, Key::Char, U'z'}, [raw] { raw->undoLast(); });
 
         return view;
+    }
+
+    std::unique_ptr<Widget> createFileView(AppContext& ctx, const std::string& path) override {
+        return std::make_unique<PaintView>(ctx, path);
     }
 
     Rect preferredBounds(const Rect& desktopArea) const override {

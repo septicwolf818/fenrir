@@ -98,8 +98,8 @@ editing/navigation modes; the Terminal app forwards it to the shell instead.
 | `Delete` | Delete the selection |
 
 Press `Enter` on a file to open it with its associated app. Built-in defaults
-send common text/code extensions to Text Editor and BMP/PNM extensions to
-Photo Viewer. Choosing **Open with** stores overrides in
+send common text/code extensions to Text Editor, `.fim` drawings to Paint, and
+BMP/PNM images to Photo Viewer. Choosing **Open with** stores overrides in
 `~/.config/fenrir/file-associations.ini`.
 
 ### Calculator

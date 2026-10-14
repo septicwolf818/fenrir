@@ -930,11 +930,11 @@ void Desktop::drawMenuBar(Screen& screen) {
 }
 
 void Desktop::drawTaskBar(Screen& screen) {
-    // Themed taskbar: taskbarBg is the background, the active handle is the
-    // "pressed button" (taskbarActiveBg), and accents (clock, arrows) use highlightText.
+    // Themed taskbar: the active handle has its own foreground/background pair;
+    // clock and scroll arrows use the theme accent.
     const auto& t = theme::active;
     const Color barBg = t.taskbarBg;
-    const Color activeFg = t.taskbarText;
+    const Color activeFg = t.taskbarActiveText;
     const Color activeBg = t.taskbarActiveBg;
     const Color inactiveFg = t.taskbarText;
     const Color accent = t.highlightText;

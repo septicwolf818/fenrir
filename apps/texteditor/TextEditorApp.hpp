@@ -5,7 +5,6 @@
 #include <vector>
 
 #include "fenrir/app/App.hpp"
-#include "fenrir/core/FileSystem.hpp"
 #include "TextEditorView.hpp"
 
 namespace fenrir::apps {
@@ -21,9 +20,8 @@ public:
     }
 
     std::unique_ptr<Widget> createView(AppContext& ctx) override {
-        int n = ++instanceCounter_;
-        std::string path = fs::join(fs::homeDir(), "document" + std::to_string(n) + ".txt");
-        auto view = std::make_unique<TextEditorView>(ctx, std::move(path));
+        ++instanceCounter_;
+        auto view = std::make_unique<TextEditorView>(ctx, std::string{});
         TextEditorView* raw = view.get();
 
         view->setMenuTabs({{U"File", std::vector<MenuItem>{
