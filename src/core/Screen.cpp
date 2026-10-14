@@ -42,6 +42,12 @@ void Screen::putText(int x, int y, std::u32string_view text, Color fg, Color bg,
     int cx = x;
     for (char32_t ch : text) {
         if (cx >= width_) break;
+        // Control characters must never reach a cell: the renderer emits cell
+        // content as raw bytes, and e.g. '\n' would move the terminal cursor
+        // and corrupt the positioning of everything drawn after it. Render
+        // them as spaces (1:1 width, layout unchanged); the renderer has its
+        // own backstop that shows them as visible glyphs if any slip through.
+        if (ch == U'\n' || ch == U'\r' || ch == U'\t') ch = U' ';
         set(cx, y, Cell{ch, fg, bg, style});
         ++cx;
     }

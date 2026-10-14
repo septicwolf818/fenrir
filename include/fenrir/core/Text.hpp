@@ -94,9 +94,9 @@ inline std::u32string clip(std::u32string_view s, int width) {
     return std::u32string(s.substr(0, static_cast<std::size_t>(width)));
 }
 
-// Word-wraps text to the given width (dialogs, messages).
+// Word-wraps a single line (no newlines) to the given width.
 // A word longer than the width is broken hard.
-inline std::vector<std::u32string> wrap(std::u32string_view s, int width) {
+inline std::vector<std::u32string> wrapSingleLine(std::u32string_view s, int width) {
     std::vector<std::u32string> out;
     if (width <= 0) return out;
 
@@ -130,7 +130,39 @@ inline std::vector<std::u32string> wrap(std::u32string_view s, int width) {
             line = std::move(word);
         }
     }
-    if (!line.empty() || out.empty()) out.push_back(std::move(line));
+    if (!line.empty()) out.push_back(std::move(line));
+    return out;
+}
+
+// Word-wraps text to the given width (dialogs, messages).
+// A word longer than the width is broken hard.
+// Embedded newlines are hard breaks (a '\n' never ends up inside an
+// output line); blank lines are preserved as empty lines. Without this,
+// multi-line messages (e.g. Dialog texts) would store raw '\n' in screen
+// cells, and the renderer would emit them as control bytes that disrupt
+// cursor positioning on the terminal.
+inline std::vector<std::u32string> wrap(std::u32string_view s, int width) {
+    std::vector<std::u32string> out;
+    if (width <= 0) return out;
+
+    std::size_t paraStart = 0;
+    const std::size_t n = s.size();
+    // Split into paragraphs on '\n' (a trailing '\r' is stripped, so
+    // CRLF text behaves the same as LF text).
+    for (std::size_t i = 0; i <= n; ++i) {
+        if (i == n || s[i] == U'\n') {
+            std::u32string_view para = s.substr(paraStart, i - paraStart);
+            if (!para.empty() && para.back() == U'\r') para.remove_suffix(1);
+            std::vector<std::u32string> wrapped = wrapSingleLine(para, width);
+            if (wrapped.empty()) {
+                out.emplace_back(); // blank line
+            } else {
+                for (auto& line : wrapped) out.push_back(std::move(line));
+            }
+            paraStart = i + 1;
+        }
+    }
+    if (out.empty()) out.emplace_back();
     return out;
 }
 

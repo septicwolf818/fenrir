@@ -75,13 +75,15 @@ void Renderer::present(const Screen& screen) {
                 haveLastStyle = true;
             }
 
-            // ESC (0x1B) from file data (e.g. color sequences saved
-            // by Paint) NEVER reaches the terminal — it would be
-            // interpreted as a command. We show it as the raw glyph
-            // ␛ (U+241B); the remaining sequence characters ('[', '9', '1'...) go
-            // through normally, so the Text Editor SEES raw data instead of rendering colors.
+            // Control characters from cell data (e.g. color sequences saved
+            // by Paint, newlines in file names) NEVER reach the terminal as
+            // raw bytes — they would be interpreted as commands and disrupt
+            // cursor positioning for everything drawn after them. Show them
+            // as visible glyphs from the U+2400 block instead (ESC shows as
+            // ␛ U+241B, so the Text Editor SEES raw data instead of colors).
             char32_t ch = cur.character == 0 ? U' ' : cur.character;
-            if (ch == 0x1B) ch = U'␛';
+            if (ch < 0x20) ch = static_cast<char32_t>(0x2400 + ch);
+            else if (ch == 0x7F) ch = U'␡';
             text::appendUtf8(out, ch);
             previous_[idx] = cur;
 
