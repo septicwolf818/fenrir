@@ -63,11 +63,14 @@ public:
                                                               static_cast<std::size_t>(avail)),
                            t.fieldText, t.fieldBg);
         }
-        // Underline for the active field — still clear when the GUI cursor is not visible.
+        // Bold for the active field — still clear when the GUI cursor is not
+        // visible. Deliberately NOT underline: real Linux consoles remap the
+        // blue+underline combination to cyan, so underline must not carry
+        // meaning in app chrome (child programs in Terminal keep SGR 4).
         if (focused_) {
             for (int x = bounds_.x; x < bounds_.x + bounds_.w; ++x) {
                 Cell c = screen.at(x, bounds_.y);
-                c.style |= StyleUnderline;
+                c.style |= StyleBold;
                 screen.set(x, bounds_.y, c);
             }
         }
