@@ -64,7 +64,7 @@ struct Theme {
 
     // --- text fields ---
     Color fieldBg{colors::White};
-    Color fieldText{colors::Black};
+    Color fieldText{colors::Blue};
 
     // --- status bar / hints ---
     Color statusBg{colors::Gray};
