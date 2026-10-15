@@ -14,6 +14,7 @@
 #include "fenrir/core/Theme.hpp"
 #include "fenrir/widgets/Dialog.hpp"
 #include "fenrir/widgets/StatusBar.hpp"
+#include "fenrir/widgets/TextView.hpp"
 #include "fenrir/widgets/Widget.hpp"
 
 namespace fenrir::apps {
@@ -71,7 +72,8 @@ public:
 
         status_.setBounds(Rect{bounds_.x, bounds_.y + bounds_.h - 1, bounds_.w, 1});
         if (view_ == View::Month) {
-            status_.setText(U"Enter: day Ctrl+N: event PgUp/Dn: month");
+            status_.setText(agendaOverflow_ ? U"Enter: day Ctrl+N: event Alt+Up/Dn: list"
+                                            : U"Enter: day Ctrl+N: event PgUp/Dn: month");
         } else if (view_ == View::Week) {
             status_.setText(multiAtCursor() ? U"Enter: edit Tab: next Del: delete PgUp/Dn: week"
                                             : U"Enter: edit/add Del: delete PgUp/Dn: week");
@@ -90,6 +92,27 @@ public:
         // Ctrl+Up/Down = year (ESC[1;5A / ESC[1;5B) — works in every view.
         if (ev.ctrl && ev.key == Key::Up)   { shiftYear(-1); return KeyEventResult::Consumed; }
         if (ev.ctrl && ev.key == Key::Down) { shiftYear(1);  return KeyEventResult::Consumed; }
+
+        // Alt+Up/Down/PageUp/PageDown/Home/End = scroll the month-view agenda
+        // (plain arrows move the date cursor there). Forward to the TextView
+        // without the Alt flag so it uses its normal scrolling keys.
+        if (view_ == View::Month && ev.alt) {
+            switch (ev.key) {
+                case Key::Up:
+                case Key::Down:
+                case Key::PageUp:
+                case Key::PageDown:
+                case Key::Home:
+                case Key::End: {
+                    if (agenda_.empty()) break; // fall through to date navigation
+                    KeyEvent fwd = ev;
+                    fwd.alt = false;
+                    agenda_.handleKey(fwd);
+                    return KeyEventResult::Consumed;
+                }
+                default: break;
+            }
+        }
 
         switch (ev.key) {
             case Key::Home: jumpToToday(); return KeyEventResult::Consumed;
@@ -265,7 +288,10 @@ private:
 
     void drawMonth(Screen& screen) {
         const auto& t = theme::active;
-        if (bounds_.w < kGridW + 2 || bounds_.h < kMinH) return;
+        if (bounds_.w < kGridW + 2 || bounds_.h < kMinH) {
+            agendaOverflow_ = false;
+            return;
+        }
 
         // Recalculate "today" on every frame — this handles crossing midnight
         // without refreshing the window (same trick as the taskbar clock).
@@ -328,14 +354,25 @@ private:
             ++y;
         }
 
-        // Cursor agenda: one row between the grid and status — event times and
-        // titles for the selected day (blank when there are no events).
+        // Cursor agenda: every event on its own line ("HH:MM title", sorted
+        // by start time) in a scrollable read-only TextView filling the rows
+        // between the grid and the status bar (blank when there are no events).
         const int statusY = bounds_.y + bounds_.h - 1;
-        if (y < statusY) {
-            const std::u32string ag = dayAgenda();
-            if (!ag.empty())
-                screen.putText(bounds_.x, y, text::clip(ag, bounds_.w),
-                               t.highlightText, t.windowBg, StyleBold);
+        const int avail = statusY - y;
+        agendaOverflow_ = false;
+        if (avail > 0) {
+            agenda_.setBounds(Rect{bounds_.x, y, bounds_.w, avail});
+            agenda_.setColors(t.highlightText, t.windowBg);
+            agenda_.setBold(true);
+            agenda_.setLines(agendaLines());
+            if (agendaY_ != year_ || agendaM_ != month_ || agendaD_ != curD_) {
+                agendaY_ = year_;
+                agendaM_ = month_;
+                agendaD_ = curD_;
+                agenda_.scrollToTop();
+            }
+            agenda_.draw(screen);
+            agendaOverflow_ = agenda_.canScrollUp() || agenda_.canScrollDown();
         }
     }
 
@@ -535,21 +572,21 @@ private:
         return false;
     }
 
-    // Events on the cursor day, sorted by start: "HH:MM title  HH:MM title".
-    std::u32string dayAgenda() const {
+    // Events on the cursor day, sorted by start time (then by id to preserve
+    // creation order for ties): one "HH:MM title" line per event.
+    std::vector<std::u32string> agendaLines() const {
         std::vector<const CalEvent*> list;
         for (const auto& e : events_)
             if (e.y == year_ && e.m == month_ && e.d == curD_) list.push_back(&e);
-        if (list.empty()) return {};
-        std::sort(list.begin(), list.end(),
-                  [](const CalEvent* a, const CalEvent* b) { return a->startMin < b->startMin; });
-        std::u32string s;
-        for (std::size_t i = 0; i < list.size(); ++i) {
-            if (i) s += U"  ";
-            s += text::toUtf32(hmStr(list[i]->startMin)) + U" " + text::toUtf32(list[i]->title);
-            if (s.size() > 400) break; // clip() will truncate it when drawing anyway
-        }
-        return s;
+        std::sort(list.begin(), list.end(), [](const CalEvent* a, const CalEvent* b) {
+            if (a->startMin != b->startMin) return a->startMin < b->startMin;
+            return a->id < b->id;
+        });
+        std::vector<std::u32string> out;
+        out.reserve(list.size());
+        for (const auto* e : list)
+            out.push_back(text::toUtf32(hmStr(e->startMin)) + U" " + text::toUtf32(e->title));
+        return out;
     }
 
     // Scroll the visible hours as needed to keep the cursor hour in view.
@@ -686,6 +723,9 @@ private:
     std::string draftTitle_, draftStart_, draftEnd_; // kept after validation errors
     int draftEditId_ = -1;                           // edited draft id (-1 = create)
     StatusBar status_;
+    TextView agenda_; // month view: one line per event on the cursor day
+    int agendaY_ = -1, agendaM_ = -1, agendaD_ = -1; // day shown (scroll resets on change)
+    bool agendaOverflow_ = false; // agenda taller than the space below the grid
 };
 
 inline const char32_t* CalendarView::kDni[7] = {U"Mon", U"Tue", U"Wed", U"Thu", U"Fri", U"Sat", U"Sun"};
