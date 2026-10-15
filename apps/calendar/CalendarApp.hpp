@@ -13,8 +13,8 @@
 #include "fenrir/core/Text.hpp"
 #include "fenrir/core/Theme.hpp"
 #include "fenrir/widgets/Dialog.hpp"
+#include "fenrir/widgets/SelectionList.hpp"
 #include "fenrir/widgets/StatusBar.hpp"
-#include "fenrir/widgets/TextView.hpp"
 #include "fenrir/widgets/Widget.hpp"
 
 namespace fenrir::apps {
@@ -30,8 +30,10 @@ struct CalEvent {
 
 // Calendar — three views sharing the same date cursor (y/m/d + hour):
 //   Month — 7-column grid (Monday first), today and cursor highlighted,
-//           event days marked with '*', and the selected day's agenda
-//           (event times and titles) below the grid.
+//           event days marked with '*', and the selected day's agenda below
+//           the grid: one row per event (time + title, sorted by start).
+//           Tab moves keyboard focus into the agenda — arrows select an
+//           event, Enter edits it, Delete deletes it, Tab returns to the grid.
 //   Week  — 7 columns (Mon..Sun) + a left-hand hour column (00:..23:),
 //           with events drawn as blocks in the daily schedule.
 //   Day   — the same layout, with one full-width column.
@@ -43,6 +45,8 @@ struct CalEvent {
 // Delete removes the event under the cursor (after confirmation).
 // Multiple events in the same hour: the cell draws all of them (the selected
 // one is prefixed with '>'); Tab changes the selection — Enter/Del act on it.
+// In the month view Tab moves keyboard focus into the day's agenda list
+// (arrows select, Enter edits, Delete deletes, Tab returns to the grid).
 // Ctrl+N = new event, Ctrl+T = week, Ctrl+D = day (menu: F2).
 // Events persist in ~/.config/fenrir/apps/calendar.conf (Prefs).
 class CalendarView : public Widget {
@@ -52,6 +56,10 @@ public:
     explicit CalendarView(AppContext& ctx) : ctx_(ctx) {
         jumpToToday();
         loadEvents();
+        // Enter/Space on an agenda row opens the event for editing.
+        agenda_.onSelect = [this](int row) {
+            if (const CalEvent* e = agendaEventAt(row)) eventDialog(e);
+        };
     }
 
     void setView(View v) { view_ = v; }
@@ -72,8 +80,12 @@ public:
 
         status_.setBounds(Rect{bounds_.x, bounds_.y + bounds_.h - 1, bounds_.w, 1});
         if (view_ == View::Month) {
-            status_.setText(agendaOverflow_ ? U"Enter: day Ctrl+N: event Alt+Up/Dn: list"
-                                            : U"Enter: day Ctrl+N: event PgUp/Dn: month");
+            if (agendaFocus_)
+                status_.setText(U"Enter: edit Del: delete Tab: back");
+            else if (hasEvents(year_, month_, curD_))
+                status_.setText(U"Tab: events Enter: day Ctrl+N: event");
+            else
+                status_.setText(U"Enter: day Ctrl+N: event PgUp/Dn: month");
         } else if (view_ == View::Week) {
             status_.setText(multiAtCursor() ? U"Enter: edit Tab: next Del: delete PgUp/Dn: week"
                                             : U"Enter: edit/add Del: delete PgUp/Dn: week");
@@ -93,24 +105,39 @@ public:
         if (ev.ctrl && ev.key == Key::Up)   { shiftYear(-1); return KeyEventResult::Consumed; }
         if (ev.ctrl && ev.key == Key::Down) { shiftYear(1);  return KeyEventResult::Consumed; }
 
-        // Alt+Up/Down/PageUp/PageDown/Home/End = scroll the month-view agenda
-        // (plain arrows move the date cursor there). Forward to the TextView
-        // without the Alt flag so it uses its normal scrolling keys.
-        if (view_ == View::Month && ev.alt) {
+        // Month-view agenda focus (entered with Tab): the SelectionList owns
+        // Up/Down/PageUp/PageDown/Home/End (selection + scrolling) and
+        // Enter/Space (edit via onSelect); Left/Right still change the day,
+        // Delete deletes the selected event, Tab returns to the grid.
+        // No Alt-based scrolling here — a bare Linux console may never emit
+        // Alt+arrow sequences, so they cannot be relied on.
+        if (view_ == View::Month && agendaFocus_) {
             switch (ev.key) {
                 case Key::Up:
                 case Key::Down:
                 case Key::PageUp:
                 case Key::PageDown:
                 case Key::Home:
-                case Key::End: {
-                    if (agenda_.empty()) break; // fall through to date navigation
-                    KeyEvent fwd = ev;
-                    fwd.alt = false;
-                    agenda_.handleKey(fwd);
+                case Key::End:
+                case Key::Enter:
+                case Key::Char: {
+                    // Enter/Space selects via onSelect (= edit); other
+                    // characters are not consumed (the agenda has no input).
+                    const auto r = agenda_.handleKey(ev);
+                    return r == KeyEventResult::Ignored ? KeyEventResult::Ignored
+                                                        : KeyEventResult::Consumed;
+                }
+                case Key::Left:  moveCursor(-1); return KeyEventResult::Consumed;
+                case Key::Right: moveCursor(1);  return KeyEventResult::Consumed;
+                case Key::Delete: {
+                    if (const CalEvent* e = agendaEventAt(agenda_.selectedIndex()))
+                        confirmDelete(*e);
                     return KeyEventResult::Consumed;
                 }
-                default: break;
+                case Key::Tab:
+                    agendaFocus_ = false;
+                    return KeyEventResult::Consumed;
+                default: return KeyEventResult::Ignored;
             }
         }
 
@@ -145,6 +172,13 @@ public:
                 case Key::PageUp:   prevMonth(); return KeyEventResult::Consumed;
                 case Key::PageDown: nextMonth(); return KeyEventResult::Consumed;
                 case Key::Delete:  return KeyEventResult::Consumed; // no hour context
+                case Key::Tab: // focus the agenda list (when the day has events)
+                    if (hasEvents(year_, month_, curD_)) {
+                        agendaFocus_ = true;
+                        agenda_.setSelectedIndex(0);
+                        return KeyEventResult::Consumed;
+                    }
+                    return KeyEventResult::Ignored;
                 default: return KeyEventResult::Ignored;
             }
         }
@@ -287,11 +321,13 @@ private:
     // --- Drawing: month view --------------------------------------------------
 
     void drawMonth(Screen& screen) {
+        // Agenda rows for the cursor day (rebuilt every frame — cheap for a
+        // handful of events). Focus is dropped when there is nothing to select.
+        agenda_.setItems(agendaRows());
+        if (agenda_.empty()) agendaFocus_ = false;
+
         const auto& t = theme::active;
-        if (bounds_.w < kGridW + 2 || bounds_.h < kMinH) {
-            agendaOverflow_ = false;
-            return;
-        }
+        if (bounds_.w < kGridW + 2 || bounds_.h < kMinH) return;
 
         // Recalculate "today" on every frame — this handles crossing midnight
         // without refreshing the window (same trick as the taskbar clock).
@@ -354,31 +390,31 @@ private:
             ++y;
         }
 
-        // Cursor agenda: every event on its own line ("HH:MM title", sorted
-        // by start time) in a scrollable read-only TextView filling the rows
-        // between the grid and the status bar (blank when there are no events).
+        // Cursor agenda: one row per event ("HH:MM title", sorted by start
+        // time) in a SelectionList filling the rows between the grid and the
+        // status bar (blank when there are no events). Unfocused the list is
+        // dimmed (inactive); Tab focuses it for selection + Enter-to-edit.
         const int statusY = bounds_.y + bounds_.h - 1;
         const int avail = statusY - y;
-        agendaOverflow_ = false;
-        if (avail > 0) {
+        if (avail <= 0) {
+            agendaFocus_ = false;
+        } else {
             agenda_.setBounds(Rect{bounds_.x, y, bounds_.w, avail});
-            agenda_.setColors(t.highlightText, t.windowBg);
-            agenda_.setBold(true);
-            agenda_.setLines(agendaLines());
             if (agendaY_ != year_ || agendaM_ != month_ || agendaD_ != curD_) {
                 agendaY_ = year_;
                 agendaM_ = month_;
                 agendaD_ = curD_;
-                agenda_.scrollToTop();
+                agenda_.setSelectedIndex(0);
             }
+            agenda_.setEnabled(agendaFocus_);
             agenda_.draw(screen);
-            agendaOverflow_ = agenda_.canScrollUp() || agenda_.canScrollDown();
         }
     }
 
     // --- Drawing: week view ---------------------------------------------------
 
     void drawWeek(Screen& screen) {
+        agendaFocus_ = false; // the agenda list lives in the month view only
         const auto& t = theme::active;
         if (bounds_.h < 5 || bounds_.w < kGutterW + 7) return;
 
@@ -430,6 +466,7 @@ private:
     // --- Drawing: day view ----------------------------------------------------
 
     void drawDay(Screen& screen) {
+        agendaFocus_ = false; // the agenda list lives in the month view only
         const auto& t = theme::active;
         if (bounds_.h < 4 || bounds_.w < kGutterW + 3) return;
 
@@ -573,8 +610,8 @@ private:
     }
 
     // Events on the cursor day, sorted by start time (then by id to preserve
-    // creation order for ties): one "HH:MM title" line per event.
-    std::vector<std::u32string> agendaLines() const {
+    // creation order for ties). Pointers stay valid until events_ mutates.
+    std::vector<const CalEvent*> agendaDayEvents() const {
         std::vector<const CalEvent*> list;
         for (const auto& e : events_)
             if (e.y == year_ && e.m == month_ && e.d == curD_) list.push_back(&e);
@@ -582,11 +619,22 @@ private:
             if (a->startMin != b->startMin) return a->startMin < b->startMin;
             return a->id < b->id;
         });
+        return list;
+    }
+
+    // Agenda rows for the SelectionList: one "HH:MM title" row per event.
+    std::vector<std::u32string> agendaRows() const {
         std::vector<std::u32string> out;
-        out.reserve(list.size());
-        for (const auto* e : list)
+        for (const auto* e : agendaDayEvents())
             out.push_back(text::toUtf32(hmStr(e->startMin)) + U" " + text::toUtf32(e->title));
         return out;
+    }
+
+    // Event behind an agenda row (month view, Tab focus); nullptr = none.
+    const CalEvent* agendaEventAt(int row) const {
+        auto list = agendaDayEvents();
+        if (row < 0 || row >= static_cast<int>(list.size())) return nullptr;
+        return list[static_cast<std::size_t>(row)];
     }
 
     // Scroll the visible hours as needed to keep the cursor hour in view.
@@ -723,9 +771,9 @@ private:
     std::string draftTitle_, draftStart_, draftEnd_; // kept after validation errors
     int draftEditId_ = -1;                           // edited draft id (-1 = create)
     StatusBar status_;
-    TextView agenda_; // month view: one line per event on the cursor day
-    int agendaY_ = -1, agendaM_ = -1, agendaD_ = -1; // day shown (scroll resets on change)
-    bool agendaOverflow_ = false; // agenda taller than the space below the grid
+    SelectionList agenda_; // month view: one row per event on the cursor day
+    bool agendaFocus_ = false; // keyboard focus in the agenda (Tab toggles)
+    int agendaY_ = -1, agendaM_ = -1, agendaD_ = -1; // agenda day (selection resets on change)
 };
 
 inline const char32_t* CalendarView::kDni[7] = {U"Mon", U"Tue", U"Wed", U"Thu", U"Fri", U"Sat", U"Sun"};

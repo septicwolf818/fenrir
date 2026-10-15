@@ -117,6 +117,7 @@ and press `Enter` or `Space`. `Ctrl+C` clears the calculation.
 | Key | Action |
 | --- | --- |
 | `Ctrl+N` | Create an event |
+| `Tab` | Focus the month-view event list (arrows select, `Enter` edits) |
 | `Ctrl+T` / `Ctrl+D` | Week / day view |
 | `Ctrl+Up` / `Ctrl+Down` | Previous / next year |
 | `Backspace` | Return from week/day view to the month |
