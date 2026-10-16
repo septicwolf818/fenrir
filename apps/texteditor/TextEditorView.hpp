@@ -330,8 +330,14 @@ private:
     }
 
     void applySyntax(TextArea& area) {
-        area.setSyntaxHighlighter(syntaxHighlighting_ ? syntax::forPath(area.path())
-                                                      : TextArea::SyntaxHighlighter{});
+        if (!syntaxHighlighting_) {
+            area.setSyntaxHighlighter(TextArea::SyntaxHighlighter{});
+            area.setBlockCommentScan(TextArea::BlockCommentScan{});
+            return;
+        }
+        const syntax::Highlighter hl = syntax::forPath(area.path());
+        area.setSyntaxHighlighter(hl.line);
+        area.setBlockCommentScan(hl.blocks);
     }
 
     AppContext& ctx_;

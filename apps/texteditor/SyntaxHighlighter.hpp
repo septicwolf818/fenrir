@@ -125,10 +125,37 @@ inline void addSpan(std::vector<SyntaxSpan>& spans, std::size_t begin, std::size
     if (end > begin) spans.push_back({begin, end, token});
 }
 
+inline bool hasBlockComment(Language language) {
+    return language == Language::CLike || language == Language::Css ||
+           language == Language::Markup || language == Language::CMake;
+}
+
+// Closer for a continued block comment: */ (C-like, CSS), --> (markup),
+// ]] (CMake #[[ ... ]]).
+inline std::u32string_view blockCloser(Language language) {
+    if (language == Language::Markup) return U"-->";
+    if (language == Language::CMake) return U"]]";
+    return U"*/";
+}
+
 inline void highlightLine(Language language, std::u32string_view line,
+                          bool startsInBlockComment,
                           std::vector<SyntaxSpan>& spans) {
     spans.clear();
     if (language == Language::None || line.empty()) return;
+
+    // Continuation of a block comment opened on an earlier line: comment up
+    // to the matching closer (or to end of line), then lex the rest normally.
+    std::size_t i = 0;
+    if (startsInBlockComment && hasBlockComment(language)) {
+        const std::u32string_view close = blockCloser(language);
+        const std::size_t found = line.find(close);
+        const std::size_t end =
+            found == std::u32string_view::npos ? line.size() : found + close.size();
+        addSpan(spans, 0, end, SyntaxToken::Comment);
+        if (found == std::u32string_view::npos) return;
+        i = end;
+    }
 
     std::size_t first = 0;
     while (first < line.size() && isSpace(line[first])) ++first;
@@ -147,7 +174,7 @@ inline void highlightLine(Language language, std::u32string_view line,
         }
     }
 
-    for (std::size_t i = 0; i < line.size();) {
+    for (; i < line.size();) {
         if ((language == Language::CLike || language == Language::Css) &&
             i + 1 < line.size() && line[i] == U'/' && line[i + 1] == U'/') {
             if (language == Language::CLike) {
@@ -241,12 +268,112 @@ inline void highlightLine(Language language, std::u32string_view line,
     }
 }
 
-inline TextArea::SyntaxHighlighter forPath(const std::string& path) {
+inline bool startsWithAt(std::u32string_view s, std::size_t i, std::u32string_view pre) {
+    return s.size() - i >= pre.size() && s.substr(i, pre.size()) == pre;
+}
+
+// Whole-buffer block-comment scan: result[i] is nonzero when logical line i
+// STARTS inside a block comment. Mirrors highlightLine's rules so per-line
+// spans and start states always agree:
+//  - strings ('...', "...", plus `...` in CLike) with backslash escapes never
+//    open or close comments (a Markup <!-- is still an opener — highlightLine
+//    checks it before strings, and so do we; a <!-- inside a tag attribute
+//    is swallowed by highlightLine's <...> tag branch, so the scan runs
+//    the same tag-name parse instead of treating < as plain text),
+//  - // line comments (CLike) end the line's scan,
+//  - a CLike line whose first non-space character is '#' is a preprocessor
+//    directive (atomic — highlightLine lexes it whole, so it never opens),
+//  - CMake '#' opens a bracket comment only as #[[ ... ]] (closed by ]]);
+//    any other '#' is a plain line comment.
+inline std::vector<char> blockCommentStates(Language language,
+                                            const std::vector<std::u32string>& lines) {
+    std::u32string_view open, close;
+    switch (language) {
+        case Language::CLike:
+        case Language::Css: open = U"/*"; close = U"*/"; break;
+        case Language::Markup: open = U"<!--"; close = U"-->"; break;
+        case Language::CMake: open = U"#[["; close = U"]]"; break;
+        default: return {}; // no block comments — TextArea keeps no cache
+    }
+    const bool backtick = (language == Language::CLike);
+    const bool slashComment = (language == Language::CLike);
+
+    std::vector<char> out(lines.size(), 0);
+    bool inComment = false;
+    for (std::size_t li = 0; li < lines.size(); ++li) {
+        const std::u32string_view ln(lines[li]);
+        out[li] = inComment ? 1 : 0;
+
+        std::size_t i = 0;
+        if (!inComment && language == Language::CLike) {
+            while (i < ln.size() && isSpace(ln[i])) ++i;
+            if (i < ln.size() && ln[i] == U'#') continue; // directive: atomic line
+        }
+        while (i < ln.size()) {
+            if (inComment) {
+                const std::size_t found = ln.find(close, i);
+                if (found == std::u32string_view::npos) break; // rest of line commented
+                i = found + close.size();
+                inComment = false;
+                continue;
+            }
+            if (slashComment && startsWithAt(ln, i, U"//")) break; // line comment
+            if (startsWithAt(ln, i, open)) {
+                inComment = true;
+                i += open.size();
+                continue;
+            }
+            if (language == Language::CMake && ln[i] == U'#') break; // plain # comment
+            const char32_t c = ln[i];
+            if (language == Language::Markup && c == U'<' && !startsWithAt(ln, i, open)) {
+                // Mirror highlightLine's tag branch exactly (including its
+                // naive '>' search): consume only the tag name so a <!--,
+                // quote, or word after it is lexed the same way per-line.
+                const std::size_t found = ln.find(U'>', i + 1);
+                const std::size_t tagEnd =
+                    found == std::u32string_view::npos ? ln.size() : found + 1;
+                std::size_t name = i + 1;
+                if (name < tagEnd && ln[name] == U'/') ++name;
+                while (name < tagEnd && isWordPart(ln[name])) ++name;
+                i = name;
+                continue;
+            }
+            if (c == U'\'' || c == U'"' || (backtick && c == U'`')) {
+                ++i;
+                while (i < ln.size()) {
+                    if (ln[i] == U'\\' && i + 1 < ln.size()) { i += 2; continue; }
+                    if (ln[i++] == c) break;
+                }
+                continue;
+            }
+            ++i;
+        }
+    }
+    return out;
+}
+
+// Both halves of highlighting for one file: the per-line lexer plus the
+// whole-buffer block-comment scan (empty when the language has no block
+// comments). TextArea keeps them in sync (cache rebuilt after every edit).
+struct Highlighter {
+    TextArea::SyntaxHighlighter line;
+    TextArea::BlockCommentScan blocks;
+};
+
+inline Highlighter forPath(const std::string& path) {
     const Language language = languageForPath(path);
     if (language == Language::None) return {};
-    return [language](std::u32string_view line, std::vector<SyntaxSpan>& spans) {
-        highlightLine(language, line, spans);
+    Highlighter result;
+    result.line = [language](std::u32string_view line, bool inBlock,
+                             std::vector<SyntaxSpan>& spans) {
+        highlightLine(language, line, inBlock, spans);
     };
+    if (hasBlockComment(language)) {
+        result.blocks = [language](const std::vector<std::u32string>& lines) {
+            return blockCommentStates(language, lines);
+        };
+    }
+    return result;
 }
 
 } // namespace fenrir::apps::syntax

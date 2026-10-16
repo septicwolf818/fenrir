@@ -375,8 +375,15 @@ KeyEventResult TextArea::handleKey(const KeyEvent& ev) {
 
 // --- Drawing -----------------------------------------------------------------
 
+void TextArea::ensureBlockStates() const {
+    if (blockValid_ || !blockScan_) return;
+    blockStart_ = blockScan_(lines_);
+    blockValid_ = true;
+}
+
 void TextArea::draw(Screen& screen) {
     ensureLayout();
+    ensureBlockStates();
     const auto& t = theme::active;
     const Cell fill{U' ', t.editorText, t.editorBg, 0};
     const int gut = gutterW();
@@ -414,7 +421,10 @@ void TextArea::draw(Screen& screen) {
         const int n = std::min(len, textW);
         if (syntaxHighlighter_) {
             std::vector<SyntaxSpan> spans;
-            syntaxHighlighter_(line, spans);
+            const std::size_t li = static_cast<std::size_t>(s.line);
+            const bool inBlock =
+                blockValid_ && li < blockStart_.size() && blockStart_[li] != 0;
+            syntaxHighlighter_(line, inBlock, spans);
             std::size_t spanIndex = 0;
             for (int i = 0; i < n; ++i) {
                 const std::size_t logicalCol = static_cast<std::size_t>(start + i);

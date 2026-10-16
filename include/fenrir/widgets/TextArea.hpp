@@ -31,12 +31,30 @@ public:
     void saveFile(const std::string& path);
     void saveToCurrentPath(); // Save to the path used for the last load or save.
 
-    // Optional line lexer. It receives a logical line and returns token spans;
-    // plain-text buffers leave this unset.
+    // Optional line lexer. It receives a logical line plus whether the line
+    // STARTS inside a block comment continued from above (see BlockCommentScan),
+    // and returns token spans; plain-text buffers leave this unset.
+    // NOTE: draw() lexes only the visible rows (starting mid-buffer when
+    // scrolled, and wrapped lines repeatedly), so the lexer must be stateless
+    // across calls — all multiline state comes through startsInBlockComment.
     using SyntaxHighlighter =
-        std::function<void(std::u32string_view, std::vector<SyntaxSpan>&)>;
+        std::function<void(std::u32string_view, bool, std::vector<SyntaxSpan>&)>;
     void setSyntaxHighlighter(SyntaxHighlighter highlighter) {
         syntaxHighlighter_ = std::move(highlighter);
+        blockValid_ = false;
+    }
+
+    // Whole-buffer block-comment scan: result[i] is nonzero when logical line
+    // i STARTS inside a block comment (e.g. /* ... */). Implemented by the
+    // language module — it must mirror the line lexer's string/comment rules.
+    // Empty function = the language has no block comments (no cache is kept).
+    // TextArea caches the result and recomputes it only after an edit, so
+    // drawing stays cheap: one linear scan per keystroke, not per frame.
+    using BlockCommentScan =
+        std::function<std::vector<char>(const std::vector<std::u32string>&)>;
+    void setBlockCommentScan(BlockCommentScan scan) {
+        blockScan_ = std::move(scan);
+        blockValid_ = false;
     }
 
     void newFile();   // Create a new empty document.
@@ -107,6 +125,9 @@ private:
     std::string path_;
     bool dirty_ = false;
     SyntaxHighlighter syntaxHighlighter_;
+    BlockCommentScan blockScan_;
+    mutable std::vector<char> blockStart_; // per-line "starts in block comment"
+    mutable bool blockValid_ = false;
 
     int cursorRow_ = 0, cursorCol_ = 0; // Cursor position in the LOGICAL LINE.
     int scrollRow_ = 0;                 // First visible VISUAL ROW.
@@ -116,7 +137,15 @@ private:
     bool lineNumbers_ = false;          // Line-number gutter.
     int goalCol_ = 0; // "Sticky" visual column for vertical movement (PageUp, etc.).
 
-    void markDirty() { layoutDirty_ = true; }
+    // Every buffer mutator calls markDirty — piggybacking the block-comment
+    // invalidation here (instead of 10 separate sites) keeps the two caches
+    // from drifting apart. Non-mutating callers (wrap, line numbers) just
+    // pay one cheap linear rescan on the next draw.
+    void markDirty() {
+        layoutDirty_ = true;
+        blockValid_ = false;
+    }
+    void ensureBlockStates() const; // recompute blockStart_ unless valid
     void ensureLayout() const;
     void rebuildLayout() const;
     int gutterW() const;               // Width of the line-number gutter (0 = none).
