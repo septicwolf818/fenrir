@@ -49,12 +49,33 @@ public:
     static constexpr uint8_t kReverse = 0x80;
 
     void resize(int w, int h) {
+        const int oldH = h_;
         w_ = std::max(1, w);
         h_ = std::max(1, h);
         const std::size_t n = static_cast<std::size_t>(w_ * h_);
-        grid_.assign(n, VtCell{});
-        altGrid_.assign(n, VtCell{});
-        cx_ = cy_ = 0;
+        // Preserve existing content when resizing: copy old rows/cols into the new grid.
+        if (!grid_.empty()) {
+            const int oldW2 = static_cast<int>(grid_.size()) / oldH;
+            std::vector<VtCell> newGrid(n, VtCell{});
+            for (int y = 0; y < std::min(oldH, h_); ++y) {
+                for (int x = 0; x < std::min(oldW2, w_); ++x) {
+                    newGrid[static_cast<std::size_t>(y * w_ + x)] = grid_[static_cast<std::size_t>(y * oldW2 + x)];
+                }
+            }
+            grid_ = std::move(newGrid);
+        }
+        if (!altGrid_.empty()) {
+            const int oldW2 = static_cast<int>(altGrid_.size()) / oldH;
+            std::vector<VtCell> newGrid(n, VtCell{});
+            for (int y = 0; y < std::min(oldH, h_); ++y) {
+                for (int x = 0; x < std::min(oldW2, w_); ++x) {
+                    newGrid[static_cast<std::size_t>(y * w_ + x)] = altGrid_[static_cast<std::size_t>(y * oldW2 + x)];
+                }
+            }
+            altGrid_ = std::move(newGrid);
+        }
+        cx_ = std::min(cx_, w_ - 1);
+        cy_ = std::min(cy_, h_ - 1);
         top_ = 0;
         bot_ = h_ - 1;
     }
