@@ -5,8 +5,8 @@ namespace fenrir {
 
 // Custom GUI cursor. Does NOT use the terminal's system cursor (that one is
 // permanently hidden by Terminal). render() is called AFTER everything else
-// has drawn to Screen — it takes the cell under (x,y) and
-// swaps its fg/bg. This is an overlay: it does not modify the persistent
+// has drawn to Screen — it stamps a solid high-contrast block over (x,y).
+// This is an overlay: it does not modify the persistent
 // Screen contents (Screen is cleared and redrawn from scratch every frame).
 class Cursor {
 public:

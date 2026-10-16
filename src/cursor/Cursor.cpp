@@ -13,20 +13,13 @@ void Cursor::render(Screen& screen) const {
     if (!visible_) return;
     if (x_ < 0 || y_ < 0 || x_ >= screen.width() || y_ >= screen.height()) return;
 
-    Cell c = screen.at(x_, y_);
-    if (c.fg == c.bg) {
-        // Swapping would be a no-op (e.g. a pattern-wallpaper cell whose
-        // glyph color equals its background) — use a solid high-contrast
-        // block instead so the cursor stays visible on any cell.
-        c.character = U'█';
-        c.fg = colors::Black;
-        c.bg = colors::White;
-    } else {
-        std::swap(c.fg, c.bg);
-    }
+    // Solid high-contrast block (hardware-cursor style). An fg/bg swap of the
+    // underlying cell is NOT enough: it vanishes on same-color cells (e.g. a
+    // pattern-wallpaper cell whose glyph color equals its background) and on
+    // low-contrast pairs (black on dark gray, where even bold lands on the
+    // background color). A fixed black-on-white block stays visible anywhere.
     // Set StyleBold — without it the renderer compares the cell with previous_ and sees "no change".
-    c.style |= StyleBold;
-    screen.set(x_, y_, c);
+    screen.set(x_, y_, Cell{U'█', colors::Black, colors::White, StyleBold});
 }
 
 } // namespace fenrir

@@ -15,8 +15,8 @@ struct TerminalSize {
 //
 // Responsibility (and ONLY this):
 //   - putting the terminal into "GUI mode": raw mode + alternate screen buffer
-//     + hiding the system cursor (permanently — our GUI has its OWN cursor
-//     drawn by swapping a cell's colors, see stage 7),
+//     + hiding the system cursor (permanently — our GUI has its OWN cursor,
+//     a solid block stamped over the cell, see stage 7),
 //   - restoring the normal terminal state when the program exits
 //     (RAII) and on SIGINT/SIGTERM (so the terminal is never
 //     left "broken" after a crash),
