@@ -5,6 +5,9 @@
 // cursor positioning, line clearing/editing, scrolling regions,
 // alternate screen (1049), application cursor mode (h/l), SGR 16/256 colors,
 // reverse video, UTF-8. Key translation to xterm sequences.
+// PgUp/PgDn browse the scrollback on the normal screen (new output or any
+// other key returns to the live view); on the alternate screen they are
+// forwarded so fullscreen apps (less, vim, ...) keep working.
 // Alt+Tab switches windows; Esc is forwarded to the shell (an exception to
 // the general Esc reservation rule, documented in this app).
 #include <algorithm>
@@ -12,6 +15,7 @@
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <fcntl.h>
 #include <string>
 #include <sys/ioctl.h>
@@ -47,6 +51,21 @@ class VtScreen {
 public:
     // Reverse-video bit — stored in the cell style, read when drawing.
     static constexpr uint8_t kReverse = 0x80;
+    // Lines of scrollback kept above the visible grid (PgUp/PgDn browses
+    // them; any new output or other key returns to the live view).
+    static constexpr std::size_t kMaxHistory = 1000;
+
+    bool inAltScreen() const { return altOn_; }
+    std::size_t historySize() const { return history_.size(); }
+    int viewOffset() const { return view_; }
+
+    // Browse the scrollback (positive = older). Clamped to [0, history].
+    void scrollView(int lines) {
+        view_ = std::clamp(view_ + lines, 0, static_cast<int>(history_.size()));
+    }
+
+    // Return to the live view (called on new output and on most keys).
+    void follow() { view_ = 0; }
 
     void resize(int w, int h) {
         const int nw = std::max(1, w);
@@ -71,6 +90,8 @@ public:
         reflowInto(grid_, w_, h_, nw, nh, cx_, cy_, newCx, newCy);
         int dummyX = 0, dummyY = 0;
         reflowInto(altGrid_, w_, h_, nw, nh, 0, 0, dummyX, dummyY);
+        reflowHistory(w_, nw);
+        view_ = 0; // resizing returns to the live view
         w_ = nw;
         h_ = nh;
         cx_ = std::clamp(newCx, 0, w_ - 1);
@@ -93,6 +114,23 @@ public:
     const VtCell& at(int x, int y) const {
         static const VtCell blank;
         if (x < 0 || y < 0 || x >= w_ || y >= h_) return blank;
+        if (view_ > 0 && !altOn_) {
+            // Scrolled back: visible row y shows an older content row —
+            // history first, then the top of the live grid.
+            const int row = static_cast<int>(history_.size()) - view_ + y;
+            if (row < 0) return blank;
+            if (row < static_cast<int>(history_.size())) {
+                const auto& hr = history_[static_cast<std::size_t>(row)];
+                if (x >= static_cast<int>(hr.size())) return blank;
+                return hr[static_cast<std::size_t>(x)];
+            }
+            const std::size_t idx =
+                static_cast<std::size_t>(row - static_cast<int>(history_.size())) *
+                    static_cast<std::size_t>(w_) +
+                static_cast<std::size_t>(x);
+            if (idx >= grid_.size()) return blank;
+            return grid_[idx];
+        }
         const auto& b = buf();
         const std::size_t idx = static_cast<std::size_t>(y) * static_cast<std::size_t>(w_) +
                                 static_cast<std::size_t>(x);
@@ -101,6 +139,7 @@ public:
     }
 
     void feed(const char* data, std::size_t n) {
+        if (n > 0) view_ = 0; // new output returns to the live view
         for (std::size_t i = 0; i < n; ++i) {
             const unsigned char b = static_cast<unsigned char>(data[i]);
             switch (state_) {
@@ -127,6 +166,51 @@ private:
 
     std::vector<VtCell>& buf() { return altOn_ ? altGrid_ : grid_; }
     const std::vector<VtCell>& buf() const { return altOn_ ? altGrid_ : grid_; }
+
+    // Rewrap the scrollback to a new width (same full-row-means-wrapped
+    // rule as the grid reflow). Rows from older sizes are normalized first;
+    // the cap drops the oldest lines.
+    void reflowHistory(int oldW, int newW) {
+        if (history_.empty() || oldW <= 0 || newW <= 0) {
+            if (newW <= 0) history_.clear();
+            return;
+        }
+        std::vector<std::vector<VtCell>> logical;
+        std::vector<VtCell> cur;
+        for (auto& row : history_) {
+            const std::size_t have = row.size();
+            const std::size_t n =
+                std::min<std::size_t>(static_cast<std::size_t>(oldW), have);
+            int last = -1;
+            for (int x = static_cast<int>(n) - 1; x >= 0; --x) {
+                if (row[static_cast<std::size_t>(x)].ch != U' ') { last = x; break; }
+            }
+            for (int x = 0; x <= last; ++x) cur.push_back(row[static_cast<std::size_t>(x)]);
+            const bool wrapped = (static_cast<int>(n) == oldW && last + 1 == oldW);
+            if (!wrapped) {
+                logical.push_back(std::move(cur));
+                cur.clear();
+            }
+        }
+        if (!cur.empty()) logical.push_back(std::move(cur));
+
+        std::deque<std::vector<VtCell>> next;
+        for (auto& line : logical) {
+            if (line.empty()) {
+                next.emplace_back();
+                continue;
+            }
+            for (std::size_t off = 0; off < line.size();
+                 off += static_cast<std::size_t>(newW)) {
+                const std::size_t len =
+                    std::min(line.size() - off, static_cast<std::size_t>(newW));
+                next.emplace_back(line.begin() + static_cast<long>(off),
+                                  line.begin() + static_cast<long>(off + len));
+            }
+        }
+        while (next.size() > kMaxHistory) next.pop_front();
+        history_.swap(next);
+    }
 
     // Reflow one cell buffer from oldW×oldH to newW×newH, preserving visible
     // text by re-wrapping logical lines (a physical row that is full to the
@@ -365,6 +449,7 @@ private:
 
     void alt(bool on, bool saveCursor) {
         if (on == altOn_) return;
+        view_ = 0; // the alternate screen has no scrollback view
         if (on) {
             if (saveCursor) { savedX_ = cx_; savedY_ = cy_; }
             altOn_ = true;
@@ -419,6 +504,12 @@ private:
 
     void scrollUp_() {
         auto& g = buf();
+        if (!altOn_ && top_ == 0 && bot_ == h_ - 1 && h_ > 0 &&
+            g.size() == static_cast<std::size_t>(w_) * static_cast<std::size_t>(h_)) {
+            // A line scrolls off the top of the normal screen — keep it for PgUp.
+            history_.emplace_back(g.begin(), g.begin() + w_);
+            while (history_.size() > kMaxHistory) history_.pop_front();
+        }
         for (int y = top_; y < bot_; ++y)
             std::move(g.begin() + static_cast<long>((y + 1) * w_),
                       g.begin() + static_cast<long>((y + 2) * w_),
@@ -612,12 +703,16 @@ private:
         priv_ = false;
         grid_.assign(static_cast<std::size_t>(w_ * h_), VtCell{});
         altGrid_.assign(static_cast<std::size_t>(w_ * h_), VtCell{});
+        history_.clear();
+        view_ = 0;
     }
 
     int w_ = 1, h_ = 1, cx_ = 0, cy_ = 0;
     int savedX_ = 0, savedY_ = 0;
     int top_ = 0, bot_ = 0;
     std::vector<VtCell> grid_, altGrid_;
+    std::deque<std::vector<VtCell>> history_; // oldest first, each w_-wide at push time
+    int view_ = 0; // scrolled-back lines (0 = live)
     bool altOn_ = false, cursorVisible_ = true, appCursor_ = false;
     Color fg_ = colors::White, bg_ = colors::Black;
     uint8_t style_ = StyleNone;
@@ -810,6 +905,15 @@ public:
 
     KeyEventResult handleKey(const KeyEvent& ev) override {
         if (!spawned_ || exited_) return KeyEventResult::Ignored;
+        // PgUp/PgDn browse the scrollback on the normal screen (where the
+        // shell has no use for them); fullscreen apps on the alternate
+        // screen (less, vim, ...) still receive them.
+        if ((ev.key == Key::PageUp || ev.key == Key::PageDown) && !vt_.inAltScreen()) {
+            const int page = std::max(1, vt_.height() - 1);
+            vt_.scrollView(ev.key == Key::PageUp ? page : -page);
+            return KeyEventResult::Consumed;
+        }
+        vt_.follow(); // any other key returns to the live view
         const std::string bytes = encodeKey(ev, vt_.appCursorKeys());
         if (!bytes.empty()) pty_.writeBytes(bytes);
         return KeyEventResult::Consumed;
@@ -856,14 +960,18 @@ public:
     int minHeight() const override { return 4; }
 
     // GUI cursor follows the shell cursor (visible on the output row).
+    // Hidden while browsing the scrollback — the shell cursor is not there.
     std::optional<std::pair<int, int>> cursorPosition() const override {
-        if (!spawned_ || exited_ || !vt_.cursorVisible() || bounds_.w <= 0 || bounds_.h <= 0)
+        if (!spawned_ || exited_ || !vt_.cursorVisible() || vt_.viewOffset() > 0 ||
+            bounds_.w <= 0 || bounds_.h <= 0)
             return std::nullopt;
         return std::make_pair(bounds_.x + std::clamp(vt_.cursorX(), 0, bounds_.w - 1),
                               bounds_.y + std::clamp(vt_.cursorY(), 0, bounds_.h - 1));
     }
 
-    bool wantsGuiCursor() const override { return spawned_ && !exited_ && vt_.cursorVisible(); }
+    bool wantsGuiCursor() const override {
+        return spawned_ && !exited_ && vt_.cursorVisible() && vt_.viewOffset() == 0;
+    }
 
 private:
     void spawn() {

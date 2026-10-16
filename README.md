@@ -143,7 +143,9 @@ arrow keys to pan, `+`/`-` to zoom, `F` to fit the image, and `0` for actual siz
 The Terminal app starts `$SHELL` (or `/bin/sh`) in a pseudoterminal. Keys are
 forwarded to the shell; `Alt+Tab`, `F2`, `F8`, `F12`, and `Ctrl+W` remain Fenrir window
 controls. `Esc` is sent to the shell. Press `F12` to return to the desktop while
-leaving the shell and its foreground program running.
+leaving the shell and its foreground program running. `PgUp`/`PgDn` scroll the
+scrollback on the normal screen (any other key or new output returns to the
+live view); on the alternate screen they go to the fullscreen app.
 
 ## Project layout
 
