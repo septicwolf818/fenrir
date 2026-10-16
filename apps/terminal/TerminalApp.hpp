@@ -90,8 +90,11 @@ public:
         reflowInto(grid_, w_, h_, nw, nh, cx_, cy_, newCx, newCy);
         int dummyX = 0, dummyY = 0;
         reflowInto(altGrid_, w_, h_, nw, nh, 0, 0, dummyX, dummyY);
-        reflowHistory(w_, nw);
-        view_ = 0; // resizing returns to the live view
+        // The scrollback is append-only: a resize reflows only the visible
+        // grids and never rewrites history, so old lines stay scrollable at
+        // any window size (rows keep the width they had when scrolled off;
+        // at() pads narrower rows with blanks). Keep the current view.
+        view_ = std::clamp(view_, 0, static_cast<int>(history_.size()));
         w_ = nw;
         h_ = nh;
         cx_ = std::clamp(newCx, 0, w_ - 1);
@@ -166,51 +169,6 @@ private:
 
     std::vector<VtCell>& buf() { return altOn_ ? altGrid_ : grid_; }
     const std::vector<VtCell>& buf() const { return altOn_ ? altGrid_ : grid_; }
-
-    // Rewrap the scrollback to a new width (same full-row-means-wrapped
-    // rule as the grid reflow). Rows from older sizes are normalized first;
-    // the cap drops the oldest lines.
-    void reflowHistory(int oldW, int newW) {
-        if (history_.empty() || oldW <= 0 || newW <= 0) {
-            if (newW <= 0) history_.clear();
-            return;
-        }
-        std::vector<std::vector<VtCell>> logical;
-        std::vector<VtCell> cur;
-        for (auto& row : history_) {
-            const std::size_t have = row.size();
-            const std::size_t n =
-                std::min<std::size_t>(static_cast<std::size_t>(oldW), have);
-            int last = -1;
-            for (int x = static_cast<int>(n) - 1; x >= 0; --x) {
-                if (row[static_cast<std::size_t>(x)].ch != U' ') { last = x; break; }
-            }
-            for (int x = 0; x <= last; ++x) cur.push_back(row[static_cast<std::size_t>(x)]);
-            const bool wrapped = (static_cast<int>(n) == oldW && last + 1 == oldW);
-            if (!wrapped) {
-                logical.push_back(std::move(cur));
-                cur.clear();
-            }
-        }
-        if (!cur.empty()) logical.push_back(std::move(cur));
-
-        std::deque<std::vector<VtCell>> next;
-        for (auto& line : logical) {
-            if (line.empty()) {
-                next.emplace_back();
-                continue;
-            }
-            for (std::size_t off = 0; off < line.size();
-                 off += static_cast<std::size_t>(newW)) {
-                const std::size_t len =
-                    std::min(line.size() - off, static_cast<std::size_t>(newW));
-                next.emplace_back(line.begin() + static_cast<long>(off),
-                                  line.begin() + static_cast<long>(off + len));
-            }
-        }
-        while (next.size() > kMaxHistory) next.pop_front();
-        history_.swap(next);
-    }
 
     // Reflow one cell buffer from oldW×oldH to newW×newH, preserving visible
     // text by re-wrapping logical lines (a physical row that is full to the
