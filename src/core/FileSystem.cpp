@@ -52,7 +52,11 @@ std::string absolute(const std::string& path) {
     std::error_code ec;
     stdfs::path p = stdfs::absolute(path, ec);
     if (ec) return path;
-    return p.lexically_normal().string();
+    std::string result = p.lexically_normal().string();
+    // Strip trailing '/' unless the path is exactly "/"
+    if (result.size() > 1 && result.back() == '/')
+        result.pop_back();
+    return result;
 }
 
 std::string join(const std::string& dir, const std::string& name) {
