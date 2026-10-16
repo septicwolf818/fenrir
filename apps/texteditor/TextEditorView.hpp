@@ -94,20 +94,23 @@ public:
             if (!token.lock()) return;
             tree_.setRoot(picked);
             treeOpen_ = true;
+            treeVisible_ = true;
             treeFocused_ = treeWidth() > 0;
             status_.setMessage(text::toUtf32("Folder: " + picked));
         });
     }
 
-    // Ctrl+B: toggles focus tree <-> text; if the tree isn't open —
-    // behaves like Ctrl+D (dialog right away).
-    void toggleTreeFocus() {
+    // Ctrl+B: shows/hides the file panel. Before any folder is chosen it
+    // behaves like Ctrl+D (opens the folder picker); once a folder is loaded
+    // the panel toggles visibility, so the editor can use the full width.
+    void toggleTree() {
         if (!treeOpen_) {
             openFolder();
             return;
         }
-        treeFocused_ = !treeFocused_ && treeWidth() > 0;
-        status_.setMessage(treeFocused_ ? U"File panel" : U"Text editing");
+        treeVisible_ = !treeVisible_;
+        treeFocused_ = treeVisible_ && treeWidth() > 0;
+        status_.setMessage(treeVisible_ ? U"File panel: shown" : U"File panel: hidden");
     }
 
     // --- File operations (current tab) ------------------------------------
@@ -174,9 +177,9 @@ public:
         const int bodyH = std::max(0, bounds_.h - statusH);
         const int areaH = std::max(0, bodyH - tabH);
 
-        // Tree on the left (when open); right column: tabs + text.
+        // Tree on the left (when open and visible); right column: tabs + text.
         const int treeW = treeWidth();
-        if (treeOpen_ && treeW > 0) {
+        if (treeW > 0) {
             tree_.setBounds(Rect{bounds_.x, bounds_.y, treeW, bodyH});
             tree_.setFocused(focused_ && treeFocused_);
             tree_.draw(screen);
@@ -205,7 +208,7 @@ public:
     }
 
     KeyEventResult handleKey(const KeyEvent& ev) override {
-        if (treeOpen_ && treeFocused_ && treeWidth() > 0) {
+        if (treeVisible_ && treeFocused_ && treeWidth() > 0) {
             // Tab from the tree returns to the text (Alt+Tab too — but it is
             // intercepted by Desktop, not the tree). Esc deliberately NOT — Desktop
             // reserves it for switching cursor modes (Edit -> Keyboard -> Desktop).
@@ -237,7 +240,7 @@ public:
     bool clickAt(int x, int y) override {
         const int treeW = treeWidth();
         const int bodyH = std::max(0, bounds_.h - 1); // without the status bar
-        if (treeOpen_ && treeW > 0 &&
+        if (treeW > 0 &&
             x >= bounds_.x && x < bounds_.x + treeW &&
             y >= bounds_.y && y < bounds_.y + bodyH) {
             treeFocused_ = true;
@@ -254,7 +257,7 @@ public:
     }
 
     std::optional<std::pair<int, int>> cursorPosition() const override {
-        if (treeOpen_ && treeFocused_) return std::nullopt; // GUI cursor in the tree? no
+        if (treeVisible_ && treeFocused_) return std::nullopt; // GUI cursor in the tree? no
         return cur().cursorPosition();
     }
 
@@ -267,8 +270,9 @@ private:
     const TextArea& cur() const { return *tabs_[static_cast<std::size_t>(current_)]; }
 
     // Tree panel width — the same geometry in draw() and clickAt().
+    // Zero when no folder is loaded or the panel is toggled off.
     int treeWidth() const {
-        if (!treeOpen_) return 0;
+        if (!treeOpen_ || !treeVisible_) return 0;
         int treeW = std::clamp(bounds_.w / 3, 12, 28);
         if (bounds_.w - treeW < 20) treeW = std::max(0, bounds_.w - 20);
         return treeW;
@@ -345,7 +349,8 @@ private:
     int current_ = 0;
     TabBar tabBar_;
     FileTree tree_;
-    bool treeOpen_ = false;
+    bool treeOpen_ = false;     // a folder root has been chosen
+    bool treeVisible_ = true;   // the panel is shown (toggle with Ctrl+B)
     bool treeFocused_ = false;
     StatusBar status_;
     bool lineNumbers_ = false;

@@ -40,7 +40,7 @@ public:
             {U"New tab (Ctrl+N)", [raw] { raw->newFile(); }},
             {U"Open... (Ctrl+O)", [raw] { raw->openFile(); }},
             {U"Open folder (Ctrl+D)", [raw] { raw->openFolder(); }},
-            {U"File panel (Ctrl+B)", [raw] { raw->toggleTreeFocus(); }},
+            {U"File panel (Ctrl+B)", [raw] { raw->toggleTree(); }},
             {U"Save (Ctrl+S)", [raw] { raw->save(); }},
             {U"Save as...", [raw] { raw->saveAs(); }},
             {U"Close tab (Ctrl+T)", [raw] { raw->closeTab(); }},
@@ -65,7 +65,7 @@ public:
         view->pushShortcut({true, Key::Char, U'e'}, [raw] { raw->toggleWrap(); });
         view->pushShortcut({true, Key::Char, U'y'}, [raw] { raw->toggleSpaces(); });
         view->pushShortcut({true, Key::Char, U'd'}, [raw] { raw->openFolder(); });
-        view->pushShortcut({true, Key::Char, U'b'}, [raw] { raw->toggleTreeFocus(); });
+        view->pushShortcut({true, Key::Char, U'b'}, [raw] { raw->toggleTree(); });
         // F3/F4 = previous/next tab. Plain function keys reach the app on
         // every console and emulator, unlike Alt+PgUp/PgDn (eaten or sent
         // without the Alt bit by some keymaps) and Alt+Left/Right (the
