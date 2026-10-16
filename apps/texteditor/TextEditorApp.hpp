@@ -22,8 +22,18 @@ public:
     }
 
     std::unique_ptr<Widget> createView(AppContext& ctx) override {
+        return makeView(ctx, std::string{});
+    }
+
+    std::unique_ptr<Widget> createFileView(AppContext& ctx, const std::string& path) override {
+        // Same menus, shortcuts and tabs as a normal window — only the
+        // initial tab already has the file loaded.
+        return makeView(ctx, path);
+    }
+
+    std::unique_ptr<Widget> makeView(AppContext& ctx, std::string path) {
         ++instanceCounter_;
-        auto view = std::make_unique<TextEditorView>(ctx, std::string{});
+        auto view = std::make_unique<TextEditorView>(ctx, std::move(path));
         TextEditorView* raw = view.get();
 
         view->setMenuTabs({{U"File", std::vector<MenuItem>{
@@ -71,10 +81,6 @@ public:
         }
 
         return view;
-    }
-
-    std::unique_ptr<Widget> createFileView(AppContext& ctx, const std::string& path) override {
-        return std::make_unique<TextEditorView>(ctx, path);
     }
 
     Rect preferredBounds(const Rect& desktopArea) const override {

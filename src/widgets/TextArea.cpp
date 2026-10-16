@@ -392,7 +392,7 @@ void TextArea::draw(Screen& screen) {
     for (int row = 0; row < bounds_.h; ++row) {
         screen.fillRect(Rect{bounds_.x, bounds_.y + row, bounds_.w, 1}, fill);
         const int segIdx = scrollRow_ + row;
-        if (segIdx >= static_cast<int>(layout_.size())) continue; // beyond the text — leave the background
+        if (segIdx < 0 || segIdx >= static_cast<int>(layout_.size())) continue; // beyond the text — leave the background
         const Seg& s = layout_[static_cast<std::size_t>(segIdx)];
         const std::u32string& line = lines_[static_cast<std::size_t>(s.line)];
 

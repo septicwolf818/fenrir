@@ -349,6 +349,18 @@ public:
     }
 
     std::unique_ptr<Widget> createView(AppContext& ctx) override {
+        return makeView(ctx);
+    }
+
+    std::unique_ptr<Widget> createFileView(AppContext& ctx, const std::string& path) override {
+        // Same menus and shortcuts as a normal window — only the image is
+        // already loaded.
+        auto view = makeView(ctx);
+        static_cast<PhotoView*>(view.get())->setImagePath(path);
+        return view;
+    }
+
+    std::unique_ptr<Widget> makeView(AppContext& ctx) {
         auto view = std::make_unique<PhotoView>(ctx);
         PhotoView* raw = view.get();
         view->setMenuTabs({
@@ -365,12 +377,6 @@ public:
         addAboutMenu(*view, ctx, U"Photo Viewer",
                      U"View common image formats with ANSI colors and terminal shading.");
         view->pushShortcut({true, Key::Char, U'o'}, [raw] { raw->openImage(); });
-        return view;
-    }
-
-    std::unique_ptr<Widget> createFileView(AppContext& ctx, const std::string& path) override {
-        auto view = std::make_unique<PhotoView>(ctx);
-        view->setImagePath(path);
         return view;
     }
 

@@ -531,7 +531,17 @@ public:
     std::vector<std::string> fileExtensions() const override { return {"fim"}; }
 
     std::unique_ptr<Widget> createView(AppContext& ctx) override {
-        auto view = std::make_unique<PaintView>(ctx);
+        return makeView(ctx, std::string{});
+    }
+
+    std::unique_ptr<Widget> createFileView(AppContext& ctx, const std::string& path) override {
+        // Same menus and shortcuts as a normal window — only the canvas
+        // already has the file loaded.
+        return makeView(ctx, path);
+    }
+
+    std::unique_ptr<Widget> makeView(AppContext& ctx, std::string path) {
+        auto view = std::make_unique<PaintView>(ctx, std::move(path));
         PaintView* raw = view.get();
 
         view->setMenuTabs({{U"File", std::vector<MenuItem>{
@@ -554,10 +564,6 @@ public:
         view->pushShortcut({true, Key::Char, U'z'}, [raw] { raw->undoLast(); });
 
         return view;
-    }
-
-    std::unique_ptr<Widget> createFileView(AppContext& ctx, const std::string& path) override {
-        return std::make_unique<PaintView>(ctx, path);
     }
 
     Rect preferredBounds(const Rect& desktopArea) const override {
