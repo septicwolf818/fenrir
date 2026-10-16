@@ -389,10 +389,15 @@ void TextArea::draw(Screen& screen) {
     const int gut = gutterW();
     const int textW = std::max(1, bounds_.w - gut);
 
+    // Paint the whole area's background up front — every row, every column,
+    // including rows past the end of the buffer. Nothing from a previous frame
+    // (or a wider line that used to sit on a row) can survive where the current
+    // line has no characters.
+    screen.fillRect(bounds_, fill);
+
     for (int row = 0; row < bounds_.h; ++row) {
-        screen.fillRect(Rect{bounds_.x, bounds_.y + row, bounds_.w, 1}, fill);
         const int segIdx = scrollRow_ + row;
-        if (segIdx < 0 || segIdx >= static_cast<int>(layout_.size())) continue; // beyond the text — leave the background
+        if (segIdx < 0 || segIdx >= static_cast<int>(layout_.size())) continue; // beyond the text — background already painted
         const Seg& s = layout_[static_cast<std::size_t>(segIdx)];
         const std::u32string& line = lines_[static_cast<std::size_t>(s.line)];
 
