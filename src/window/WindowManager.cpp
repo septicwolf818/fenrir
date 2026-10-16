@@ -53,27 +53,25 @@ Window* WindowManager::focused() const {
     return nullptr;
 }
 
-void WindowManager::focusNext() {
-    if (windows_.empty()) return;
-    std::vector<Window*> ordered;
-    for (auto& p : windows_) ordered.push_back(p.get());
-    std::sort(ordered.begin(), ordered.end(), [](Window* a, Window* b) { return a->zOrder() < b->zOrder(); });
+void WindowManager::focusNext() { cycleFocus(+1); }
 
-    auto it = std::find_if(ordered.begin(), ordered.end(), [](Window* w) { return w->focused(); });
-    std::size_t idx = (it == ordered.end()) ? 0 : (static_cast<std::size_t>(it - ordered.begin()) + 1) % ordered.size();
-    focus(ordered[idx]);
-}
+void WindowManager::focusPrev() { cycleFocus(-1); }
 
-void WindowManager::focusPrev() {
-    if (windows_.empty()) return;
+void WindowManager::cycleFocus(int dir) {
+    // Alt+Tab cycles only through VISIBLE windows: minimized windows are
+    // reachable from the taskbar, not by cycling (focus() would otherwise
+    // restore one, defeating the point of minimizing it).
     std::vector<Window*> ordered;
-    for (auto& p : windows_) ordered.push_back(p.get());
+    for (auto& p : windows_)
+        if (!p->minimized()) ordered.push_back(p.get());
+    if (ordered.empty()) return;
     std::sort(ordered.begin(), ordered.end(), [](Window* a, Window* b) { return a->zOrder() < b->zOrder(); });
 
     auto it = std::find_if(ordered.begin(), ordered.end(), [](Window* w) { return w->focused(); });
     std::size_t n = ordered.size();
-    std::size_t idx = (it == ordered.end()) ? 0
-                                             : (static_cast<std::size_t>(it - ordered.begin()) + n - 1) % n;
+    std::size_t idx = (it == ordered.end())
+                          ? 0
+                          : (static_cast<std::size_t>(it - ordered.begin()) + n + (dir > 0 ? 1 : n - 1)) % n;
     focus(ordered[idx]);
 }
 

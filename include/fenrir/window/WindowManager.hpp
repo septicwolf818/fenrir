@@ -29,6 +29,7 @@ private:
     int nextZ_ = 1;
 
     void bringToFront(Window* w);
+    void cycleFocus(int dir); // dir > 0 = next, dir < 0 = previous (skips minimized)
 };
 
 } // namespace fenrir
