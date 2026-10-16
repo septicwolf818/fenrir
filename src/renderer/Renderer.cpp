@@ -56,7 +56,6 @@ void Renderer::present(const Screen& screen) {
     std::string out;
     out.reserve(4096);
 
-    int lastX = -1, lastY = -1;
     Cell lastStyleUsed{}; // for detecting whether a new SGR is needed
     bool haveLastStyle = false;
 
@@ -66,7 +65,9 @@ void Renderer::present(const Screen& screen) {
             const Cell& cur = cells[idx];
             if (!fullRedraw_ && cur == previous_[idx]) continue;
 
-            if (x != lastX || y != lastY) appendMoveTo(out, x, y);
+            // Never infer terminal cursor position from the previous glyph:
+            // Unicode width handling differs between terminal emulators.
+            appendMoveTo(out, x, y);
 
             if (!haveLastStyle || cur.fg != lastStyleUsed.fg || cur.bg != lastStyleUsed.bg ||
                 cur.style != lastStyleUsed.style) {
@@ -87,8 +88,6 @@ void Renderer::present(const Screen& screen) {
             text::appendUtf8(out, ch);
             previous_[idx] = cur;
 
-            lastX = x + 1;
-            lastY = y;
         }
     }
 
