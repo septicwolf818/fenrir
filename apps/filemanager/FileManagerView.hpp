@@ -132,6 +132,39 @@ public:
                     });
     }
 
+    void makeDirectory() {
+        const std::string dir = active().currentDir();
+        const auto token = lifetimeToken();
+        ctx_.prompt(U"New Directory", U"Create a new directory in:\n" + text::toUtf32(dir),
+                    U"Name: ", std::u32string(),
+                    [this, token, dir](std::optional<std::u32string> name) {
+                        if (!token.lock()) return; // the window may have been closed
+                        if (!name || name->empty()) return;
+                        const std::string base = text::toUtf8(*name);
+                        if (base == "." || base == ".." ||
+                            base.find('/') != std::string::npos) {
+                            status("Enter a single folder name.");
+                            return;
+                        }
+                        const std::string path = fs::join(dir, base);
+                        try {
+                            if (fs::exists(path)) {
+                                status("Already exists: " + base);
+                                return;
+                            }
+                            std::error_code ec;
+                            if (!std::filesystem::create_directory(path, ec) || ec) {
+                                status("Error: " + (ec ? ec.message() : std::string("could not create directory")));
+                                return;
+                            }
+                            reloadBoth();
+                            status("Created: " + base);
+                        } catch (const std::exception& e) {
+                            status(std::string("Error: ") + e.what());
+                        }
+                    });
+    }
+
     void deleteSelected() {
         DirectoryView& v = active();
         if (v.empty()) { status("No items."); return; }
@@ -219,6 +252,7 @@ public:
                 case U'c': case U'C': copySelected();  return KeyEventResult::Consumed;
                 case U'x': case U'X': moveSelected();   return KeyEventResult::Consumed;
                 case U'r': case U'R': renameSelected(); return KeyEventResult::Consumed;
+                case U'm': case U'M': makeDirectory();  return KeyEventResult::Consumed;
                 case U'g': case U'G': goToFolder();     return KeyEventResult::Consumed;
                 default: break;
             }
