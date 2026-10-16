@@ -2,7 +2,6 @@
 
 #include <algorithm>
 
-#include "fenrir/core/Text.hpp"
 #include "fenrir/core/Theme.hpp"
 
 namespace fenrir {
@@ -248,14 +247,7 @@ void Window::draw(Screen& screen) {
     const Color contentBg = t.windowBg;
     const Color contentFg = t.windowText;
 
-    if (minimized_) {
-        // A minimized window = title bar only, no content - visible as a
-        // "tab" on the desktop (the full view is also in the status bar).
-        // toUtf32, because std::u32string(bytes) mangles non-ASCII letters.
-        std::u32string bar = U"[_] " + text::toUtf32(title_);
-        screen.putText(bounds_.x, bounds_.y, bar, border, t.desktopBg);
-        return;
-    }
+    if (minimized_) return; // Minimized windows are represented only by taskbar handles.
 
     if (!hasBorder_) {
         if (content_) content_->draw(screen);

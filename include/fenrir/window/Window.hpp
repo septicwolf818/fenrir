@@ -44,7 +44,7 @@ public:
     void restore(); // undoes maximize() back to the previous bounds
 
     bool contains(int x, int y) const { return visibleBounds().contains(x, y); }
-    Rect visibleBounds() const { return minimized_ ? Rect{bounds_.x, bounds_.y, bounds_.w, 1} : bounds_; }
+    Rect visibleBounds() const { return minimized_ ? Rect{} : bounds_; }
     bool onTitleBar(int x, int y) const;
     // Menu bar row (its own row under the title bar, as in windowing systems).
     bool onMenuRow(int x, int y) const;
