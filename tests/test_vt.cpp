@@ -164,7 +164,40 @@ int main() {
         v.scrollView(1);
         check(v.viewOffset() == 1, "scroll view");
         v.resize(4, 3);
-        check(v.viewOffset() <= static_cast<int>(v.historySize()), "view clamped");
+        check(v.viewOffset() <= static_cast<int>(v.historyRowCount()), "view clamped");
+    }
+    // The scrollback keeps the actual text of a line, so it re-wraps to the
+    // new width instead of being truncated or padded with blanks.
+    {
+        VtScreen v;
+        v.resize(10, 2);
+        v.feed("0123456789ABCDE\r\n", 17); // soft-wraps, then scrolls off
+        v.feed("FGHIJKLMNO\r\n", 12);
+        check(v.historySize() == 1, "wrapped line stored as one history line");
+        v.resize(5, 4);
+        check(v.historyRowCount() == 3, "history re-wrapped to the new width");
+        v.scrollView(3);
+        check(v.at(0, 0).ch == U'0' && v.at(4, 0).ch == U'4', "history row 0 re-wrapped");
+        check(v.at(0, 1).ch == U'5' && v.at(4, 1).ch == U'9', "history row 1 re-wrapped");
+        check(v.at(0, 2).ch == U'A' && v.at(4, 2).ch == U'E', "history row 2 re-wrapped");
+        v.scrollView(-3);
+        check(v.at(0, 0).ch == U'F', "live view restored");
+    }
+    // Separate output lines stay separate in the scrollback.
+    {
+        VtScreen v;
+        v.resize(10, 2);
+        v.feed("FIRST\r\n", 7);
+        v.feed("SECOND\r\n", 8);
+        v.feed("THIRD\r\n", 7);
+        check(v.historySize() == 2, "two complete lines in history");
+        v.resize(4, 4);
+        check(v.historyRowCount() == 4, "history lines re-wrapped to the new width");
+        v.scrollView(4);
+        check(v.at(0, 0).ch == U'F' && v.at(3, 0).ch == U'S', "first line re-wrapped");
+        check(v.at(0, 1).ch == U'T', "first line continues on the next row");
+        check(v.at(0, 2).ch == U'S' && v.at(3, 2).ch == U'O', "second line re-wrapped");
+        check(v.at(0, 3).ch == U'N' && v.at(1, 3).ch == U'D', "second line continues on the next row");
     }
     // Split VT sequence across feeds.
     {
