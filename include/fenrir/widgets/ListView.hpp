@@ -112,7 +112,7 @@ public:
             Color bg = sel ? t.accentBg : t.surfaceBg;
             if (!sel && it.dim) fg = t.dimText; // dimmed row (e.g. "..")
             uint8_t style = sel ? StyleBold : StyleNone;
-            if (!it.enabled) { fg = t.dimText; style = StyleDim; } // inactive row
+            if (!it.enabled) { fg = t.dimText; style = StyleNone; } // inactive row color is theme-controlled
 
             screen.fillRect(Rect{bounds_.x, y + row, bounds_.w, 1}, Cell{U' ', fg, bg, style});
 
