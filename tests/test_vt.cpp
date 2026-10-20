@@ -213,6 +213,85 @@ int main() {
         check(v.at(0, 1).ch == U' ' && v.at(1, 1).ch == U' ' && v.at(2, 1).ch == U'X',
               "soft-wrap continuation keeps its original offset");
     }
+    // Clearing the screen breaks a soft-wrap continuation into the live grid;
+    // subsequent output must start a new history line, not join the old one.
+    {
+        VtScreen v;
+        v.resize(6, 2);
+        v.feed("abcdefg\r\n", 9);
+        check(v.historySize() == 1, "open soft-wrapped history line");
+        v.feed("\x1b[2J\x1b[H", 7);
+        v.feed("UVWXYZ12345\r\n", 13);
+        check(v.historySize() == 2, "screen clear closes history continuation");
+        v.resize(4, 4);
+        check(v.historyRowCount() == 4, "cleared and new history lines remain distinct");
+    }
+    // Repeated resizing while a soft-wrapped line spans history and screen
+    // must neither duplicate nor lose its cells.
+    {
+        const std::string input = "ABCDEFGHIJKLMNOPQRSTUVWX0123456789";
+        VtScreen v;
+        v.resize(6, 2);
+        v.feed(input.data(), input.size());
+        for (const auto [width, height] : {std::pair{4, 7}, {9, 6}, {3, 8}, {6, 7}}) {
+            v.resize(width, height);
+            const int historyRows = static_cast<int>(v.historyRowCount());
+            const int totalRows = historyRows + v.height();
+            std::vector<std::string> stream(static_cast<std::size_t>(totalRows),
+                                            std::string(static_cast<std::size_t>(v.width()), ' '));
+            for (int offset = historyRows; offset >= 0; --offset) {
+                v.follow();
+                v.scrollView(offset);
+                for (int y = 0; y < v.height(); ++y) {
+                    const int streamRow = historyRows - offset + y;
+                    if (streamRow < 0 || streamRow >= totalRows) continue;
+                    for (int x = 0; x < v.width(); ++x)
+                        stream[static_cast<std::size_t>(streamRow)][static_cast<std::size_t>(x)] =
+                            static_cast<char>(v.at(x, y).ch);
+                }
+            }
+            std::string actual;
+            for (const auto& row : stream)
+                for (const char c : row)
+                    if (c != ' ') actual.push_back(c);
+            check(actual == input, "repeated resize preserves history/screen stream");
+        }
+    }
+    // Multiple long hard lines must not be duplicated when resizes occur
+    // between scrolls of their soft-wrapped rows.
+    {
+        VtScreen v;
+        v.resize(8, 3);
+        std::string expected;
+        for (int i = 0; i < 12; ++i) {
+            const std::string line = "L" + std::to_string(i) + "ABCDEFGHIJKLMNOPQRST";
+            expected += line;
+            v.feed(line.data(), line.size());
+            v.feed("\r\n", 2);
+            if (i == 3) v.resize(5, 5);
+            if (i == 7) v.resize(11, 4);
+        }
+        const int historyRows = static_cast<int>(v.historyRowCount());
+        const int totalRows = historyRows + v.height();
+        std::vector<std::string> stream(static_cast<std::size_t>(totalRows),
+                                        std::string(static_cast<std::size_t>(v.width()), ' '));
+        for (int offset = historyRows; offset >= 0; --offset) {
+            v.follow();
+            v.scrollView(offset);
+            for (int y = 0; y < v.height(); ++y) {
+                const int streamRow = historyRows - offset + y;
+                if (streamRow < 0 || streamRow >= totalRows) continue;
+                for (int x = 0; x < v.width(); ++x)
+                    stream[static_cast<std::size_t>(streamRow)][static_cast<std::size_t>(x)] =
+                        static_cast<char>(v.at(x, y).ch);
+            }
+        }
+        std::string actual;
+        for (const auto& row : stream)
+            for (const char c : row)
+                if (c != ' ') actual.push_back(c);
+        check(actual == expected, "hard lines and soft wraps do not duplicate after resize");
+    }
     // Split VT sequence across feeds.
     {
         VtScreen v;

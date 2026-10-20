@@ -192,6 +192,13 @@ private:
             line.pop_back();
     }
 
+    void closeHistoryContinuation() {
+        if (altOn_ || !historyOpen_) return;
+        historyOpen_ = false;
+        if (!history_.empty()) trimTrailingBlanks(history_.back());
+        historyRowsDirty_ = true;
+    }
+
     // Reflow one cell buffer from oldW×oldH to newW×newH, preserving visible
     // text by re-wrapping logical lines using explicit soft-wrap markers.
     // The cursor (curX/curY, possibly curX == oldW for pending wrap) is mapped
@@ -612,18 +619,21 @@ private:
         if (mode == 2) {
             std::fill(g.begin(), g.end(), c);
             std::fill(wraps().begin(), wraps().end(), 0);
+            closeHistoryContinuation();
         } else if (mode == 0) {
             for (int x = cx_; x < w_; ++x) g[static_cast<std::size_t>(cy_ * w_ + x)] = c;
             for (int y = cy_; y < h_; ++y) wraps()[static_cast<std::size_t>(y)] = 0;
             for (int y = cy_ + 1; y < h_; ++y)
                 std::fill(g.begin() + static_cast<long>(y * w_),
                           g.begin() + static_cast<long>((y + 1) * w_), c);
+            if (cy_ == 0 && cx_ == 0) closeHistoryContinuation();
         } else if (mode == 1) {
             for (int y = 0; y < cy_; ++y)
                 std::fill(g.begin() + static_cast<long>(y * w_),
                           g.begin() + static_cast<long>((y + 1) * w_), c);
             for (int y = 0; y <= cy_; ++y) wraps()[static_cast<std::size_t>(y)] = 0;
             for (int x = 0; x <= cx_ && x < w_; ++x) g[static_cast<std::size_t>(cy_ * w_ + x)] = c;
+            if (cy_ == 0) closeHistoryContinuation();
         }
     }
 
