@@ -199,6 +199,20 @@ int main() {
         check(v.at(0, 2).ch == U'S' && v.at(3, 2).ch == U'O', "second line re-wrapped");
         check(v.at(0, 3).ch == U'N' && v.at(1, 3).ch == U'D', "second line continues on the next row");
     }
+    // Spaces written at the end of a soft-wrapped row are real cell offsets:
+    // preserve them so the continuation does not shift left after reflow.
+    {
+        VtScreen v;
+        v.resize(6, 2);
+        v.feed("abc   X", 7);
+        v.feed("\r\n", 2);
+        v.feed("Y\r\n", 3);
+        v.resize(4, 4);
+        v.scrollView(2);
+        check(v.at(0, 0).ch == U'a' && v.at(3, 0).ch == U' ', "soft-wrap trailing spaces retained");
+        check(v.at(0, 1).ch == U' ' && v.at(1, 1).ch == U' ' && v.at(2, 1).ch == U'X',
+              "soft-wrap continuation keeps its original offset");
+    }
     // Split VT sequence across feeds.
     {
         VtScreen v;

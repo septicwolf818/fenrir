@@ -564,11 +564,11 @@ private:
                 history_.back().insert(history_.back().end(), first, last);
             else
                 history_.emplace_back(first, last);
-            // The row padding at the end of the line is not text — dropping it
-            // keeps the line free of gaps when it is re-wrapped later. The
-            // line stays open while its remaining rows are still on screen.
-            trimTrailingBlanks(history_.back());
             historyOpen_ = rowWraps[0] != 0;
+            // A soft-wrapped row occupies the entire old-width row; its
+            // trailing spaces are positions in the logical line and must be
+            // preserved when the line is re-wrapped at a different width.
+            if (!historyOpen_) trimTrailingBlanks(history_.back());
             while (history_.size() > kMaxHistory) {
                 history_.pop_front();
                 if (history_.empty()) historyOpen_ = false;
