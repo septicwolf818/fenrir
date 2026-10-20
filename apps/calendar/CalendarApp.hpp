@@ -228,10 +228,11 @@ private:
     // --- Events: persisted in Prefs (calendar.conf) ---------------------------
 
     static std::string hmStr(int min) {
-        min = std::clamp(min, 0, 23 * 60 + 59); // also silences -Wformat-truncation (glibc)
-        char buf[8];
-        std::snprintf(buf, sizeof(buf), "%02d:%02d", min / 60, min % 60);
-        return buf;
+        min = std::clamp(min, 0, 23 * 60 + 59);
+        const int hours = min / 60;
+        const int minutes = min % 60;
+        return {static_cast<char>('0' + hours / 10), static_cast<char>('0' + hours % 10), ':',
+                static_cast<char>('0' + minutes / 10), static_cast<char>('0' + minutes % 10)};
     }
 
     static bool parseHm(std::string_view s, int& outMin) {

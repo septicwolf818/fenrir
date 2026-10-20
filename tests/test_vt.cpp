@@ -233,7 +233,7 @@ int main() {
         VtScreen v;
         v.resize(6, 2);
         v.feed(input.data(), input.size());
-        for (const auto [width, height] : {std::pair{4, 7}, {9, 6}, {3, 8}, {6, 7}}) {
+        for (const auto& [width, height] : {std::pair{4, 7}, {9, 6}, {3, 8}, {6, 7}}) {
             v.resize(width, height);
             const int historyRows = static_cast<int>(v.historyRowCount());
             const int totalRows = historyRows + v.height();

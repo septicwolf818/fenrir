@@ -54,7 +54,7 @@ const std::vector<NamedTheme>& catalog() {
             .closeBg = colors::BrightRed, .closeText = colors::Black,
             .windowBg = colors::Black, .windowText = colors::BrightYellow,
             .menuBg = colors::Black, .menuText = colors::BrightYellow,
-            .accentBg = colors::BrightYellow, .accentText = colors::Black,
+            .accentBg = colors::BrightYellow, .accentText = colors::BrightWhite,
             .surfaceBg = colors::Black, .surfaceText = colors::BrightYellow,
             .dimText = colors::BrightWhite,
             .headerBg = colors::Yellow, .headerText = colors::Black,
