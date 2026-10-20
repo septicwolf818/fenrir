@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
 project(fenrir LANGUAGES CXX)
 
+enable_testing()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -54,3 +56,8 @@ add_executable(fenrir_desktop
 )
 target_link_libraries(fenrir_desktop PRIVATE fenrir)
 set_target_properties(fenrir_desktop PROPERTIES OUTPUT_NAME fenrir)
+
+# --- tests -----------------------------------------------------------------
+add_executable(fenrir_tests tests/test_vt.cpp)
+target_link_libraries(fenrir_tests PRIVATE fenrir)
+add_test(NAME fenrir_tests COMMAND fenrir_tests)

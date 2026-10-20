@@ -1067,8 +1067,8 @@ void Desktop::tickOnce() {
     // so iterate over a copy of the vector.
     auto sources = fdSources_;
     for (const auto& [fd, cb] : sources) {
-        struct pollfd pfd { fd, POLLIN, 0 };
-        if (poll(&pfd, 1, 0) > 0 && (pfd.revents & (POLLIN | POLLHUP | POLLERR)) && cb) cb();
+        struct pollfd pfd { fd, POLLIN | POLLOUT, 0 };
+        if (poll(&pfd, 1, 0) > 0 && (pfd.revents & (POLLIN | POLLOUT | POLLHUP | POLLERR)) && cb) cb();
     }
 
     char buf[64];
