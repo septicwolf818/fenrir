@@ -56,7 +56,7 @@ const std::vector<NamedTheme>& catalog() {
             .menuBg = colors::Black, .menuText = colors::BrightYellow,
             .accentBg = colors::BrightYellow, .accentText = colors::Black,
             .surfaceBg = colors::Black, .surfaceText = colors::BrightYellow,
-            .dimText = colors::Yellow,
+            .dimText = colors::BrightWhite,
             .headerBg = colors::Yellow, .headerText = colors::Black,
             .buttonBg = colors::Black, .buttonText = colors::Yellow,
             .buttonTextHot = colors::BrightYellow,
