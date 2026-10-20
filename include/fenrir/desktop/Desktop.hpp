@@ -63,7 +63,8 @@ public:
                     OnDialogResult onResult) override;
     void closeWindow() override;
     // Asynchronous sources (e.g. the terminal PTY) — polled in tickOnce.
-    void addFdSource(int fd, std::function<void()> onReady) override;
+    void addFdSource(int fd, std::function<void()> onReady,
+                     std::function<bool()> wantsWrite = {}) override;
     void removeFdSource(int fd) override;
 
 private:
@@ -111,9 +112,14 @@ private:
     // call stack — we flag it instead and Desktop closes after dispatch (see flushPendingCloses).
     std::vector<Window*> closePending_;
 
-    // Registered fds (AppContext::addFdSource): poll(POLLIN) each tick,
-    // before reading the keyboard — sources refresh at a shorter interval.
-    std::vector<std::pair<int, std::function<void()>>> fdSources_;
+    struct FdSource {
+        int fd;
+        std::function<void()> onReady;
+        std::function<bool()> wantsWrite;
+    };
+    // Registered fds are polled before keyboard input; active sources shorten
+    // the input polling interval so child output appears smoothly.
+    std::vector<FdSource> fdSources_;
 
     void handleKey(const KeyEvent& ev);          // wrapper: dispatch + flush of pending closes
     void handleKeyEvent(const KeyEvent& ev);     // actual key handling

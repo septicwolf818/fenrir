@@ -191,7 +191,7 @@ private:
             return;
         }
         pty_.resize(bounds_.w, bounds_.h);
-        ctx_.addFdSource(pty_.fd(), [this] { pump(); });
+        ctx_.addFdSource(pty_.fd(), [this] { pump(); }, [this] { return pty_.hasPendingOutput(); });
     }
 
     void pump() {

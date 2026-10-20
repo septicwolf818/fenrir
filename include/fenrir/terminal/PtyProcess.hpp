@@ -52,6 +52,7 @@ public:
 
     int fd() const { return fd_; }
     pid_t pid() const { return pid_; }
+    bool hasPendingOutput() const { return !out_.empty(); }
 
     void closeFd() {
         if (fd_ >= 0) {

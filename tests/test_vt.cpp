@@ -31,6 +31,87 @@ int main() {
         for (int x = 0; x < 5; ++x) row0 += static_cast<char>(v.at(x, 0).ch);
         check(row0 == "ABCDE", "reflow row0");
     }
+    // An exact-width cursor is pending-wrap, not already on the next row.
+    {
+        VtScreen v;
+        v.resize(5, 3);
+        v.feed("ABCDE", 5);
+        check(v.cursorX() == 5 && v.cursorY() == 0, "pending wrap before resize");
+        v.resize(5, 4);
+        check(v.cursorX() == 5 && v.cursorY() == 0, "pending wrap survives same-width resize");
+        v.feed("F", 1);
+        check(v.at(0, 1).ch == U'F', "next char wraps after resize");
+
+        VtScreen saved;
+        saved.resize(5, 4);
+        saved.feed("ABCDE\x1b" "7", 7); // save the pending-wrap cursor
+        saved.resize(5, 5);
+        saved.feed("\x1b" "8", 2);
+        check(saved.cursorX() == 5 && saved.cursorY() == 0, "saved pending-wrap cursor survives resize");
+
+        VtScreen alternate;
+        alternate.resize(5, 4);
+        alternate.feed("ABCDE\x1b[?1049h", 13);
+        alternate.resize(5, 5);
+        alternate.feed("\x1b[?1049l", 8);
+        check(alternate.cursorX() == 5 && alternate.cursorY() == 0,
+              "1049 restores pending-wrap cursor after resize");
+    }
+    // A full row followed by CR/LF is a hard break, while automatic wrap is
+    // soft; resizing must not join unrelated output lines.
+    {
+        VtScreen v;
+        v.resize(5, 4);
+        v.feed("ABCDE\r\nFG", 9);
+        v.resize(4, 5);
+        check(v.at(0, 0).ch == U'A' && v.at(3, 0).ch == U'D', "hard-break first row");
+        check(v.at(0, 1).ch == U'E' && v.at(1, 1).ch == U' ', "hard-break continuation row");
+        check(v.at(0, 2).ch == U'F' && v.at(1, 2).ch == U'G', "hard break preserved after reflow");
+
+        VtScreen soft;
+        soft.resize(5, 4);
+        soft.feed("ABCDEF", 6);
+        soft.resize(4, 5);
+        check(soft.at(0, 1).ch == U'E' && soft.at(1, 1).ch == U'F', "soft wrap preserved after reflow");
+    }
+    // LF cancels pending autowrap rather than advancing an extra row.
+    {
+        VtScreen v;
+        v.resize(5, 4);
+        v.feed("ABCDE\nF", 7);
+        check(v.at(4, 1).ch == U'F', "LF after exact-width line advances once");
+        check(v.at(0, 2).ch == U' ', "LF does not trigger a second wrap");
+    }
+    // Exercise cursor offsets on both sides of width boundaries over repeated
+    // width changes, including one-column windows and exact pending wraps.
+    {
+        for (int oldWidth = 2; oldWidth <= 8; ++oldWidth) {
+            for (int count = 1; count <= 24; ++count) {
+                std::string input;
+                for (int i = 0; i < count; ++i)
+                    input.push_back(static_cast<char>('A' + i % 26));
+                for (int newWidth = 1; newWidth <= 8; ++newWidth) {
+                    VtScreen v;
+                    v.resize(oldWidth, 32);
+                    v.feed(input.data(), input.size());
+                    v.resize(newWidth, 32);
+                    std::string actual;
+                    for (int y = 0; y < v.height(); ++y)
+                        for (int x = 0; x < v.width(); ++x)
+                            if (v.at(x, y).ch != U' ')
+                                actual.push_back(static_cast<char>(v.at(x, y).ch));
+                    check(actual == input, "reflow retains text over width transitions");
+                    if (count % oldWidth == 0 && count % newWidth == 0) {
+                        check(v.cursorX() == newWidth && v.cursorY() == count / newWidth - 1,
+                              "pending-wrap cursor maps to final occupied cell");
+                    } else {
+                        check(v.cursorX() == count % newWidth && v.cursorY() == count / newWidth,
+                              "cursor maps to logical offset");
+                    }
+                }
+            }
+        }
+    }
     // Height shrink keeps bottom content, not trailing blanks.
     {
         VtScreen v;
@@ -55,6 +136,24 @@ int main() {
         check(v.at(0, 0).ch == U'A', "alt survives resize");
         v.feed("\x1b[?1049l", 8);
         check(!v.inAltScreen(), "alt exited");
+    }
+    // Cursor anchors, including the normal cursor saved across 1049, reflow.
+    {
+        VtScreen v;
+        v.resize(10, 6);
+        v.feed("\x1b[4;8H", 6); // row 4, column 8
+        check(v.cursorX() == 7 && v.cursorY() == 3, "position cursor on blank row");
+        v.resize(5, 8);
+        check(v.cursorX() == 2 && v.cursorY() == 4, "blank-row cursor reflow");
+
+        v.resize(10, 6);
+        v.feed("\x1b[3;9H", 6);
+        v.feed("\x1b[?1049h", 8);
+        v.feed("\x1b[4;8H", 6);
+        v.resize(5, 8);
+        check(v.cursorX() == 2 && v.cursorY() == 4, "alternate cursor reflow");
+        v.feed("\x1b[?1049l", 8);
+        check(v.cursorX() == 3 && v.cursorY() == 3, "restored normal cursor reflow");
     }
     // Scrollback view + resize.
     {
@@ -86,22 +185,33 @@ int main() {
     {
         PtyProcess pty;
         std::string err;
-        check(pty.spawn(20, 5, err), "pty spawn");
-        pty.writeBytes("echo PTY_OK\n");
-        // pump reads
+        const char* previousShell = std::getenv("SHELL");
+        const bool hadShell = previousShell != nullptr;
+        const std::string savedShell = previousShell ? previousShell : "";
+        setenv("SHELL", "/bin/sh", 1);
+        const bool spawned = pty.spawn(20, 5, err);
+        if (hadShell) setenv("SHELL", savedShell.c_str(), 1);
+        else unsetenv("SHELL");
+        check(spawned, "pty spawn");
         char buf[256];
         std::string out;
-        for (int i = 0; i < 50 && out.find("PTY_OK") == std::string::npos; ++i) {
-            long n = pty.readSome(buf, sizeof(buf));
-            if (n > 0) out.append(buf, static_cast<std::size_t>(n));
-            else if (n == 0) { /* EAGAIN */ }
-            else break;
-            // allow child to run
-            struct timespec ts{0, 10000000};
-            nanosleep(&ts, nullptr);
-        }
-        check(out.find("PTY_OK") != std::string::npos, "pty output");
+        auto waitFor = [&](const std::string& needle) {
+            for (int i = 0; i < 100 && out.find(needle) == std::string::npos; ++i) {
+                const long n = pty.readSome(buf, sizeof(buf));
+                if (n > 0) out.append(buf, static_cast<std::size_t>(n));
+                else if (n < 0) break;
+                const struct timespec ts{0, 10000000};
+                nanosleep(&ts, nullptr);
+            }
+            return out.find(needle) != std::string::npos;
+        };
+        pty.writeBytes("printf 'PTY_OK\\n'\n");
+        check(waitFor("PTY_OK\r\n"), "pty child output");
+        pty.writeBytes("stty size\n");
+        check(waitFor("5 20\r\n"), "initial child PTY size");
         pty.resize(10, 3);
+        pty.writeBytes("stty size\n");
+        check(waitFor("3 10\r\n"), "resized child PTY size");
         pty.terminate();
     }
     std::cout << "All tests passed.\n";

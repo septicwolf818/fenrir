@@ -1052,13 +1052,14 @@ void Desktop::positionGuiCursor() {
     cursor_.render(screen_);
 }
 
-void Desktop::addFdSource(int fd, std::function<void()> onReady) {
+void Desktop::addFdSource(int fd, std::function<void()> onReady,
+                          std::function<bool()> wantsWrite) {
     if (fd < 0 || !onReady) return;
-    fdSources_.emplace_back(fd, std::move(onReady));
+    fdSources_.push_back(FdSource{fd, std::move(onReady), std::move(wantsWrite)});
 }
 
 void Desktop::removeFdSource(int fd) {
-    std::erase_if(fdSources_, [fd](const auto& s) { return s.first == fd; });
+    std::erase_if(fdSources_, [fd](const FdSource& source) { return source.fd == fd; });
 }
 
 void Desktop::tickOnce() {
@@ -1066,9 +1067,13 @@ void Desktop::tickOnce() {
     // poll without blocking. A callback may read data and remove its source,
     // so iterate over a copy of the vector.
     auto sources = fdSources_;
-    for (const auto& [fd, cb] : sources) {
-        struct pollfd pfd { fd, POLLIN | POLLOUT, 0 };
-        if (poll(&pfd, 1, 0) > 0 && (pfd.revents & (POLLIN | POLLOUT | POLLHUP | POLLERR)) && cb) cb();
+    for (const auto& source : sources) {
+        short events = POLLIN;
+        if (source.wantsWrite && source.wantsWrite()) events |= POLLOUT;
+        struct pollfd pfd { source.fd, events, 0 };
+        if (poll(&pfd, 1, 0) > 0 &&
+            (pfd.revents & (events | POLLHUP | POLLERR | POLLNVAL)) && source.onReady)
+            source.onReady();
     }
 
     char buf[64];

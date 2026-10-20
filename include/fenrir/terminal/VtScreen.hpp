@@ -48,20 +48,35 @@ public:
             h_ = nh;
             grid_.assign(static_cast<std::size_t>(nw) * static_cast<std::size_t>(nh), VtCell{});
             altGrid_.assign(static_cast<std::size_t>(nw) * static_cast<std::size_t>(nh), VtCell{});
+            gridWrap_.assign(static_cast<std::size_t>(nh), 0);
+            altWrap_.assign(static_cast<std::size_t>(nh), 0);
             cx_ = 0;
             cy_ = 0;
             top_ = 0;
             bot_ = nh - 1;
             return;
         }
-        // Reflow both buffers so visible content survives the resize instead
-        // of being cleared or linearly garbled. The cursor is mapped through
-        // the active buffer's reflow; the inactive buffer keeps its own
-        // content (its cursor is restored from savedX_/savedY_ on switch).
+        // Reflow both buffers and map each buffer's cursor through its own
+        // layout. While the alternate screen is active, savedX_/savedY_ is
+        // the normal-screen cursor saved by 1049; cx_/cy_ belongs to altGrid_.
         int newCx = cx_, newCy = cy_;
-        reflowInto(grid_, w_, h_, nw, nh, cx_, cy_, newCx, newCy);
-        int dummyX = 0, dummyY = 0;
-        reflowInto(altGrid_, w_, h_, nw, nh, 0, 0, dummyX, dummyY);
+        int newSavedX = savedX_, newSavedY = savedY_;
+        if (altOn_) {
+            int normalX = savedX_, normalY = savedY_;
+            int ignoredX = 0, ignoredY = 0;
+            reflowInto(grid_, gridWrap_, w_, h_, nw, nh, savedX_, savedY_, savedX_, savedY_,
+                       normalX, normalY, ignoredX, ignoredY);
+            reflowInto(altGrid_, altWrap_, w_, h_, nw, nh, cx_, cy_, cx_, cy_,
+                       newCx, newCy, ignoredX, ignoredY);
+            newSavedX = normalX;
+            newSavedY = normalY;
+        } else {
+            int ignoredX = 0, ignoredY = 0;
+            reflowInto(grid_, gridWrap_, w_, h_, nw, nh, cx_, cy_, savedX_, savedY_,
+                       newCx, newCy, newSavedX, newSavedY);
+            reflowInto(altGrid_, altWrap_, w_, h_, nw, nh, 0, 0, 0, 0,
+                       ignoredX, ignoredY, ignoredX, ignoredY);
+        }
         // The scrollback is append-only: a resize reflows only the visible
         // grids and never rewrites history, so old lines stay scrollable at
         // any window size (rows keep the width they had when scrolled off;
@@ -69,12 +84,13 @@ public:
         view_ = std::clamp(view_, 0, static_cast<int>(history_.size()));
         w_ = nw;
         h_ = nh;
-        cx_ = std::clamp(newCx, 0, w_ - 1);
-        // Preserve the pending-wrap state (cx_ == w_ means the next put wraps).
-        if (cx_ == w_ - 1 && newCx >= w_) cx_ = w_;
+        // cx_ == width means the last cell was written and the next printable
+        // character wraps. Preserve that state across reflow; clamping it to
+        // width-1 makes a subsequent character overwrite the last cell.
+        cx_ = (newCx == w_) ? w_ : std::clamp(newCx, 0, w_ - 1);
         cy_ = std::clamp(newCy, 0, h_ - 1);
-        savedX_ = std::clamp(savedX_, 0, w_ - 1);
-        savedY_ = std::clamp(savedY_, 0, h_ - 1);
+        savedX_ = (newSavedX == w_) ? w_ : std::clamp(newSavedX, 0, w_ - 1);
+        savedY_ = std::clamp(newSavedY, 0, h_ - 1);
         top_ = 0;
         bot_ = h_ - 1;
     }
@@ -141,23 +157,29 @@ private:
 
     std::vector<VtCell>& buf() { return altOn_ ? altGrid_ : grid_; }
     const std::vector<VtCell>& buf() const { return altOn_ ? altGrid_ : grid_; }
+    std::vector<uint8_t>& wraps() { return altOn_ ? altWrap_ : gridWrap_; }
 
     // Reflow one cell buffer from oldW×oldH to newW×newH, preserving visible
-    // text by re-wrapping logical lines (a physical row that is full to the
-    // right edge continues on the next row; a shorter row is a hard break).
+    // text by re-wrapping logical lines using explicit soft-wrap markers.
     // The cursor (curX/curY, possibly curX == oldW for pending wrap) is mapped
     // to the same logical offset in the new layout. Overflow keeps the last
     // newH rows (prompt stays visible); underflow pads with blanks at the
     // bottom. New blanks use VtCell{} (same as a fresh grid).
-    static void reflowInto(std::vector<VtCell>& cells, int oldW, int oldH,
+    static void reflowInto(std::vector<VtCell>& cells, std::vector<uint8_t>& wrap,
+                           int oldW, int oldH,
                            int newW, int newH, int curX, int curY,
-                           int& outX, int& outY) {
+                           int savedX, int savedY,
+                           int& outX, int& outY, int& outSavedX, int& outSavedY) {
         const std::size_t expect =
             static_cast<std::size_t>(std::max(0, oldW)) * static_cast<std::size_t>(std::max(0, oldH));
-        if (cells.size() != expect || oldW <= 0 || oldH <= 0) {
+        if (cells.size() != expect || wrap.size() != static_cast<std::size_t>(oldH) ||
+            oldW <= 0 || oldH <= 0) {
             cells.assign(static_cast<std::size_t>(newW) * static_cast<std::size_t>(newH), VtCell{});
+            wrap.assign(static_cast<std::size_t>(newH), 0);
             outX = 0;
             outY = 0;
+            outSavedX = 0;
+            outSavedY = 0;
             return;
         }
         // 1. Split into logical lines.
@@ -166,6 +188,10 @@ private:
         std::vector<int> rowLogic(static_cast<std::size_t>(oldH), 0);
         std::vector<std::size_t> rowBase(static_cast<std::size_t>(oldH), 0);
         std::vector<VtCell> cur;
+        const int mapCurY = std::clamp(curY, 0, oldH - 1);
+        const int mapSavedY = std::clamp(savedY, 0, oldH - 1);
+        const int mapCurX = std::clamp(curX, 0, oldW);
+        const int mapSavedX = std::clamp(savedX, 0, oldW);
         for (int y = 0; y < oldH; ++y) {
             int last = -1;
             const std::size_t base = static_cast<std::size_t>(y) * static_cast<std::size_t>(oldW);
@@ -173,51 +199,73 @@ private:
                 if (cells[base + static_cast<std::size_t>(x)].ch != U' ') { last = x; break; }
             }
             const int rowLen = last + 1; // 0 = blank row
+            const bool wrapped = wrap[static_cast<std::size_t>(y)] != 0;
             rowLogic[static_cast<std::size_t>(y)] = static_cast<int>(logical.size());
             rowBase[static_cast<std::size_t>(y)] = cur.size();
-            for (int x = 0; x < rowLen; ++x) cur.push_back(cells[base + static_cast<std::size_t>(x)]);
-            const bool wrapped = (rowLen == oldW) && (y + 1 < oldH);
+            int preserve = wrapped ? oldW : rowLen;
+            if (y == mapCurY) preserve = std::max(preserve, mapCurX);
+            if (y == mapSavedY) preserve = std::max(preserve, mapSavedX);
+            for (int x = 0; x < preserve; ++x)
+                cur.push_back(cells[base + static_cast<std::size_t>(x)]);
             if (!wrapped) {
                 logical.push_back(std::move(cur));
                 cur.clear();
             }
         }
         if (!cur.empty()) logical.push_back(std::move(cur));
-        // Drop trailing blank logical lines: they are just empty screen
-        // padding and must not displace real content on height shrink;
-        // padding is re-added at the bottom when phys is shorter than newH.
-        while (!logical.empty() && logical.back().empty()) logical.pop_back();
+        // Drop trailing blank logical lines beyond both cursor anchors: they
+        // are screen padding and must not displace content on height shrink.
+        // Keep blank rows up through a cursor so blank-screen cursor placement
+        // survives a resize. Padding is re-added below when space permits.
+        const int lastCursorLine = std::max(rowLogic[static_cast<std::size_t>(mapCurY)],
+                                            rowLogic[static_cast<std::size_t>(mapSavedY)]);
+        while (static_cast<int>(logical.size()) - 1 > lastCursorLine &&
+               !logical.empty() && logical.back().empty())
+            logical.pop_back();
 
         // 2. Map the cursor to (logical line, offset in line).
         int logicIdx = 0;
         std::size_t logicOff = 0;
         if (!logical.empty()) {
-            const int cy = std::clamp(curY, 0, oldH - 1);
-            logicIdx = rowLogic[static_cast<std::size_t>(cy)];
+            logicIdx = rowLogic[static_cast<std::size_t>(mapCurY)];
             logicIdx = std::clamp(logicIdx, 0, static_cast<int>(logical.size()) - 1);
-            const std::size_t base = rowBase[static_cast<std::size_t>(cy)];
-            // curX may be oldW (pending wrap after writing the last column).
-            const int cx = std::clamp(curX, 0, oldW);
-            logicOff = base + static_cast<std::size_t>(cx);
+            const std::size_t base = rowBase[static_cast<std::size_t>(mapCurY)];
+            logicOff = base + static_cast<std::size_t>(mapCurX);
             logicOff = std::min(logicOff, logical[static_cast<std::size_t>(logicIdx)].size());
+        }
+
+        int savedLogicIdx = 0;
+        std::size_t savedLogicOff = 0;
+        if (!logical.empty()) {
+            savedLogicIdx = std::clamp(rowLogic[static_cast<std::size_t>(mapSavedY)],
+                                       0, static_cast<int>(logical.size()) - 1);
+            savedLogicOff = rowBase[static_cast<std::size_t>(mapSavedY)] +
+                            static_cast<std::size_t>(mapSavedX);
+            savedLogicOff = std::min(savedLogicOff,
+                                     logical[static_cast<std::size_t>(savedLogicIdx)].size());
         }
 
         // 3. Re-wrap to the new width.
         std::vector<std::vector<VtCell>> phys;
+        std::vector<uint8_t> physWrap;
         phys.reserve(logical.size());
+        physWrap.reserve(logical.size());
         std::vector<int> logicStart(logical.size(), 0);
         for (std::size_t li = 0; li < logical.size(); ++li) {
             logicStart[li] = static_cast<int>(phys.size());
             const auto& line = logical[li];
             if (line.empty()) {
                 phys.emplace_back();
+                physWrap.push_back(0);
             } else {
-                for (std::size_t off = 0; off < line.size(); off += static_cast<std::size_t>(newW))
+                for (std::size_t off = 0; off < line.size(); off += static_cast<std::size_t>(newW)) {
                     phys.push_back(std::vector<VtCell>(line.begin() + static_cast<long>(off),
                                                       line.begin() +
                                                           static_cast<long>(std::min(
                                                               line.size(),
                                                               off + static_cast<std::size_t>(newW)))));
+                    physWrap.push_back(off + static_cast<std::size_t>(newW) < line.size() ? 1 : 0);
+                }
             }
         }
 
@@ -228,22 +276,34 @@ private:
         const int kept = static_cast<int>(phys.size()) - drop;
 
         cells.assign(static_cast<std::size_t>(newW) * static_cast<std::size_t>(newH), VtCell{});
+        wrap.assign(static_cast<std::size_t>(newH), 0);
         for (int r = 0; r < kept; ++r) {
-            const auto& row = phys[static_cast<std::size_t>(r + drop)];
+            const std::size_t srcRow = static_cast<std::size_t>(r + drop);
+            const auto& row = phys[srcRow];
             const std::size_t dst = static_cast<std::size_t>(r) * static_cast<std::size_t>(newW);
             for (std::size_t x = 0; x < row.size(); ++x) cells[dst + x] = row[x];
+            wrap[static_cast<std::size_t>(r)] = physWrap[srcRow];
         }
 
         if (logical.empty()) {
             outX = 0;
             outY = 0;
+            outSavedX = 0;
+            outSavedY = 0;
             return;
         }
-        const int startRow = logicStart[static_cast<std::size_t>(logicIdx)] - drop;
-        const int prow = startRow + static_cast<int>(logicOff / static_cast<std::size_t>(newW));
-        outX = static_cast<int>(logicOff % static_cast<std::size_t>(newW));
-        outY = std::clamp(prow, 0, newH - 1);
-        if (prow < 0) outX = 0; // cursor scrolled off the top — park at origin
+        auto mapPoint = [&](int line, std::size_t offset, bool pendingWrap, int& x, int& y) {
+            const int startRow = logicStart[static_cast<std::size_t>(line)] - drop;
+            const std::size_t width = static_cast<std::size_t>(newW);
+            const bool exactBoundary = pendingWrap && offset > 0 && offset % width == 0;
+            const int row = startRow + static_cast<int>(
+                exactBoundary ? (offset / width) - 1 : offset / width);
+            x = exactBoundary ? newW : static_cast<int>(offset % width);
+            y = std::clamp(row, 0, newH - 1);
+            if (row < 0) x = 0; // cursor scrolled off the top — park at origin
+        };
+        mapPoint(logicIdx, logicOff, curX == oldW, outX, outY);
+        mapPoint(savedLogicIdx, savedLogicOff, savedX == oldW, outSavedX, outSavedY);
     }
 
     void ground(unsigned char b) {
@@ -252,7 +312,12 @@ private:
             case '\r': cx_ = 0; return;
             case '\n':
             case 0x0b:
-            case 0x0c: index_(); return;
+            case 0x0c:
+                cx_ = std::min(cx_, w_ - 1);
+                if (wraps().size() > static_cast<std::size_t>(cy_))
+                    wraps()[static_cast<std::size_t>(cy_)] = 0;
+                index_();
+                return;
             case '\b': if (cx_ > 0) --cx_; return;
             case '\t': cx_ = std::min(w_ - 1, ((cx_ / 8) + 1) * 8); return;
             default: break;
@@ -290,9 +355,17 @@ private:
             case ']': state_ = St::Osc; break;
             case '(': case ')': case '*': case '+': state_ = St::Charset; break;
             case '7': savedX_ = cx_; savedY_ = cy_; break; // DECSC
-            case '8': cx_ = std::clamp(savedX_, 0, w_ - 1); cy_ = std::clamp(savedY_, 0, h_ - 1); break; // DECRC
+            case '8':
+                cx_ = (savedX_ == w_) ? w_ : std::clamp(savedX_, 0, w_ - 1);
+                cy_ = std::clamp(savedY_, 0, h_ - 1);
+                break; // DECRC
             case 'M': reverseIndex_(); break; // RI
-            case 'D': index_(); break;        // IND
+            case 'D':
+                cx_ = std::min(cx_, w_ - 1);
+                if (wraps().size() > static_cast<std::size_t>(cy_))
+                    wraps()[static_cast<std::size_t>(cy_)] = 0;
+                index_();
+                break; // IND
             case 'E': cx_ = 0; index_(); break; // NEL
             case 'c': hardReset(); break;     // RIS
             default: break; // '=', '>', 'H', 'Z' — ignore
@@ -393,7 +466,7 @@ private:
         } else {
             altOn_ = false;
             if (saveCursor) {
-                cx_ = std::clamp(savedX_, 0, w_ - 1);
+                cx_ = (savedX_ == w_) ? w_ : std::clamp(savedX_, 0, w_ - 1);
                 cy_ = std::clamp(savedY_, 0, h_ - 1);
             }
         }
@@ -401,17 +474,23 @@ private:
 
     void clearBuf() {
         auto& g = buf();
+        auto& rowWraps = wraps();
         VtCell c;
         c.bg = bg_;
         std::fill(g.begin(), g.end(), c);
+        std::fill(rowWraps.begin(), rowWraps.end(), 0);
     }
 
     void put(char32_t c) {
         if (cy_ < 0 || cy_ >= h_ || cx_ < 0) return;
+        auto& rowWraps = wraps();
+        if (rowWraps.size() != static_cast<std::size_t>(h_)) return;
         if (cx_ >= w_) { // deferred wrap simplified to immediate wrap
+            rowWraps[static_cast<std::size_t>(cy_)] = 1;
             cx_ = 0;
             index_();
         }
+        rowWraps[static_cast<std::size_t>(cy_)] = 0;
         auto& b = buf();
         const std::size_t idx = static_cast<std::size_t>(cy_) * static_cast<std::size_t>(w_) +
                                 static_cast<std::size_t>(cx_);
@@ -438,6 +517,7 @@ private:
 
     void scrollUp_() {
         auto& g = buf();
+        auto& rowWraps = wraps();
         if (!altOn_ && top_ == 0 && bot_ == h_ - 1 && h_ > 0 &&
             g.size() == static_cast<std::size_t>(w_) * static_cast<std::size_t>(h_)) {
             // A line scrolls off the top of the normal screen — keep it for PgUp.
@@ -448,20 +528,26 @@ private:
             std::move(g.begin() + static_cast<long>((y + 1) * w_),
                       g.begin() + static_cast<long>((y + 2) * w_),
                       g.begin() + static_cast<long>(y * w_));
+        for (int y = top_; y < bot_; ++y)
+            rowWraps[static_cast<std::size_t>(y)] = rowWraps[static_cast<std::size_t>(y + 1)];
         blankRow(bot_);
     }
 
     void scrollDown_() {
         auto& g = buf();
+        auto& rowWraps = wraps();
         for (int y = bot_; y > top_; --y)
             std::move(g.begin() + static_cast<long>((y - 1) * w_),
                       g.begin() + static_cast<long>(y * w_),
                       g.begin() + static_cast<long>(y * w_));
+        for (int y = bot_; y > top_; --y)
+            rowWraps[static_cast<std::size_t>(y)] = rowWraps[static_cast<std::size_t>(y - 1)];
         blankRow(top_);
     }
 
     void blankRow(int y) {
         auto& g = buf();
+        wraps()[static_cast<std::size_t>(y)] = 0;
         VtCell c;
         c.bg = bg_;
         std::fill(g.begin() + static_cast<long>(y * w_),
@@ -474,8 +560,10 @@ private:
         c.bg = bg_;
         if (mode == 2) {
             std::fill(g.begin(), g.end(), c);
+            std::fill(wraps().begin(), wraps().end(), 0);
         } else if (mode == 0) {
             for (int x = cx_; x < w_; ++x) g[static_cast<std::size_t>(cy_ * w_ + x)] = c;
+            for (int y = cy_; y < h_; ++y) wraps()[static_cast<std::size_t>(y)] = 0;
             for (int y = cy_ + 1; y < h_; ++y)
                 std::fill(g.begin() + static_cast<long>(y * w_),
                           g.begin() + static_cast<long>((y + 1) * w_), c);
@@ -483,6 +571,7 @@ private:
             for (int y = 0; y < cy_; ++y)
                 std::fill(g.begin() + static_cast<long>(y * w_),
                           g.begin() + static_cast<long>((y + 1) * w_), c);
+            for (int y = 0; y <= cy_; ++y) wraps()[static_cast<std::size_t>(y)] = 0;
             for (int x = 0; x <= cx_ && x < w_; ++x) g[static_cast<std::size_t>(cy_ * w_ + x)] = c;
         }
     }
@@ -497,6 +586,7 @@ private:
         else if (mode != 2) return;
         std::fill(g.begin() + static_cast<long>(cy_ * w_ + from),
                   g.begin() + static_cast<long>(cy_ * w_ + to), c);
+        wraps()[static_cast<std::size_t>(cy_)] = 0;
     }
 
     void insertLines(int n) {
@@ -507,6 +597,9 @@ private:
             std::move(g.begin() + static_cast<long>((y - n) * w_),
                       g.begin() + static_cast<long>((y - n + 1) * w_),
                       g.begin() + static_cast<long>(y * w_));
+        auto& rowWraps = wraps();
+        for (int y = bot_; y >= cy_ + n; --y)
+            rowWraps[static_cast<std::size_t>(y)] = rowWraps[static_cast<std::size_t>(y - n)];
         for (int y = cy_; y < cy_ + n; ++y) blankRow(y);
     }
 
@@ -518,11 +611,15 @@ private:
             std::move(g.begin() + static_cast<long>((y + n) * w_),
                       g.begin() + static_cast<long>((y + n + 1) * w_),
                       g.begin() + static_cast<long>(y * w_));
+        auto& rowWraps = wraps();
+        for (int y = cy_; y + n <= bot_; ++y)
+            rowWraps[static_cast<std::size_t>(y)] = rowWraps[static_cast<std::size_t>(y + n)];
         for (int y = bot_ - n + 1; y <= bot_; ++y) blankRow(y);
     }
 
     void insertChars(int n) {
         auto& g = buf();
+        wraps()[static_cast<std::size_t>(cy_)] = 0;
         n = std::min(n, w_ - cx_);
         auto first = g.begin() + static_cast<long>(cy_ * w_);
         std::move_backward(first + cx_, first + (w_ - n), first + w_);
@@ -535,6 +632,7 @@ private:
 
     void deleteChars(int n) {
         auto& g = buf();
+        wraps()[static_cast<std::size_t>(cy_)] = 0;
         n = std::min(n, w_ - cx_);
         auto first = g.begin() + static_cast<long>(cy_ * w_);
         std::move(first + (cx_ + n), first + w_, first + cx_);
@@ -547,6 +645,7 @@ private:
 
     void eraseChars(int n) {
         auto& g = buf();
+        wraps()[static_cast<std::size_t>(cy_)] = 0;
         n = std::min(n, w_ - cx_);
         for (int x = cx_; x < cx_ + n; ++x) {
             VtCell c;
@@ -637,6 +736,8 @@ private:
         priv_ = false;
         grid_.assign(static_cast<std::size_t>(w_ * h_), VtCell{});
         altGrid_.assign(static_cast<std::size_t>(w_ * h_), VtCell{});
+        gridWrap_.assign(static_cast<std::size_t>(h_), 0);
+        altWrap_.assign(static_cast<std::size_t>(h_), 0);
         history_.clear();
         view_ = 0;
     }
@@ -645,6 +746,7 @@ private:
     int savedX_ = 0, savedY_ = 0;
     int top_ = 0, bot_ = 0;
     std::vector<VtCell> grid_, altGrid_;
+    std::vector<uint8_t> gridWrap_, altWrap_;
     std::deque<std::vector<VtCell>> history_; // oldest first, each w_-wide at push time
     int view_ = 0; // scrolled-back lines (0 = live)
     bool altOn_ = false, cursorVisible_ = true, appCursor_ = false;

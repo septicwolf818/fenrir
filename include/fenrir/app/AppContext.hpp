@@ -54,10 +54,11 @@ public:
     virtual void closeWindow() = 0;
 
     // --- Asynchronous data sources (e.g. a terminal PTY) --------------------
-    // Registers an fd polled once per tick (poll POLLIN, non-blocking); onReady
-    // is called when data is available on fd. The source MUST be removed
-    // (removeFdSource) BEFORE fd is closed — the widget destructor is the place.
-    virtual void addFdSource(int fd, std::function<void()> onReady) = 0;
+    // Registers an fd polled once per tick (non-blocking). onReady is called
+    // when it is readable, or writable while wantsWrite() returns true. The
+    // source MUST be removed before fd is closed.
+    virtual void addFdSource(int fd, std::function<void()> onReady,
+                             std::function<bool()> wantsWrite = {}) = 0;
     virtual void removeFdSource(int fd) = 0;
 
     // --- High-level helpers (build a Dialog and open it via openDialog) ---
