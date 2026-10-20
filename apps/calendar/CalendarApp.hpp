@@ -346,14 +346,14 @@ private:
         // --- Row 1: centered, bold month and year -----------------------------
         std::u32string title = monthName(month_) + U" " + text::toUtf32(std::to_string(year_));
         int tx = x0 + (kGridW - static_cast<int>(title.size())) / 2;
-        screen.putText(tx, y, title, t.headerText, t.windowBg, StyleBold);
+        screen.putText(tx, y, title, t.windowText, t.windowBg, StyleBold);
         ++y;
 
         // --- Row 2: weekday abbreviations (Monday first) ----------------------
         for (int c = 0; c < 7; ++c) {
             std::u32string lab = kDni[c];
             int cx = x0 + c * kCellW + (kCellW - static_cast<int>(lab.size())) / 2;
-            screen.putText(cx, y, lab, t.headerText, t.windowBg, StyleBold);
+            screen.putText(cx, y, lab, t.windowText, t.windowBg, StyleBold);
         }
         y += 2; // blank spacer row after the headers
 
@@ -430,7 +430,7 @@ private:
         title += U" - " + ddmm(eD, eM) + U"." + text::toUtf32(std::to_string(eY));
         int tx = bounds_.x + (bounds_.w - static_cast<int>(title.size())) / 2;
         if (tx < bounds_.x) tx = bounds_.x;
-        screen.putText(tx, y0, title, t.headerText, t.windowBg, StyleBold);
+        screen.putText(tx, y0, title, t.windowText, t.windowBg, StyleBold);
 
         // --- Column headers: Mon..Sun with dates; cursor column highlighted --
         const int curWd = weekdayOf(year_, month_, curD_);
@@ -445,7 +445,7 @@ private:
                 screen.fillRect(Rect{cx, hy, colW, 1}, Cell{U' ', t.accentText, t.accentBg, StyleBold});
                 screen.putText(cx, hy, lab, t.accentText, t.accentBg, StyleBold);
             } else {
-                screen.putText(cx, hy, lab, t.headerText, t.windowBg, StyleBold);
+                screen.putText(cx, hy, lab, t.windowText, t.windowBg, StyleBold);
             }
         }
 
@@ -477,7 +477,7 @@ private:
                                U"." + text::toUtf32(std::to_string(year_));
         int tx = bounds_.x + (bounds_.w - static_cast<int>(title.size())) / 2;
         if (tx < bounds_.x) tx = bounds_.x;
-        screen.putText(tx, y0, title, t.headerText, t.windowBg, StyleBold);
+        screen.putText(tx, y0, title, t.windowText, t.windowBg, StyleBold);
 
         const int rowY = y0 + 1;
         const int avail = bounds_.h - 2; // title + status
@@ -497,7 +497,7 @@ private:
         const auto& t = theme::active;
         const bool cur = (hour == hourCur_);
         const Color bg = cur ? t.accentBg : t.windowBg;
-        const Color fg = cur ? t.accentText : t.headerText;
+        const Color fg = cur ? t.accentText : t.windowText;
         screen.fillRect(Rect{bounds_.x, y, kGutterW, 1}, Cell{U' ', fg, bg, 0});
         const std::u32string lab = text::toUtf32(hmStr(hour * 60)).substr(0, 3); // "HH:"
         screen.putText(bounds_.x, y, lab, fg, bg, cur ? StyleBold : StyleNone);
