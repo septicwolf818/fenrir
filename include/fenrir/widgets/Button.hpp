@@ -24,10 +24,11 @@ public:
     void draw(Screen& screen) override {
         const auto& t = theme::active;
         const bool hot = (focused_ || highlighted_) && enabled_;
-        // A disabled button is drawn dimmed (inactive) and never goes hot.
+        // The theme's dimText color controls disabled contrast; do not also
+        // apply ANSI dim, which can turn a bright theme color into gray.
         const Color fg = enabled_ ? (hot ? t.buttonTextHot : t.buttonText) : t.dimText;
         const Color bg = t.buttonBg;
-        const uint8_t style = enabled_ ? (hot ? StyleBold : StyleNone) : StyleDim;
+        const uint8_t style = enabled_ && hot ? StyleBold : StyleNone;
 
         screen.fillRect(bounds_, Cell{U' ', fg, bg, 0});
 
