@@ -1,15 +1,13 @@
 #pragma once
 #include <algorithm>
-#include <chrono>
-#include <filesystem>
 #include <functional>
 #include <set>
 #include <string>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "fenrir/core/FileSystem.hpp"
+#include "fenrir/core/FileWatchdog.hpp"
 #include "fenrir/core/Text.hpp"
 #include "fenrir/core/Theme.hpp"
 #include "fenrir/widgets/Widget.hpp"
@@ -24,9 +22,6 @@ namespace fenrir {
 // fs::list (sorting inherited).
 class FileTree : public Widget {
 public:
-    // How often the watchdog checks the expanded directories.
-    static constexpr int kPollIntervalMs = 500;
-
     std::function<void(const std::string& path)> onOpen;
 
     // Sets the root directory and expands it; selection on the root.
@@ -34,9 +29,9 @@ public:
         root_ = std::move(path);
         expanded_.clear();
         if (!root_.empty()) expanded_.insert(root_);
-        // Reset timestamps for new root
-        dirTimestamps_.clear();
-        lastPoll_ = std::chrono::steady_clock::time_point{};
+        // Watch the new root; the old directories are no longer watched.
+        watchdog_.clear();
+        if (!root_.empty()) watchdog_.watch(root_);
         rebuild();
         sel_ = 0;
         scrollRow_ = 0;
@@ -132,53 +127,16 @@ public:
 
     bool editable() const override { return false; }
 
-    // Watchdog: poll only expanded directories for changes every 500ms.
+    // Watchdog: the expanded directories are watched for changes (a new file,
+    // a rename, a removed directory). Returns true when the tree was rebuilt.
     bool pollFilesystem() {
-        using namespace std::chrono;
-        const auto now = steady_clock::now();
-        if (lastPoll_ == time_point<steady_clock>{}) {
-            lastPoll_ = now;
-            // Initial population of timestamps
-            for (const auto& p : expanded_) {
-                updateTimestamp(p);
-            }
-            return false;
-        }
-        if (now - lastPoll_ < milliseconds(kPollIntervalMs)) return false;
-        lastPoll_ = now;
-
         bool changed = false;
-        // Only scan directories that are currently expanded (and visible in tree)
-        std::vector<std::string> toCheck;
-        toCheck.reserve(expanded_.size());
-        for (const auto& p : expanded_) {
-            toCheck.push_back(p);
-        }
-        for (const auto& p : toCheck) {
-            std::error_code ec;
-            // A missing path is reported as file_type::not_found; whether the
-            // error code is also set varies between standard libraries, so the
-            // type is checked first and the error code afterwards.
-            const std::filesystem::file_status status = std::filesystem::status(p, ec);
-            if (status.type() == std::filesystem::file_type::not_found) {
-                // The directory is gone: stop watching it and refresh the tree.
-                if (expanded_.erase(p) > 0) changed = true;
-                dirTimestamps_.erase(p);
-                continue;
+        for (const auto& event : watchdog_.poll()) {
+            if (event.change == FileWatchdog::Change::Removed) {
+                // The directory is gone — stop watching it.
+                expanded_.erase(event.path);
             }
-            if (ec) continue; // transient error (e.g. permission) — retry later
-            // Check if directory is still expanded (might have been collapsed during iteration)
-            if (!expanded_.count(p)) continue;
-            std::filesystem::file_time_type mtime;
-            if (!mtimeOf(p, mtime)) continue;
-            auto it = dirTimestamps_.find(p);
-            if (it == dirTimestamps_.end()) {
-                dirTimestamps_[p] = mtime;
-            } else if (it->second != mtime) {
-                // Directory modification time changed — rebuild
-                changed = true;
-                it->second = mtime;
-            }
+            changed = true;
         }
         if (changed) rebuild();
         return changed;
@@ -192,30 +150,6 @@ private:
         bool expanded = false;
     };
 
-    void updateTimestamp(const std::string& path) {
-        std::error_code ec;
-        const std::filesystem::file_status status = std::filesystem::status(path, ec);
-        if (status.type() == std::filesystem::file_type::not_found || ec) {
-            dirTimestamps_.erase(path);
-            return;
-        }
-        std::filesystem::file_time_type mtime;
-        if (!mtimeOf(path, mtime)) {
-            dirTimestamps_.erase(path);
-            return;
-        }
-        dirTimestamps_[path] = mtime;
-    }
-
-    // Last write time of a path; false when it cannot be read.
-    static bool mtimeOf(const std::string& path, std::filesystem::file_time_type& out) {
-        std::error_code ec;
-        const auto mtime = std::filesystem::last_write_time(path, ec);
-        if (ec) return false;
-        out = mtime;
-        return true;
-    }
-
     // Full rebuild of the visible list (root + expanded branch).
     // The selection is tracked by PATH — indices change while expanding.
     void rebuild() {
@@ -224,10 +158,6 @@ private:
                                   : std::string();
         visible_.clear();
         if (!root_.empty()) addNode(root_, 0);
-        // Update timestamps for expanded directories after rebuild
-        for (const auto& p : expanded_) {
-            updateTimestamp(p);
-        }
         sel_ = 0;
         if (!selPath.empty()) {
             for (int i = 0; i < static_cast<int>(visible_.size()); ++i) {
@@ -260,11 +190,14 @@ private:
 
     void toggleExpand(int idx) {
         Node& n = visible_[static_cast<std::size_t>(idx)];
-        if (n.expanded) expanded_.erase(n.path);
-        else expanded_.insert(n.path);
-        // Rescan on collapse/expand so changes are picked up immediately
-        // Update timestamp for the toggled directory to avoid immediate re-poll
-        updateTimestamp(n.path);
+        if (n.expanded) {
+            expanded_.erase(n.path);
+            watchdog_.unwatch(n.path);
+        } else {
+            expanded_.insert(n.path);
+            watchdog_.watch(n.path);
+        }
+        // Rescan on collapse/expand so changes are picked up immediately.
         rebuild();
     }
 
@@ -273,8 +206,7 @@ private:
     std::set<std::string> expanded_;
     int sel_ = 0;
     int scrollRow_ = 0;
-    std::unordered_map<std::string, std::filesystem::file_time_type> dirTimestamps_;
-    std::chrono::steady_clock::time_point lastPoll_;
+    FileWatchdog watchdog_;
 };
 
 } // namespace fenrir

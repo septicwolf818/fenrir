@@ -22,6 +22,7 @@ add_library(fenrir STATIC
     src/terminal/Terminal.cpp
     src/core/Screen.cpp
     src/core/FileSystem.cpp
+    src/core/FileWatchdog.cpp
     src/core/Themes.cpp
     src/core/Settings.cpp
     src/core/Prefs.cpp
@@ -65,6 +66,14 @@ add_test(NAME fenrir_tests COMMAND fenrir_tests)
 add_executable(fenrir_filetree_tests tests/test_filetree.cpp)
 target_link_libraries(fenrir_filetree_tests PRIVATE fenrir)
 add_test(NAME fenrir_filetree_tests COMMAND fenrir_filetree_tests)
+
+add_executable(fenrir_watchdog_tests tests/test_watchdog.cpp)
+target_link_libraries(fenrir_watchdog_tests PRIVATE fenrir)
+add_test(NAME fenrir_watchdog_tests COMMAND fenrir_watchdog_tests)
+
+add_executable(fenrir_editor_tests tests/test_editor.cpp)
+target_link_libraries(fenrir_editor_tests PRIVATE fenrir)
+add_test(NAME fenrir_editor_tests COMMAND fenrir_editor_tests)
 
 # --- install rules ---------------------------------------------------------
 install(TARGETS fenrir_desktop

@@ -3,6 +3,8 @@
 #include <string>
 #include <utility>
 
+#include "fenrir/core/FileSystem.hpp"
+#include "fenrir/core/FileWatchdog.hpp"
 #include "fenrir/core/Text.hpp"
 #include "fenrir/core/Theme.hpp"
 #include "fenrir/widgets/DirectoryListing.hpp"
@@ -17,10 +19,15 @@ namespace fenrir {
 // "directory browsing" — FileDialog and the file manager compose TWO such views
 // instead of writing their own list drawing (a duplication that had crept into
 // the project in three places).
+//
+// The listed directory is watched, so files created, renamed or removed
+// elsewhere show up without pressing a refresh key.
 class DirectoryView : public Widget {
 public:
     explicit DirectoryView(std::string startDir) : listing_(std::move(startDir)) {
         list_.onActivate = [this](int idx) { activateIndex(idx); };
+        watchdogPath_ = listing_.currentDir();
+        watchdog_.watch(watchdogPath_);
         refresh(/*keepSelection=*/false);
     }
 
@@ -42,6 +49,9 @@ public:
     // Switch to the given directory (Ctrl+G / "Go to folder...").
     void setDirectory(std::string dir) {
         listing_ = DirectoryListing(std::move(dir));
+        watchdog_.unwatch(watchdogPath_);
+        watchdogPath_ = listing_.currentDir();
+        watchdog_.watch(watchdogPath_);
         refresh(/*keepSelection=*/false);
         if (onDirChange) onDirChange(listing_.currentDir());
     }
@@ -49,6 +59,9 @@ public:
     void goUp() {
         const std::string before = listing_.currentDir();
         listing_.goUp();
+        watchdog_.unwatch(watchdogPath_);
+        watchdogPath_ = listing_.currentDir();
+        watchdog_.watch(watchdogPath_);
         refresh(/*keepSelection=*/false);
         if (onDirChange && listing_.currentDir() != before) onDirChange(listing_.currentDir());
     }
@@ -70,6 +83,16 @@ public:
     void draw(Screen& screen) override {
         const auto& t = theme::active;
         if (bounds_.w <= 0 || bounds_.h <= 0) return;
+
+        // The listed directory changed on disk (a file was created, renamed
+        // or removed elsewhere) — re-read it. The selection stays put. No
+        // status message: the list visibly updates, and a message here would
+        // overwrite the one the file manager shows for its own actions.
+        for (const auto& event : watchdog_.poll()) {
+            if (event.path != watchdogPath_) continue;
+            listing_.reload();
+            refresh(/*keepSelection=*/true);
+        }
 
         if (listing_.hasError()) {
             // Listing error: a clear red message instead of an empty list.
@@ -122,6 +145,8 @@ private:
 
     DirectoryListing listing_;
     ListView list_;
+    FileWatchdog watchdog_;
+    std::string watchdogPath_; // the directory currently watched
 };
 
 } // namespace fenrir

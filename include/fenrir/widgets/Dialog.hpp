@@ -28,7 +28,15 @@ public:
 
     explicit Dialog(std::u32string message, Buttons buttons = Buttons::Ok)
         : message_(std::move(message)), buttons_(buttons) {
-        buildButtons();
+        buildButtons(labelsFor(buttons_));
+    }
+
+    // Dialog with custom button labels — e.g. a file conflict with
+    // "Overwrite", "Save as..." and "Cancel". onResult(idx) gives the index
+    // of the pressed button (-1 = Esc).
+    Dialog(std::u32string message, std::vector<std::u32string> labels)
+        : message_(std::move(message)) {
+        buildButtons(labels);
     }
 
     std::function<void(int index)> onResult;
@@ -164,8 +172,7 @@ private:
         return {U"OK"};
     }
 
-    void buildButtons() {
-        auto labels = labelsFor(buttons_);
+    void buildButtons(const std::vector<std::u32string>& labels) {
         panel_ = std::make_unique<Panel>(static_cast<int>(labels.size()), 0, 1);
         for (std::size_t i = 0; i < labels.size(); ++i) {
             auto btn = std::make_unique<Button>(labels[i]);

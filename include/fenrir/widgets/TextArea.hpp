@@ -1,11 +1,13 @@
 #pragma once
 #include <cstdint>
+#include <ctime>
 #include <functional>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
+#include "fenrir/core/FileWatchdog.hpp"
 #include "fenrir/widgets/Widget.hpp"
 
 namespace fenrir {
@@ -77,6 +79,15 @@ public:
     const std::string& path() const { return path_; }
     bool dirty() const override { return dirty_; }
 
+    // --- External changes ---------------------------------------------------
+    // The file this buffer came from can be changed or removed by another
+    // program after it was loaded. The stamp below is the state of the file
+    // when it was loaded or saved; the editor compares it with the current
+    // state on disk (FileWatchdog::stateOf) to notice such a change.
+    const FileWatchdog::State& fileStamp() const { return fileStamp_; }
+    // When the file was loaded or saved by the editor (0 = unknown).
+    std::time_t fileSavedAt() const { return fileSavedAt_; }
+
     // Cursor position (line, column), both 1-based — for the status bar.
     std::pair<int, int> cursorLineCol() const { return {cursorRow_ + 1, cursorCol_ + 1}; }
 
@@ -124,6 +135,9 @@ private:
 
     std::string path_;
     bool dirty_ = false;
+    // State of the file on disk when it was loaded or saved (see fileStamp()).
+    FileWatchdog::State fileStamp_;
+    std::time_t fileSavedAt_ = 0;
     SyntaxHighlighter syntaxHighlighter_;
     BlockCommentScan blockScan_;
     mutable std::vector<char> blockStart_; // per-line "starts in block comment"
