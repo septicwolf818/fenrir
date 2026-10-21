@@ -62,6 +62,10 @@ add_executable(fenrir_tests tests/test_vt.cpp)
 target_link_libraries(fenrir_tests PRIVATE fenrir)
 add_test(NAME fenrir_tests COMMAND fenrir_tests)
 
+add_executable(fenrir_filetree_tests tests/test_filetree.cpp)
+target_link_libraries(fenrir_filetree_tests PRIVATE fenrir)
+add_test(NAME fenrir_filetree_tests COMMAND fenrir_filetree_tests)
+
 # --- install rules ---------------------------------------------------------
 install(TARGETS fenrir_desktop
     RUNTIME DESTINATION bin
