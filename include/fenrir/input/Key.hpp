@@ -21,10 +21,6 @@ struct KeyEvent {
     // with alt=true from that. Practical combos on a bare TTY: Alt+Tab (ESC+Tab) and
     // Alt+composite key (ESC+ESC[5~).
     bool alt = false;
-    // Shift. Arrows with a modifier arrive as ESC [ 1 ; <mods> A (the xterm
-    // form); the Linux console sends the same sequence for Shift+Arrow, so
-    // Shift+Arrow (text selection) works on a bare console too.
-    bool shift = false;
 };
 
 

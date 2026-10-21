@@ -82,8 +82,7 @@ editing/navigation modes; the Terminal app forwards it to the shell instead.
 | `Ctrl+R` | Reload the file from disk (asks first when there are unsaved changes) |
 | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut / paste (the workspace clipboard) |
 | `Ctrl+A` | Select all |
-| `Shift+Arrow` | Extend the selection |
-| `Ctrl+Space`, then arrows | Selection mode for consoles that omit Shift modifiers |
+| `Ctrl+Space` | Toggle selection mode; use arrows to extend the selection |
 | `Ctrl+T` | Close the current tab |
 | `Ctrl+E` | Toggle line wrapping |
 | `Ctrl+G` | Toggle line numbers |

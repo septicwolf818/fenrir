@@ -103,6 +103,8 @@ public:
             if (index >= count()) break;
             const Entry& entry = entries_[static_cast<std::size_t>(index)];
             const bool sel = index == selected_;
+            // Keep the selected page legible in inactive windows too; the
+            // window border is the global focus indicator.
             Color fg = sel ? t.accentText : t.surfaceText;
             Color bg = sel ? t.accentBg : t.surfaceBg;
             uint8_t style = StyleNone;
@@ -110,9 +112,6 @@ public:
                 // The category headers stand out, but they are never selected.
                 fg = t.buttonTextHot;
                 style = StyleBold;
-            } else if (sel && !focused_) {
-                // The list is not the active pane: the selection is dimmed.
-                fg = t.dimText;
             }
             screen.fillRect(Rect{bounds_.x, bounds_.y + row, bounds_.w, 1},
                             Cell{U' ', fg, bg, style});
@@ -264,7 +263,6 @@ public:
         const int tocWidth = std::min(std::clamp(totalWidth / 3, 16, 28), totalWidth);
 
         toc_.setBounds(Rect{bounds_.x, bounds_.y, tocWidth, paneHeight});
-        toc_.setFocused(focused_ && focus_ == Focus::Toc);
         toc_.draw(screen);
 
         // A vertical line separates the contents from the page.

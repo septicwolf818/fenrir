@@ -196,12 +196,10 @@ inline Library buildLibrary() {
                     {"Ctrl+X", "Cut the selection"},
                     {"Ctrl+V", "Paste"},
                     {"Ctrl+A", "Select all"},
-                    {"Shift+Arrow", "Extend the selection"},
-                    {"Ctrl+Space", "Selection mode (see the note)"},
+                    {"Ctrl+Space", "Toggle selection mode; arrows extend the selection"},
                 })
-                .note("Consoles that do not report the Shift modifier with the arrow keys cannot "
-                      "deliver Shift+Arrow. Press Ctrl+Space once: the arrow keys then extend the "
-                      "selection. Press Ctrl+Space again to leave the mode.")
+                .note("Press Ctrl+Space to turn selection mode on. Arrow keys extend the current "
+                      "selection; press Ctrl+Space again to turn selection mode off.")
                 .seeAlso({"text-editor", "files"})
                 .build());
 
@@ -315,8 +313,8 @@ inline Library buildLibrary() {
                 .keys({
                     {"Characters", "Type"},
                     {"Arrows", "Move the cursor"},
-                    {"Shift+Arrow", "Extend the selection"},
                     {"Ctrl+C / Ctrl+X / Ctrl+V", "Copy / cut / paste"},
+                    {"Ctrl+Space", "Text Editor: toggle selection mode"},
                     {"F2", "Menu of the application"},
                     {"Esc", "Back to the keyboard mode of the window"},
                 })
@@ -365,8 +363,7 @@ inline Library buildLibrary() {
                 .keys({
                     {"Ctrl+C / Ctrl+X / Ctrl+V", "Copy / cut / paste"},
                     {"Ctrl+A", "Select all"},
-                    {"Shift+Arrow", "Extend the selection"},
-                    {"Ctrl+Space", "Selection mode, then the arrows"},
+                    {"Ctrl+Space", "Toggle selection mode; arrows extend the selection"},
                     {"Ctrl+E", "Toggle the line wrapping"},
                     {"Ctrl+G", "Toggle the line numbers"},
                     {"Ctrl+Y", "Toggle spaces instead of tab characters"},
@@ -554,9 +551,10 @@ inline Library buildLibrary() {
                 .section("Alt+Tab does not switch the windows")
                 .text("Some consoles do not send Alt+Tab. Use the taskbar instead: move the "
                       "cursor to the handle of the window and press Enter.")
-                .section("Shift+Arrow does not select")
-                .text("The console does not report the Shift modifier with the arrow keys. Press "
-                      "Ctrl+Space to enter the selection mode, then use the arrows.")
+                .section("Selecting text")
+                .text("In the Text Editor, press Ctrl+Space to turn selection mode on, then move "
+                      "with the arrow keys to extend the selection. Press Ctrl+Space again to "
+                      "turn selection mode off.")
                 .section("The arrows scroll the console instead")
                 .text("The console scrollback is on. Switch it off in the console settings, or "
                       "use the PgUp and PgDn keys of the application (the Terminal application "
