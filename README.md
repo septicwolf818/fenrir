@@ -79,6 +79,10 @@ editing/navigation modes; the Terminal app forwards it to the shell instead.
 | `Ctrl+D` | Open a folder in the file tree |
 | `Ctrl+B` | Toggle focus between the file tree and text |
 | `Ctrl+S` | Save |
+| `Ctrl+R` | Reload the file from disk (asks first when there are unsaved changes) |
+| `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut / paste (the workspace clipboard) |
+| `Ctrl+A` | Select all |
+| `Shift+Arrow` | Extend the selection |
 | `Ctrl+T` | Close the current tab |
 | `Ctrl+E` | Toggle line wrapping |
 | `Ctrl+G` | Toggle line numbers |
@@ -89,6 +93,18 @@ Syntax highlighting for C/C++, JavaScript/TypeScript, Java, Go, Rust, Python,
 shell, JSON, HTML/XML, CSS, INI/TOML/YAML, CMake, and Markdown is enabled by
 default. Toggle it from the editor's **Format** menu; the choice is saved in
 editor preferences.
+
+Files changed or removed outside the editor are noticed: the status bar shows
+`[changed]` or `[removed]`. Saving a file that was removed asks for a new
+name; saving a file that was changed opens a dialog with the context and the
+choices **Overwrite**, **Save as...** and **Cancel** (keep your version).
+`Ctrl+R` re-reads the file from disk and drops the editor's own changes.
+
+The clipboard is shared by the whole workspace: text copied in the editor can
+be pasted in another application, and the other way round. A text console has
+no system clipboard, so the text is kept in `~/.config/fenrir/clipboard.txt`;
+it is also sent to the terminal with OSC 52, so graphical terminals that
+support it can paste the text outside of Fenrir.
 
 ### File Manager
 

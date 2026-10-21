@@ -4,6 +4,7 @@
 #include <functional>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -69,6 +70,22 @@ public:
     bool insertsSpaces() const { return insertsSpaces_; }
 
     // Line numbers (left gutter), toggled from the menu or a shortcut.
+    // --- Selection -----------------------------------------------------------
+    // A selection is an anchor (logical line/column) plus the cursor as the
+    // other end. Shift+Arrow extends it, Ctrl+C/X/V work with the global
+    // clipboard (see fenrir/core/Clipboard.hpp).
+    bool hasSelection() const { return selecting_; }
+    // The selected text ("" when nothing is selected).
+    std::u32string selectedText() const;
+    void selectAll();
+    void clearSelection();
+    // Copies the selection to the clipboard; true when something was copied.
+    bool copySelection();
+    // Copies the selection and removes it from the buffer.
+    bool cutSelection();
+    // Inserts the clipboard content at the cursor (replacing the selection).
+    void pasteClipboard();
+
     void setShowLineNumbers(bool on) {
         if (lineNumbers_ == on) return;
         lineNumbers_ = on;
@@ -90,6 +107,10 @@ public:
 
     // Cursor position (line, column), both 1-based — for the status bar.
     std::pair<int, int> cursorLineCol() const { return {cursorRow_ + 1, cursorCol_ + 1}; }
+
+    // Moves the cursor to a 1-based (line, column) position, clamped to the
+    // buffer. Used to keep the place after the file was reloaded from disk.
+    void setCursorLineCol(int line, int col);
 
     // Word wrapping is enabled by default. When disabled, long lines extend
     // beyond the screen and scroll HORIZONTALLY (scrollCol_, as in LineEdit),
@@ -135,6 +156,9 @@ private:
 
     std::string path_;
     bool dirty_ = false;
+    // Selection anchor (logical line/column); the cursor is the other end.
+    int selRow_ = 0, selCol_ = 0;
+    bool selecting_ = false;
     // State of the file on disk when it was loaded or saved (see fileStamp()).
     FileWatchdog::State fileStamp_;
     std::time_t fileSavedAt_ = 0;
@@ -170,6 +194,15 @@ private:
 
     void insertChar(char32_t ch);
     void insertNewline();
+    // Inserts a piece of text (may contain newlines) at the cursor.
+    void insertText(const std::u32string& text);
+    // --- Selection helpers (private) -----------------------------------------
+    // Normalized selection range: start line/column and end line/column, the
+    // end being exclusive.
+    std::tuple<int, int, int, int> selectionRange() const;
+    bool isSelected(int line, int col) const;
+    void beginSelection();   // anchors the selection at the cursor
+    void deleteSelection();  // removes the selected text
     void backspace();
     void del();
     void moveHoriz(int dCol); // Move left/right, crossing between lines.
