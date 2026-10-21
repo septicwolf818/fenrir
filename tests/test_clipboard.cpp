@@ -19,20 +19,12 @@ static void typeText(TextArea& area, const std::string& utf8) {
 }
 
 void runClipboardTests() {
-    // --- The key parser understands the shift modifier -----------------------
+    // --- Ctrl+Space maps to the selection-mode key ---------------------------
     {
         KeyParser parser;
-        const auto events = parser.feed("\x1b[1;2A", 6);
-        check(events.size() == 1, "one key from the sequence");
-        check(events[0].key == Key::Up, "Shift+Up is an Up key");
-        check(events[0].shift, "the shift modifier is set");
-        check(!events[0].ctrl && !events[0].alt, "no other modifier");
-
         const auto ctrl = parser.feed("\x1b[1;5A", 6);
-        check(ctrl.size() == 1 && ctrl[0].ctrl && !ctrl[0].shift, "Ctrl+Up keeps ctrl only");
-
-        const auto both = parser.feed("\x1b[1;6A", 6);
-        check(both.size() == 1 && both[0].ctrl && both[0].shift, "Ctrl+Shift+Up has both");
+        check(ctrl.size() == 1 && ctrl[0].key == Key::Up && ctrl[0].ctrl,
+              "Ctrl+Up keeps its control modifier");
 
         const char nul = '\0';
         const auto space = parser.feed(&nul, 1);
@@ -60,7 +52,7 @@ void runClipboardTests() {
         check(clipboard::base64Encode("hello world") == "aGVsbG8gd29ybGQ=", "a longer text");
     }
 
-    // --- Selecting text with Shift+Arrow and copying it ---------------------
+    // --- Ctrl+Space selection, copy/cut/paste, and highlighting --------------
     {
         const std::string saved = clipboard::text();
         TextArea area;
@@ -69,13 +61,21 @@ void runClipboardTests() {
         check(!area.hasSelection(), "no selection after typing");
 
         KeyParser selectionKeys;
+        const auto modifiedArrow = selectionKeys.feed("\x1b[1;2D", 6);
+        check(modifiedArrow.size() == 1 && modifiedArrow[0].key == Key::Left,
+              "a modified arrow remains a cursor movement key");
+        area.handleKey(modifiedArrow[0]);
+        check(!area.hasSelection(), "modified arrows do not start a selection");
+        area.handleKey(KeyEvent{Key::Right}); // return to the end of the text
+
+        const char nul = '\0';
+        const auto space = selectionKeys.feed(&nul, 1);
+        check(space.size() == 1 && space[0].ctrl, "Ctrl+Space produces a key event");
+        area.handleKey(space[0]);
         for (int i = 0; i < 5; ++i) {
-            const auto events = selectionKeys.feed("\x1b[1;2D", 6); // Shift+Left
-            check(events.size() == 1 && events[0].shift && events[0].key == Key::Left,
-                  "parser emits Shift+Left");
-            area.handleKey(events[0]);
+            area.handleKey(KeyEvent{Key::Left});
         }
-        check(area.hasSelection(), "Shift+Left starts a selection");
+        check(area.hasSelection(), "arrows start a selection in Ctrl+Space mode");
         check(area.selectedText() == U"world", "the selection covers the last word");
         Screen screen(40, 10);
         area.draw(screen);
@@ -97,24 +97,11 @@ void runClipboardTests() {
         area.handleKey(KeyEvent{Key::Char, U'a', true}); // Ctrl+A
         check(area.hasSelection(), "Ctrl+A selects everything");
         check(area.selectedText() == U"hello world", "the whole buffer is selected");
+        area.handleKey(space[0]); // selection mode on
+        area.handleKey(space[0]); // selection mode off
+        area.handleKey(KeyEvent{Key::Left});
+        check(!area.hasSelection(), "arrows stop extending the selection when mode is off");
         clipboard::setText(saved); // put the user's clipboard back
-    }
-
-    // The bare Linux console may not include Shift in arrow-key bytes. Ctrl+
-    // Space toggles selection mode there; arrows then extend the selection.
-    {
-        TextArea area;
-        area.setBounds(Rect{0, 0, 40, 10});
-        typeText(area, "hello world");
-        const char nul = '\0';
-        KeyParser parser;
-        const auto keys = parser.feed(&nul, 1);
-        check(keys.size() == 1, "Ctrl+Space produces a key event");
-        area.handleKey(keys[0]);
-        for (int i = 0; i < 5; ++i)
-            area.handleKey(KeyEvent{Key::Left});
-        check(area.hasSelection() && area.selectedText() == U"world",
-              "Ctrl+Space selection mode extends with plain arrows");
     }
 
 }

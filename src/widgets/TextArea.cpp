@@ -505,13 +505,13 @@ KeyEventResult TextArea::handleKey(const KeyEvent& ev) {
         return KeyEventResult::Consumed;
     }
     // Ctrl+Space is NUL on a TTY; KeyParser represents it as Ctrl+backtick.
-    // It provides selection on consoles that don't send Shift+Arrow modifiers.
+    // While selection mode is active, plain arrow keys extend the selection.
     if (ev.ctrl && ev.key == Key::Char && ev.character == U'`') {
         toggleSelectionMode();
         return KeyEventResult::Consumed;
     }
-    // Clipboard: copy / cut / paste / select all. They work on the selection
-    // made with Shift+Arrow (and on the whole buffer for select all).
+    // Clipboard: copy / cut / paste / select all. Copy and cut use the active
+    // Ctrl+Space selection (or the whole buffer for select all).
     if (ev.ctrl && ev.key == Key::Char) {
         switch (ev.character) {
             case U'c': case U'C':
@@ -530,12 +530,13 @@ KeyEventResult TextArea::handleKey(const KeyEvent& ev) {
             default: break;
         }
     }
-    // Shift+Arrow extends the selection; a plain cursor move drops it.
+    // Selection mode makes cursor movement extend the selection; otherwise a
+    // plain cursor move drops it.
     const bool moveKey = ev.key == Key::Up || ev.key == Key::Down || ev.key == Key::Left ||
                          ev.key == Key::Right || ev.key == Key::Home || ev.key == Key::End ||
                          ev.key == Key::PageUp || ev.key == Key::PageDown;
     if (moveKey) {
-        if (ev.shift || selectionMode_) beginSelection();
+        if (selectionMode_) beginSelection();
         else clearSelection();
     }
     switch (ev.key) {

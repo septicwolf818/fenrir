@@ -209,4 +209,32 @@ void runHandbookTests() {
         }
         check(foundTitle, "the title of the page is drawn");
     }
+
+    // The selected TOC item stays legible in an inactive Handbook window.
+    {
+        struct RestoreTheme {
+            theme::Theme value = theme::active;
+            ~RestoreTheme() { theme::active = value; }
+        } restoreTheme;
+        check(theme::apply("forest"), "the Forest theme exists");
+
+        FakeContext ctx;
+        apps::HandbookView view(ctx);
+        view.setBounds(Rect{0, 0, 80, 24});
+        view.setFocused(true);
+        Screen activeScreen(80, 24);
+        view.draw(activeScreen);
+        const Cell activeSelection = activeScreen.at(0, 1);
+
+        view.setFocused(false); // another window becomes active
+        Screen inactiveScreen(80, 24);
+        view.draw(inactiveScreen);
+        const Cell inactiveSelection = inactiveScreen.at(0, 1);
+
+        check(inactiveSelection.fg == activeSelection.fg &&
+                  inactiveSelection.bg == activeSelection.bg,
+              "losing window focus does not recolor the selected TOC item");
+        check(inactiveSelection.fg != inactiveSelection.bg,
+              "the selected TOC item remains visible in Forest");
+    }
 }

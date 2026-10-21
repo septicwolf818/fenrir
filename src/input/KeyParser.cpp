@@ -79,12 +79,11 @@ KeyEvent KeyParser::parseEscapeSequence(std::string_view seq) const {
                         }
                     }
                     if (mods >= 0) {
-                        // The modifier parameter is 1 + a bit mask (1=shift, 2=alt,
-                        // 4=ctrl) — ESC[1;2A is Shift+Up, ESC[1;5A is Ctrl+Up.
+                        // The modifier parameter is 1 + a bit mask (2=alt, 4=ctrl).
+                        // Shift is not exposed as an application key modifier.
                         const int bits = mods > 0 ? mods - 1 : 0;
                         ev.ctrl = (bits & 4) != 0;
                         ev.alt = (bits & 2) != 0;
-                        ev.shift = (bits & 1) != 0;
                         switch (last) {
                             case 'A': ev.key = Key::Up; return ev;
                             case 'B': ev.key = Key::Down; return ev;
@@ -124,12 +123,11 @@ KeyEvent KeyParser::parseEscapeSequence(std::string_view seq) const {
                     const int mods = digits(num.substr(s1 + 1, s2 - s1 - 1));
                     const int code = digits(num.substr(s2 + 1));
                     if (mods >= 0 && code >= 0) {
-                        // The modifier parameter is 1 + a bit mask (1=shift, 2=alt,
-                        // 4=ctrl) — ESC[1;2A is Shift+Up, ESC[1;5A is Ctrl+Up.
+                        // The modifier parameter is 1 + a bit mask (2=alt, 4=ctrl).
+                        // Shift is not exposed as an application key modifier.
                         const int bits = mods > 0 ? mods - 1 : 0;
                         ev.ctrl = (bits & 4) != 0;
                         ev.alt = (bits & 2) != 0;
-                        ev.shift = (bits & 1) != 0;
                         switch (code) {
                             case 9:  ev.key = Key::Tab; return ev;
                             case 13: ev.key = Key::Enter; return ev;
@@ -149,12 +147,11 @@ KeyEvent KeyParser::parseEscapeSequence(std::string_view seq) const {
             if (msemi != std::string_view::npos) {
                 const int mods = digits(num.substr(msemi + 1));
                 if (mods >= 0) {
-                    // The modifier parameter is 1 + a bit mask (1=shift, 2=alt,
-                    // 4=ctrl) — ESC[1;2A is Shift+Up, ESC[1;5A is Ctrl+Up.
+                    // The modifier parameter is 1 + a bit mask (2=alt, 4=ctrl).
+                    // Shift is not exposed as an application key modifier.
                     const int bits = mods > 0 ? mods - 1 : 0;
                     ev.ctrl = (bits & 4) != 0;
                     ev.alt = (bits & 2) != 0;
-                    ev.shift = (bits & 1) != 0;
                     code = num.substr(0, msemi);
                 } else {
                     return ev; // unknown combination — don't fake known keys

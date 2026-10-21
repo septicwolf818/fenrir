@@ -72,8 +72,8 @@ public:
     // Line numbers (left gutter), toggled from the menu or a shortcut.
     // --- Selection -----------------------------------------------------------
     // A selection is an anchor (logical line/column) plus the cursor as the
-    // other end. Shift+Arrow extends it, Ctrl+C/X/V work with the global
-    // clipboard (see fenrir/core/Clipboard.hpp).
+    // other end. Ctrl+Space toggles extend-with-arrows mode; Ctrl+C/X/V work
+    // with the global clipboard (see fenrir/core/Clipboard.hpp).
     bool hasSelection() const { return selecting_; }
     // The selected text ("" when nothing is selected).
     std::u32string selectedText() const;
@@ -85,8 +85,7 @@ public:
     bool cutSelection();
     // Inserts the clipboard content at the cursor (replacing the selection).
     void pasteClipboard();
-    // Fallback for terminals (notably some Linux console keymaps) that don't
-    // report Shift on arrow keys: toggle an extend-with-arrows mode.
+    // Toggle extend-with-arrows selection mode.
     void toggleSelectionMode();
 
     void setShowLineNumbers(bool on) {
