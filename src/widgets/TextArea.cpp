@@ -138,6 +138,7 @@ void TextArea::selectAll() {
     selRow_ = 0;
     selCol_ = 0;
     selecting_ = true;
+    selectionMode_ = false;
     // The anchor stays at the start; the cursor marks the end.
     const int last = static_cast<int>(lines_.size()) - 1;
     cursorRow_ = std::max(0, last);
@@ -146,8 +147,17 @@ void TextArea::selectAll() {
 
 void TextArea::clearSelection() {
     selecting_ = false;
+    selectionMode_ = false;
     selRow_ = cursorRow_;
     selCol_ = cursorCol_;
+}
+
+void TextArea::toggleSelectionMode() {
+    selectionMode_ = !selectionMode_;
+    if (selectionMode_) beginSelection();
+    if (onStatus)
+        onStatus(selectionMode_ ? "Selection mode: use arrows, Ctrl+Space to finish"
+                                : "Selection mode ended");
 }
 
 void TextArea::beginSelection() {
@@ -175,6 +185,7 @@ void TextArea::deleteSelection() {
     cursorRow_ = sr;
     cursorCol_ = sc;
     selecting_ = false;
+    selectionMode_ = false;
     selRow_ = sr;
     selCol_ = sc;
     dirty_ = true;
@@ -493,6 +504,12 @@ KeyEventResult TextArea::handleKey(const KeyEvent& ev) {
         toggleWrap();
         return KeyEventResult::Consumed;
     }
+    // Ctrl+Space is NUL on a TTY; KeyParser represents it as Ctrl+backtick.
+    // It provides selection on consoles that don't send Shift+Arrow modifiers.
+    if (ev.ctrl && ev.key == Key::Char && ev.character == U'`') {
+        toggleSelectionMode();
+        return KeyEventResult::Consumed;
+    }
     // Clipboard: copy / cut / paste / select all. They work on the selection
     // made with Shift+Arrow (and on the whole buffer for select all).
     if (ev.ctrl && ev.key == Key::Char) {
@@ -518,7 +535,7 @@ KeyEventResult TextArea::handleKey(const KeyEvent& ev) {
                          ev.key == Key::Right || ev.key == Key::Home || ev.key == Key::End ||
                          ev.key == Key::PageUp || ev.key == Key::PageDown;
     if (moveKey) {
-        if (ev.shift) beginSelection();
+        if (ev.shift || selectionMode_) beginSelection();
         else clearSelection();
     }
     switch (ev.key) {

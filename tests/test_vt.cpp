@@ -1,3 +1,5 @@
+#include "test_harness.hpp"
+
 #include "fenrir/terminal/VtScreen.hpp"
 #include "fenrir/terminal/PtyProcess.hpp"
 
@@ -8,15 +10,10 @@
 #include <ctime>
 
 using namespace fenrir;
+using fenrir::test::check;
 
-static void check(bool cond, const char* msg) {
-    if (!cond) {
-        std::cerr << "FAIL: " << msg << "\n";
-        std::exit(1);
-    }
-}
 
-int main() {
+void runTerminalTests() {
     // Basic resize preserves content and cursor.
     {
         VtScreen v;
@@ -340,6 +337,4 @@ int main() {
         check(waitFor("3 10\r\n"), "resized child PTY size");
         pty.terminate();
     }
-    std::cout << "All tests passed.\n";
-    return 0;
 }

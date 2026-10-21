@@ -9,13 +9,14 @@ INSTALL      := $(CMAKE) --install
 BUILD_DIR    := build
 PREFIX       := $(HOME)/.local
 
-.PHONY: clean build install uninstall run help
+.PHONY: clean build install uninstall run test help
 
 help:
 	@echo "Usage:"
 	@echo "  make build    - Build the project"
 	@echo "  make clean    - Remove build artifacts"
 	@echo "  make run      - Run fenrir executable from build dir"
+	@echo "  make test     - Build and run the test suite"
 	@echo "  make install  - Install to $(PREFIX)"
 	@echo "  make uninstall - Uninstall from $(PREFIX)"
 	@echo ""
@@ -37,3 +38,7 @@ clean:
 
 run: build
 	./$(BUILD_DIR)/fenrir
+
+# The tests are ONE binary with all the suites (tests/main.cpp runs them).
+test: build
+	./$(BUILD_DIR)/fenrir_tests

@@ -1,8 +1,9 @@
+#include "test_harness.hpp"
+
 #include "fenrir/core/Screen.hpp"
 #include "fenrir/widgets/FileTree.hpp"
 
 #include <chrono>
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -10,13 +11,8 @@
 #include <thread>
 
 using namespace fenrir;
+using fenrir::test::check;
 
-static void check(bool cond, const char* msg) {
-    if (!cond) {
-        std::cerr << "FAIL: " << msg << "\n";
-        std::exit(1);
-    }
-}
 
 static std::string screenText(const Screen& screen) {
     std::string out;
@@ -26,7 +22,7 @@ static std::string screenText(const Screen& screen) {
     return out;
 }
 
-int main() {
+void runFileTreeTests() {
     const std::filesystem::path root =
         std::filesystem::temp_directory_path() / "fenrir_filetree_watchdog";
     std::filesystem::remove_all(root);
@@ -79,6 +75,4 @@ int main() {
     tree.draw(screen);
     check(screenText(screen).find("[-]") == std::string::npos, "removed root is not watched anymore");
 
-    std::cout << "All FileTree tests passed.\n";
-    return 0;
 }
