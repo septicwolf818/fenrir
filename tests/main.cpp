@@ -17,6 +17,7 @@ void runWatchdogTests();
 void runEditorTests();
 void runClipboardTests();
 void runHandbookTests();
+void runWindowTests();
 
 namespace {
 
@@ -46,6 +47,7 @@ int main() {
         {"text editor", runEditorTests},
         {"clipboard", runClipboardTests},
         {"handbook", runHandbookTests},
+        {"window focus", runWindowTests},
     };
 
     int failed = 0;

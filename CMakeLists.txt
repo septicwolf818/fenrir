@@ -70,6 +70,7 @@ add_executable(fenrir_tests
     tests/test_editor.cpp
     tests/test_clipboard.cpp
     tests/test_handbook.cpp
+    tests/test_window.cpp
 )
 target_link_libraries(fenrir_tests PRIVATE fenrir)
 add_test(NAME fenrir_tests COMMAND fenrir_tests)

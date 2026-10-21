@@ -47,7 +47,9 @@ public:
     void setBounds(const Rect& r) { bounds_ = r; }
     const Rect& bounds() const { return bounds_; }
 
-    // focused_ indicates whether this window (or a widget within it) is focused.
+    // focused_ indicates the active content target within this window. A window
+    // retains its focused content styling while inactive; its frame indicates
+    // global window focus.
     // highlighted_ indicates whether this widget is currently highlighted (e.g. selected during navigation).
     void setFocused(bool f) { focused_ = f; }
     bool focused() const { return focused_; }

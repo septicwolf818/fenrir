@@ -30,6 +30,8 @@ public:
     void constrainTo(const Rect& area);
 
     bool focused() const { return focused_; }
+    // Changes the global active window. Content focus styling is retained when
+    // this becomes inactive; the frame indicates global window focus.
     void setFocused(bool f);
 
     int zOrder() const { return zOrder_; }
