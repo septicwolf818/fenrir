@@ -61,3 +61,14 @@ set_target_properties(fenrir_desktop PROPERTIES OUTPUT_NAME fenrir)
 add_executable(fenrir_tests tests/test_vt.cpp)
 target_link_libraries(fenrir_tests PRIVATE fenrir)
 add_test(NAME fenrir_tests COMMAND fenrir_tests)
+
+# --- install rules ---------------------------------------------------------
+install(TARGETS fenrir_desktop
+    RUNTIME DESTINATION bin
+)
+install(TARGETS fenrir
+    ARCHIVE DESTINATION lib
+)
+install(DIRECTORY include/fenrir
+    DESTINATION include
+)

@@ -1,8 +1,11 @@
 #pragma once
 #include <algorithm>
+#include <chrono>
+#include <filesystem>
 #include <functional>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -28,6 +31,9 @@ public:
         root_ = std::move(path);
         expanded_.clear();
         if (!root_.empty()) expanded_.insert(root_);
+        // Reset timestamps for new root
+        dirTimestamps_.clear();
+        lastPoll_ = std::chrono::steady_clock::time_point{};
         rebuild();
         sel_ = 0;
         scrollRow_ = 0;
@@ -40,6 +46,9 @@ public:
         const auto& t = theme::active;
         screen.fillRect(bounds_, Cell{U' ', t.editorText, t.editorBg, 0});
         if (bounds_.w <= 0 || bounds_.h <= 0 || visible_.empty()) return;
+
+        // Poll for changes in opened directories before drawing
+        pollChanges();
 
         // Keep the selected row within the visible range.
         if (sel_ < scrollRow_) scrollRow_ = sel_;
@@ -137,6 +146,10 @@ private:
                                   : std::string();
         visible_.clear();
         if (!root_.empty()) addNode(root_, 0);
+        // Update timestamps for expanded directories after rebuild
+        for (const auto& p : expanded_) {
+            updateTimestamp(p);
+        }
         sel_ = 0;
         if (!selPath.empty()) {
             for (int i = 0; i < static_cast<int>(visible_.size()); ++i) {
@@ -171,7 +184,71 @@ private:
         Node& n = visible_[static_cast<std::size_t>(idx)];
         if (n.expanded) expanded_.erase(n.path);
         else expanded_.insert(n.path);
+        // Rescan on collapse/expand so changes are picked up immediately
+        // Update timestamp for the toggled directory to avoid immediate re-poll
+        updateTimestamp(n.path);
         rebuild();
+    }
+
+    // Watchdog: poll only expanded directories for changes every 500ms.
+    void pollChanges() {
+        using namespace std::chrono;
+        const auto now = steady_clock::now();
+        if (lastPoll_ == time_point<steady_clock>{}) {
+            lastPoll_ = now;
+            // Initial population of timestamps
+            for (const auto& p : expanded_) {
+                updateTimestamp(p);
+            }
+            return;
+        }
+        if (now - lastPoll_ < milliseconds(500)) return;
+        lastPoll_ = now;
+
+        bool changed = false;
+        // Only scan directories that are currently expanded (and visible in tree)
+        std::vector<std::string> toCheck;
+        toCheck.reserve(expanded_.size());
+        for (const auto& p : expanded_) {
+            toCheck.push_back(p);
+        }
+        for (const auto& p : toCheck) {
+            std::filesystem::path fsPath(p);
+            std::error_code ec;
+            auto status = std::filesystem::status(fsPath, ec);
+            if (ec) {
+                // Directory vanished or inaccessible; remove from expanded and mark changed
+                if (expanded_.count(p)) {
+                    expanded_.erase(p);
+                    changed = true;
+                }
+                dirTimestamps_.erase(p);
+                continue;
+            }
+            // Check if directory is still expanded (might have been collapsed during iteration)
+            if (!expanded_.count(p)) continue;
+            auto mtime = std::filesystem::last_write_time(fsPath, ec);
+            if (ec) continue;
+            auto it = dirTimestamps_.find(p);
+            if (it == dirTimestamps_.end()) {
+                dirTimestamps_[p] = mtime;
+            } else if (it->second != mtime) {
+                // Directory modification time changed — rebuild
+                changed = true;
+                it->second = mtime;
+            }
+        }
+        if (changed) rebuild();
+    }
+
+    void updateTimestamp(const std::string& path) {
+        std::filesystem::path fsPath(path);
+        std::error_code ec;
+        auto status = std::filesystem::status(fsPath, ec);
+        if (ec) return;
+        auto mtime = std::filesystem::last_write_time(fsPath, ec);
+        if (ec) return;
+        dirTimestamps_[path] = mtime;
     }
 
     std::string root_;
@@ -179,6 +256,8 @@ private:
     std::set<std::string> expanded_;
     int sel_ = 0;
     int scrollRow_ = 0;
+    std::unordered_map<std::string, std::filesystem::file_time_type> dirTimestamps_;
+    std::chrono::steady_clock::time_point lastPoll_;
 };
 
 } // namespace fenrir
