@@ -1,13 +1,16 @@
 #pragma once
 #include <algorithm>
+#include <chrono>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "fenrir/app/AppContext.hpp"
 #include "fenrir/core/FileSystem.hpp"
+#include "fenrir/core/FileWatchdog.hpp"
 #include "fenrir/core/Prefs.hpp"
 #include "fenrir/core/Text.hpp"
+#include "fenrir/widgets/Dialog.hpp"
 #include "fenrir/widgets/FileTree.hpp"
 #include "fenrir/widgets/StatusBar.hpp"
 #include "fenrir/widgets/TabBar.hpp"
@@ -117,7 +120,21 @@ public:
 
     void save() {
         if (cur().path().empty()) { saveAs(); return; }
+        // The file may have been changed or removed by another program after
+        // it was loaded — saving over it silently would lose that work.
+        switch (fileState()) {
+            case FileState::Missing:
+                status_.setMessage(text::toUtf32("The file was removed on disk - saving under a new name."));
+                saveAs();
+                return;
+            case FileState::Changed:
+                showConflictDialog();
+                return;
+            case FileState::Unchanged:
+                break;
+        }
         cur().saveToCurrentPath();
+        shownFileState_ = FileState::Unchanged;
         refreshTabBar(); // after saving a new file the label changes
     }
 
@@ -131,6 +148,7 @@ public:
         ctx_.saveFile(startDir, suggest, [this, token](const std::string& picked) {
             if (!token.lock()) return;
             cur().saveFile(picked);
+            shownFileState_ = FileState::Unchanged;
             refreshTabBar();
         });
     }
@@ -172,6 +190,7 @@ public:
             currentDirtyShown_ = cur().dirty();
             tabBar_.setDirty(current_, currentDirtyShown_);
         }
+        reportFileState();
 
         const int statusH = 1, tabH = 1;
         const int bodyH = std::max(0, bounds_.h - statusH);
@@ -201,6 +220,10 @@ public:
                               text::toUtf32(std::to_string(tabs_.size())) + U"]";
         std::u32string right = text::toUtf32(std::to_string(row) + ":" + std::to_string(col));
         if (cur().dirty()) right += U" *";
+        // The file was changed or removed outside the editor — say so in the
+        // status bar, not only in a message that scrolls away.
+        if (shownFileState_ == FileState::Changed) right += U" [changed]";
+        else if (shownFileState_ == FileState::Missing) right += U" [removed]";
 
         status_.setBounds(Rect{bounds_.x, bounds_.y + bodyH, bounds_.w, statusH});
         status_.setText(std::move(left), std::move(right));
@@ -269,6 +292,70 @@ private:
     TextArea& cur() { return *tabs_[static_cast<std::size_t>(current_)]; }
     const TextArea& cur() const { return *tabs_[static_cast<std::size_t>(current_)]; }
 
+    // State of the current tab's file compared with the state on disk.
+    enum class FileState { Unchanged, Changed, Missing };
+
+    FileState fileState() const {
+        const std::string& path = cur().path();
+        if (path.empty()) return FileState::Unchanged;
+        const FileWatchdog::State stamp = cur().fileStamp();
+        const FileWatchdog::State now = FileWatchdog::stateOf(path);
+        if (stamp.exists && !now.exists) return FileState::Missing;
+        if (FileWatchdog::differsFrom(stamp, now)) return FileState::Changed;
+        return FileState::Unchanged;
+    }
+
+    // Tell the user once per change that the file was changed or removed
+    // outside the editor. The check is throttled (a file query per frame
+    // would be wasteful) — the save flow always checks the real state.
+    void reportFileState() {
+        const auto now = std::chrono::steady_clock::now();
+        if (now - lastFileCheck_ < std::chrono::milliseconds(FileWatchdog::kPollIntervalMs)) return;
+        lastFileCheck_ = now;
+        const FileState state = fileState();
+        if (state == shownFileState_) return;
+        shownFileState_ = state;
+        if (state == FileState::Missing)
+            status_.setMessage(text::toUtf32("Removed on disk: " + cur().path()));
+        else if (state == FileState::Changed)
+            status_.setMessage(text::toUtf32("Changed on disk: " + cur().path()));
+    }
+
+    // The file was changed by someone else: ask what to do before writing
+    // over it. The dialog shows the context (path and both sizes).
+    void showConflictDialog() {
+        const std::string path = cur().path();
+        const FileWatchdog::State stamp = cur().fileStamp();
+        const FileWatchdog::State now = FileWatchdog::stateOf(path);
+        std::u32string msg = U"The file was changed outside the editor:\n" + text::toUtf32(path) +
+                             U"\n\nWhen it was loaded/saved: " + sizeText(stamp.size) +
+                             U"\nOn disk now: " + sizeText(now.size) +
+                             U"\n\nOverwrite it, save under another name, or keep your version?";
+        auto dlg = std::make_unique<Dialog>(
+            std::move(msg), std::vector<std::u32string>{U"Overwrite", U"Save as...", U"Cancel"});
+        const auto token = lifetimeToken();
+        ctx_.openDialog(U"File changed on disk", std::move(dlg), [token, this](int idx) {
+            if (!token.lock()) return;
+            if (idx == 0) { // Overwrite the file on disk
+                cur().saveToCurrentPath();
+                shownFileState_ = FileState::Unchanged;
+                refreshTabBar();
+                return;
+            }
+            if (idx == 1) { // Save under another name
+                saveAs();
+                return;
+            }
+            // Cancel: keep the buffer as it is, the file on disk stays untouched.
+            status_.setMessage(U"Kept your version - the file on disk was not changed.");
+        });
+    }
+
+    static std::u32string sizeText(std::uintmax_t bytes) {
+        if (bytes == 0) return U"0 bytes";
+        return text::toUtf32(std::to_string(bytes) + " bytes");
+    }
+
     // Tree panel width — the same geometry in draw() and clickAt().
     // Zero when no folder is loaded or the panel is toggled off.
     int treeWidth() const {
@@ -291,6 +378,7 @@ private:
         applySyntax(*area);
         tabs_.push_back(std::move(area));
         current_ = static_cast<int>(tabs_.size()) - 1;
+        shownFileState_ = FileState::Unchanged;
         refreshTabBar();
     }
 
@@ -309,6 +397,7 @@ private:
         if (tabs_.empty()) return;
         const int n = static_cast<int>(tabs_.size());
         current_ = ((idx % n) + n) % n;
+        shownFileState_ = FileState::Unchanged; // the new tab reports its own state
         refreshTabBar(); // also refreshes the bar selection and dirty markers
     }
 
@@ -357,6 +446,8 @@ private:
     bool insertsSpaces_ = false;
     bool syntaxHighlighting_ = true;
     bool currentDirtyShown_ = false;
+    FileState shownFileState_ = FileState::Unchanged;
+    std::chrono::steady_clock::time_point lastFileCheck_{};
 };
 
 } // namespace fenrir::apps

@@ -107,6 +107,10 @@ void TextArea::loadFile(const std::string& path) {
         lines_.push_back(std::u32string());
         dirty_ = false;
         markDirty();
+        // A file that does not exist yet: remember "missing" so a later
+        // external change (created or written by someone else) is noticed.
+        fileStamp_ = FileWatchdog::State{};
+        fileSavedAt_ = std::time(nullptr);
         if (onStatus) onStatus("New file: " + path);
         return;
     }
@@ -132,6 +136,10 @@ void TextArea::loadFile(const std::string& path) {
     goalCol_ = 0;
     dirty_ = false;
     markDirty();
+    // Remember the state of the file on disk: everything after this point is
+    // compared against it to notice changes made outside the editor.
+    fileStamp_ = FileWatchdog::stateOf(path);
+    fileSavedAt_ = std::time(nullptr);
     if (onStatus) onStatus("Loaded: " + path + " (" + std::to_string(lines_.size()) + " lines)");
 }
 
@@ -161,6 +169,10 @@ void TextArea::saveFile(const std::string& path) {
     }
     path_ = path;
     dirty_ = false;
+    // The file now holds our content — the new state is the reference for
+    // later external changes.
+    fileStamp_ = FileWatchdog::stateOf(path);
+    fileSavedAt_ = std::time(nullptr);
     if (onStatus) onStatus("Saved: " + path);
 }
 
@@ -183,6 +195,8 @@ void TextArea::newFile() {
     path_.clear();
     dirty_ = false;
     markDirty();
+    fileStamp_ = FileWatchdog::State{};
+    fileSavedAt_ = 0;
     if (onStatus) onStatus("New file");
 }
 
