@@ -60,7 +60,10 @@ int Window::minWindowHeight() const {
 
 void Window::setFocused(bool f) {
     focused_ = f;
-    if (content_) content_->setFocused(f);
+    // Preserve the content's focus cues while this window is inactive. The
+    // frame is the global window-focus indicator; widgets keep their current
+    // selection/colors until this window is activated again.
+    if (f && content_) content_->setFocused(true);
 }
 
 void Window::maximize(const Rect& area) {
