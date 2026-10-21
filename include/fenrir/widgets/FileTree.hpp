@@ -24,6 +24,9 @@ namespace fenrir {
 // fs::list (sorting inherited).
 class FileTree : public Widget {
 public:
+    // How often the watchdog checks the expanded directories.
+    static constexpr int kPollIntervalMs = 500;
+
     std::function<void(const std::string& path)> onOpen;
 
     // Sets the root directory and expands it; selection on the root.
@@ -44,11 +47,10 @@ public:
 
     void draw(Screen& screen) override {
         const auto& t = theme::active;
+        // Poll for changes in the expanded directories before drawing.
+        pollFilesystem();
         screen.fillRect(bounds_, Cell{U' ', t.editorText, t.editorBg, 0});
         if (bounds_.w <= 0 || bounds_.h <= 0 || visible_.empty()) return;
-
-        // Poll for changes in opened directories before drawing
-        pollChanges();
 
         // Keep the selected row within the visible range.
         if (sel_ < scrollRow_) scrollRow_ = sel_;
@@ -130,6 +132,58 @@ public:
 
     bool editable() const override { return false; }
 
+    // Watchdog: poll only expanded directories for changes every 500ms.
+    bool pollFilesystem() {
+        using namespace std::chrono;
+        const auto now = steady_clock::now();
+        if (lastPoll_ == time_point<steady_clock>{}) {
+            lastPoll_ = now;
+            // Initial population of timestamps
+            for (const auto& p : expanded_) {
+                updateTimestamp(p);
+            }
+            return false;
+        }
+        if (now - lastPoll_ < milliseconds(kPollIntervalMs)) return false;
+        lastPoll_ = now;
+
+        bool changed = false;
+        // Only scan directories that are currently expanded (and visible in tree)
+        std::vector<std::string> toCheck;
+        toCheck.reserve(expanded_.size());
+        for (const auto& p : expanded_) {
+            toCheck.push_back(p);
+        }
+        for (const auto& p : toCheck) {
+            std::error_code ec;
+            // A missing path is reported as file_type::not_found; whether the
+            // error code is also set varies between standard libraries, so the
+            // type is checked first and the error code afterwards.
+            const std::filesystem::file_status status = std::filesystem::status(p, ec);
+            if (status.type() == std::filesystem::file_type::not_found) {
+                // The directory is gone: stop watching it and refresh the tree.
+                if (expanded_.erase(p) > 0) changed = true;
+                dirTimestamps_.erase(p);
+                continue;
+            }
+            if (ec) continue; // transient error (e.g. permission) — retry later
+            // Check if directory is still expanded (might have been collapsed during iteration)
+            if (!expanded_.count(p)) continue;
+            std::filesystem::file_time_type mtime;
+            if (!mtimeOf(p, mtime)) continue;
+            auto it = dirTimestamps_.find(p);
+            if (it == dirTimestamps_.end()) {
+                dirTimestamps_[p] = mtime;
+            } else if (it->second != mtime) {
+                // Directory modification time changed — rebuild
+                changed = true;
+                it->second = mtime;
+            }
+        }
+        if (changed) rebuild();
+        return changed;
+    }
+
 private:
     struct Node {
         std::string path;
@@ -137,6 +191,30 @@ private:
         bool isDir = false;
         bool expanded = false;
     };
+
+    void updateTimestamp(const std::string& path) {
+        std::error_code ec;
+        const std::filesystem::file_status status = std::filesystem::status(path, ec);
+        if (status.type() == std::filesystem::file_type::not_found || ec) {
+            dirTimestamps_.erase(path);
+            return;
+        }
+        std::filesystem::file_time_type mtime;
+        if (!mtimeOf(path, mtime)) {
+            dirTimestamps_.erase(path);
+            return;
+        }
+        dirTimestamps_[path] = mtime;
+    }
+
+    // Last write time of a path; false when it cannot be read.
+    static bool mtimeOf(const std::string& path, std::filesystem::file_time_type& out) {
+        std::error_code ec;
+        const auto mtime = std::filesystem::last_write_time(path, ec);
+        if (ec) return false;
+        out = mtime;
+        return true;
+    }
 
     // Full rebuild of the visible list (root + expanded branch).
     // The selection is tracked by PATH — indices change while expanding.
@@ -188,67 +266,6 @@ private:
         // Update timestamp for the toggled directory to avoid immediate re-poll
         updateTimestamp(n.path);
         rebuild();
-    }
-
-    // Watchdog: poll only expanded directories for changes every 500ms.
-    void pollChanges() {
-        using namespace std::chrono;
-        const auto now = steady_clock::now();
-        if (lastPoll_ == time_point<steady_clock>{}) {
-            lastPoll_ = now;
-            // Initial population of timestamps
-            for (const auto& p : expanded_) {
-                updateTimestamp(p);
-            }
-            return;
-        }
-        if (now - lastPoll_ < milliseconds(500)) return;
-        lastPoll_ = now;
-
-        bool changed = false;
-        // Only scan directories that are currently expanded (and visible in tree)
-        std::vector<std::string> toCheck;
-        toCheck.reserve(expanded_.size());
-        for (const auto& p : expanded_) {
-            toCheck.push_back(p);
-        }
-        for (const auto& p : toCheck) {
-            std::filesystem::path fsPath(p);
-            std::error_code ec;
-            auto status = std::filesystem::status(fsPath, ec);
-            if (ec) {
-                // Directory vanished or inaccessible; remove from expanded and mark changed
-                if (expanded_.count(p)) {
-                    expanded_.erase(p);
-                    changed = true;
-                }
-                dirTimestamps_.erase(p);
-                continue;
-            }
-            // Check if directory is still expanded (might have been collapsed during iteration)
-            if (!expanded_.count(p)) continue;
-            auto mtime = std::filesystem::last_write_time(fsPath, ec);
-            if (ec) continue;
-            auto it = dirTimestamps_.find(p);
-            if (it == dirTimestamps_.end()) {
-                dirTimestamps_[p] = mtime;
-            } else if (it->second != mtime) {
-                // Directory modification time changed — rebuild
-                changed = true;
-                it->second = mtime;
-            }
-        }
-        if (changed) rebuild();
-    }
-
-    void updateTimestamp(const std::string& path) {
-        std::filesystem::path fsPath(path);
-        std::error_code ec;
-        auto status = std::filesystem::status(fsPath, ec);
-        if (ec) return;
-        auto mtime = std::filesystem::last_write_time(fsPath, ec);
-        if (ec) return;
-        dirTimestamps_[path] = mtime;
     }
 
     std::string root_;
