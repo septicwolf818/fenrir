@@ -40,6 +40,7 @@ const std::vector<NamedTheme>& catalog() {
             .syntaxKeyword = colors::BrightBlue, .syntaxType = colors::BrightCyan,
             .syntaxString = colors::BrightGreen, .syntaxNumber = colors::BrightYellow,
             .syntaxComment = colors::Cyan, .syntaxDirective = colors::BrightYellow,
+            .docHeading = colors::BrightCyan, .docKey = colors::BrightYellow,
         }},
 
         // Amber — monochrome "old amber monitor" theme.
@@ -67,6 +68,7 @@ const std::vector<NamedTheme>& catalog() {
             .syntaxKeyword = colors::BrightYellow, .syntaxType = colors::BrightYellow,
             .syntaxString = colors::Yellow, .syntaxNumber = colors::BrightYellow,
             .syntaxComment = colors::Yellow, .syntaxDirective = colors::BrightYellow,
+            .docHeading = colors::BrightYellow, .docKey = colors::BrightCyan,
         }},
 
         // Forest — green terminal, black background + green frames and headers.
@@ -94,6 +96,7 @@ const std::vector<NamedTheme>& catalog() {
             .syntaxKeyword = colors::BrightCyan, .syntaxType = colors::BrightWhite,
             .syntaxString = colors::BrightGreen, .syntaxNumber = colors::BrightYellow,
             .syntaxComment = colors::Green, .syntaxDirective = colors::BrightYellow,
+            .docHeading = colors::BrightGreen, .docKey = colors::BrightCyan,
         }},
 
         // High contrast — black/white + yellow accents (readability first).
@@ -121,6 +124,7 @@ const std::vector<NamedTheme>& catalog() {
             .syntaxKeyword = colors::BrightYellow, .syntaxType = colors::BrightWhite,
             .syntaxString = colors::BrightGreen, .syntaxNumber = colors::BrightCyan,
             .syntaxComment = colors::Gray, .syntaxDirective = colors::BrightYellow,
+            .docHeading = colors::BrightYellow, .docKey = colors::BrightCyan,
         }},
     };
     return cats;

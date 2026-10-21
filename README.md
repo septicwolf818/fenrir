@@ -13,8 +13,8 @@ features rather than system administration.
 
 - Full-screen terminal UI with windowed, keyboard, and text-editing modes.
 - Window movement, resizing, minimization, and maximize/restore.
-- Built-in apps: Text Editor, File Manager, Calculator, Settings, Calendar,
-  Paint, Terminal, and Photo Viewer.
+- Built-in apps: Handbook, Text Editor, File Manager, Calculator, Settings,
+  Calendar, Paint, Terminal, and Photo Viewer.
 - File associations that open files in the selected app and persist globally.
 - Photo Viewer for common raster formats, rendered with ANSI colors and a
   brightness-to-character ramp.

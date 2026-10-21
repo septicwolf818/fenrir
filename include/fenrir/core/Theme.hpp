@@ -84,6 +84,12 @@ struct Theme {
     Color syntaxNumber{colors::BrightMagenta};
     Color syntaxComment{colors::Gray};
     Color syntaxDirective{colors::BrightYellow};
+
+    // --- documentation (the Handbook) ---
+    // Both are drawn on the document surface (editorBg), so they are always
+    // the bright variants - a dark blue on black is unreadable on a TTY.
+    Color docHeading{colors::BrightYellow}; // section headings
+    Color docKey{colors::BrightCyan};      // key names in the key tables
 };
 
 // The current theme. Swapping it = a new theme for the entire UI.
