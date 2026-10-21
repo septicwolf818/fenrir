@@ -1,9 +1,10 @@
 #include "../apps/texteditor/TextEditorView.hpp"
 
+#include "test_harness.hpp"
+
 #include "fenrir/core/Screen.hpp"
 #include "fenrir/widgets/Dialog.hpp"
 
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -11,13 +12,8 @@
 #include <vector>
 
 using namespace fenrir;
+using fenrir::test::check;
 
-static void check(bool cond, const char* msg) {
-    if (!cond) {
-        std::cerr << "FAIL: " << msg << "\n";
-        std::exit(1);
-    }
-}
 
 // Records what the editor asks the framework to do.
 class FakeContext : public AppContext {
@@ -63,7 +59,7 @@ static std::string readFile(const std::filesystem::path& path) {
     return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 }
 
-int main() {
+void runEditorTests() {
     const std::filesystem::path root =
         std::filesystem::temp_directory_path() / "fenrir_editor_conflict";
     std::filesystem::remove_all(root);
@@ -154,6 +150,4 @@ int main() {
     }
 
     std::filesystem::remove_all(root);
-    std::cout << "All editor tests passed.\n";
-    return 0;
 }

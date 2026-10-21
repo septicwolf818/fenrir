@@ -85,6 +85,9 @@ public:
     bool cutSelection();
     // Inserts the clipboard content at the cursor (replacing the selection).
     void pasteClipboard();
+    // Fallback for terminals (notably some Linux console keymaps) that don't
+    // report Shift on arrow keys: toggle an extend-with-arrows mode.
+    void toggleSelectionMode();
 
     void setShowLineNumbers(bool on) {
         if (lineNumbers_ == on) return;
@@ -159,6 +162,7 @@ private:
     // Selection anchor (logical line/column); the cursor is the other end.
     int selRow_ = 0, selCol_ = 0;
     bool selecting_ = false;
+    bool selectionMode_ = false;
     // State of the file on disk when it was loaded or saved (see fileStamp()).
     FileWatchdog::State fileStamp_;
     std::time_t fileSavedAt_ = 0;

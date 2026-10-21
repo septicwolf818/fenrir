@@ -60,25 +60,18 @@ target_link_libraries(fenrir_desktop PRIVATE fenrir)
 set_target_properties(fenrir_desktop PROPERTIES OUTPUT_NAME fenrir)
 
 # --- tests -----------------------------------------------------------------
-add_executable(fenrir_tests tests/test_vt.cpp)
+# ONE test binary: the test sources are split by area (tests/test_*.cpp) and
+# the runner (tests/main.cpp) executes every suite. `make test` runs it.
+add_executable(fenrir_tests
+    tests/main.cpp
+    tests/test_vt.cpp
+    tests/test_filetree.cpp
+    tests/test_watchdog.cpp
+    tests/test_editor.cpp
+    tests/test_clipboard.cpp
+)
 target_link_libraries(fenrir_tests PRIVATE fenrir)
 add_test(NAME fenrir_tests COMMAND fenrir_tests)
-
-add_executable(fenrir_filetree_tests tests/test_filetree.cpp)
-target_link_libraries(fenrir_filetree_tests PRIVATE fenrir)
-add_test(NAME fenrir_filetree_tests COMMAND fenrir_filetree_tests)
-
-add_executable(fenrir_watchdog_tests tests/test_watchdog.cpp)
-target_link_libraries(fenrir_watchdog_tests PRIVATE fenrir)
-add_test(NAME fenrir_watchdog_tests COMMAND fenrir_watchdog_tests)
-
-add_executable(fenrir_editor_tests tests/test_editor.cpp)
-target_link_libraries(fenrir_editor_tests PRIVATE fenrir)
-add_test(NAME fenrir_editor_tests COMMAND fenrir_editor_tests)
-
-add_executable(fenrir_clipboard_tests tests/test_clipboard.cpp)
-target_link_libraries(fenrir_clipboard_tests PRIVATE fenrir)
-add_test(NAME fenrir_clipboard_tests COMMAND fenrir_clipboard_tests)
 
 # --- install rules ---------------------------------------------------------
 install(TARGETS fenrir_desktop

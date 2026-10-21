@@ -1,10 +1,11 @@
+#include "test_harness.hpp"
+
 #include "fenrir/core/FileWatchdog.hpp"
 #include "fenrir/core/Screen.hpp"
 #include "fenrir/widgets/DirectoryView.hpp"
 #include "fenrir/widgets/TextArea.hpp"
 
 #include <chrono>
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -12,13 +13,8 @@
 #include <thread>
 
 using namespace fenrir;
+using fenrir::test::check;
 
-static void check(bool cond, const char* msg) {
-    if (!cond) {
-        std::cerr << "FAIL: " << msg << "\n";
-        std::exit(1);
-    }
-}
 
 static void writeFile(const std::filesystem::path& path, const std::string& content) {
     std::ofstream file(path, std::ios::binary | std::ios::trunc);
@@ -33,7 +29,7 @@ static std::string screenText(const Screen& screen) {
     return out;
 }
 
-int main() {
+void runWatchdogTests() {
     const std::filesystem::path root =
         std::filesystem::temp_directory_path() / "fenrir_watchdog_test";
     std::filesystem::remove_all(root);
@@ -129,6 +125,4 @@ int main() {
     }
 
     std::filesystem::remove_all(root);
-    std::cout << "All watchdog tests passed.\n";
-    return 0;
 }
