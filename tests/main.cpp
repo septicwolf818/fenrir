@@ -16,6 +16,7 @@ void runFileTreeTests();
 void runWatchdogTests();
 void runEditorTests();
 void runClipboardTests();
+void runHandbookTests();
 
 namespace {
 
@@ -44,6 +45,7 @@ int main() {
         {"filesystem watchdog", runWatchdogTests},
         {"text editor", runEditorTests},
         {"clipboard", runClipboardTests},
+        {"handbook", runHandbookTests},
     };
 
     int failed = 0;

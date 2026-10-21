@@ -15,6 +15,7 @@
 #include "../paint/PaintApp.hpp"
 #include "../terminal/TerminalApp.hpp"
 #include "../photoviewer/PhotoViewerApp.hpp"
+#include "../handbook/HandbookApp.hpp"
 
 int main() {
     try {
@@ -32,6 +33,8 @@ int main() {
         desktop.apps().registerApp(std::make_unique<fenrir::apps::PaintApp>());
         desktop.apps().registerApp(std::make_unique<fenrir::apps::TerminalApp>());
         desktop.apps().registerApp(std::make_unique<fenrir::apps::PhotoViewerApp>());
+        // The Handbook is the built-in documentation (available in F1).
+        desktop.apps().registerApp(std::make_unique<fenrir::apps::HandbookApp>());
         // Add more apps here.
 
         return desktop.run();
