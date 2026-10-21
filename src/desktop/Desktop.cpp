@@ -150,6 +150,16 @@ Desktop::Desktop()
     settings::load();
     theme::apply(settings::active.theme);
     desktopName_ = settings::active.desktopName;
+    // The clipboard lives in a file (shared by all Fenrir processes); on top
+    // of that the copied text is pushed to the terminal with OSC 52, so
+    // graphical terminals that support it can paste it outside of Fenrir.
+    clipboard::setTerminalSink([this](const std::string& utf8) { pushClipboardToTerminal(utf8); });
+}
+
+void Desktop::pushClipboardToTerminal(const std::string& utf8) {
+    // OSC 52 (clipboard access): ESC ] 52 ; c ; <base64> BEL
+    terminal_.write("\x1b]52;c;" + clipboard::base64Encode(utf8) + "\x07");
+    terminal_.flush();
 }
 
 Rect Desktop::desktopArea() const {

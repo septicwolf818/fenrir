@@ -4,6 +4,7 @@
 #include <fstream>
 #include <sstream>
 
+#include "fenrir/core/Clipboard.hpp"
 #include "fenrir/core/Text.hpp"
 #include "fenrir/core/Theme.hpp"
 
@@ -95,6 +96,119 @@ int TextArea::visualOffset() const {
 void TextArea::syncGoal() {
     ensureLayout();
     goalCol_ = visualOffset();
+}
+
+// --- Selection ---------------------------------------------------------------
+
+std::tuple<int, int, int, int> TextArea::selectionRange() const {
+    int sr = selRow_, sc = selCol_, er = cursorRow_, ec = cursorCol_;
+    if (sr > er || (sr == er && sc > ec)) {
+        std::swap(sr, er);
+        std::swap(sc, ec);
+    }
+    return {sr, sc, er, ec};
+}
+
+bool TextArea::isSelected(int line, int col) const {
+    if (!selecting_) return false;
+    const auto [sr, sc, er, ec] = selectionRange();
+    if (line < sr || line > er) return false;
+    if (line == sr && col < sc) return false;
+    if (line == er && col >= ec) return false;
+    return true;
+}
+
+std::u32string TextArea::selectedText() const {
+    if (!selecting_) return {};
+    const auto [sr, sc, er, ec] = selectionRange();
+    if (sr == er && sc >= ec) return {};
+    std::u32string out;
+    for (int r = sr; r <= er && r < static_cast<int>(lines_.size()); ++r) {
+        const std::u32string& line = lines_[static_cast<std::size_t>(r)];
+        const int from = (r == sr) ? sc : 0;
+        const int to = (r == er) ? ec : static_cast<int>(line.size());
+        if (to > from) out += line.substr(static_cast<std::size_t>(from),
+                                          static_cast<std::size_t>(to - from));
+        if (r != er) out += U'\n';
+    }
+    return out;
+}
+
+void TextArea::selectAll() {
+    selRow_ = 0;
+    selCol_ = 0;
+    selecting_ = true;
+    // The anchor stays at the start; the cursor marks the end.
+    const int last = static_cast<int>(lines_.size()) - 1;
+    cursorRow_ = std::max(0, last);
+    cursorCol_ = static_cast<int>(lines_[static_cast<std::size_t>(cursorRow_)].size());
+}
+
+void TextArea::clearSelection() {
+    selecting_ = false;
+    selRow_ = cursorRow_;
+    selCol_ = cursorCol_;
+}
+
+void TextArea::beginSelection() {
+    if (selecting_) return; // keep the original anchor while extending
+    selRow_ = cursorRow_;
+    selCol_ = cursorCol_;
+    selecting_ = true;
+}
+
+void TextArea::deleteSelection() {
+    if (!selecting_) return;
+    const auto [sr, sc, er, ec] = selectionRange();
+    if (sr == er && sc >= ec) {
+        selecting_ = false;
+        return;
+    }
+    if (er >= static_cast<int>(lines_.size())) {
+        selecting_ = false;
+        return;
+    }
+    std::u32string& first = lines_[static_cast<std::size_t>(sr)];
+    const std::u32string& last = lines_[static_cast<std::size_t>(er)];
+    first = first.substr(0, static_cast<std::size_t>(sc)) + last.substr(static_cast<std::size_t>(ec));
+    lines_.erase(lines_.begin() + sr + 1, lines_.begin() + er + 1);
+    cursorRow_ = sr;
+    cursorCol_ = sc;
+    selecting_ = false;
+    selRow_ = sr;
+    selCol_ = sc;
+    dirty_ = true;
+    markDirty();
+    clampCursor();
+    ensureVisible();
+}
+
+bool TextArea::copySelection() {
+    if (!selecting_) return false;
+    const std::u32string sel = selectedText();
+    if (sel.empty()) return false;
+    clipboard::setText(text::toUtf8(sel));
+    if (onStatus) onStatus("Copied " + std::to_string(sel.size()) + " characters");
+    return true;
+}
+
+bool TextArea::cutSelection() {
+    if (!copySelection()) return false;
+    deleteSelection();
+    if (onStatus) onStatus("Cut");
+    return true;
+}
+
+void TextArea::pasteClipboard() {
+    const std::string utf8 = clipboard::text();
+    if (utf8.empty()) {
+        if (onStatus) onStatus("Clipboard is empty");
+        return;
+    }
+    if (selecting_) deleteSelection();
+    insertText(text::toUtf32(utf8));
+    ensureVisible();
+    if (onStatus) onStatus("Pasted " + std::to_string(utf8.size()) + " characters");
 }
 
 // --- Editing -----------------------------------------------------------------
@@ -221,6 +335,34 @@ void TextArea::insertChar(char32_t ch) {
     syncGoal();
 }
 
+void TextArea::insertText(const std::u32string& text) {
+    if (text.empty()) return;
+    std::u32string chunk;
+    for (const char32_t ch : text) {
+        if (ch == U'\n') {
+            if (!chunk.empty()) {
+                std::u32string& line = lines_[static_cast<std::size_t>(cursorRow_)];
+                line.insert(line.begin() + cursorCol_, chunk.begin(), chunk.end());
+                cursorCol_ += static_cast<int>(chunk.size());
+                chunk.clear();
+            }
+            insertNewline();
+        } else if (ch == U'\r') {
+            // CR of a CRLF pair — the LF does the work.
+        } else {
+            chunk.push_back(ch);
+        }
+    }
+    if (!chunk.empty()) {
+        std::u32string& line = lines_[static_cast<std::size_t>(cursorRow_)];
+        line.insert(line.begin() + cursorCol_, chunk.begin(), chunk.end());
+        cursorCol_ += static_cast<int>(chunk.size());
+    }
+    dirty_ = true;
+    markDirty();
+    syncGoal();
+}
+
 void TextArea::insertNewline() {
     std::u32string rest = lines_[cursorRow_].substr(cursorCol_);
     lines_[cursorRow_].resize(cursorCol_);
@@ -271,6 +413,15 @@ void TextArea::del() {
 void TextArea::clampCursor() {
     cursorRow_ = std::clamp(cursorRow_, 0, static_cast<int>(lines_.size()) - 1);
     cursorCol_ = std::clamp(cursorCol_, 0, static_cast<int>(lines_[cursorRow_].size()));
+}
+
+void TextArea::setCursorLineCol(int line, int col) {
+    if (lines_.empty()) return;
+    cursorRow_ = std::clamp(line - 1, 0, static_cast<int>(lines_.size()) - 1);
+    cursorCol_ = std::clamp(col - 1, 0, static_cast<int>(lines_[static_cast<std::size_t>(cursorRow_)].size()));
+    goalCol_ = 0; // the sticky column belongs to the old content
+    markDirty();
+    ensureVisible();
 }
 
 void TextArea::moveHoriz(int dCol) {
@@ -342,6 +493,34 @@ KeyEventResult TextArea::handleKey(const KeyEvent& ev) {
         toggleWrap();
         return KeyEventResult::Consumed;
     }
+    // Clipboard: copy / cut / paste / select all. They work on the selection
+    // made with Shift+Arrow (and on the whole buffer for select all).
+    if (ev.ctrl && ev.key == Key::Char) {
+        switch (ev.character) {
+            case U'c': case U'C':
+                copySelection();
+                return KeyEventResult::Consumed;
+            case U'x': case U'X':
+                cutSelection();
+                return KeyEventResult::Consumed;
+            case U'v': case U'V':
+                pasteClipboard();
+                return KeyEventResult::Consumed;
+            case U'a': case U'A':
+                selectAll();
+                ensureVisible();
+                return KeyEventResult::Consumed;
+            default: break;
+        }
+    }
+    // Shift+Arrow extends the selection; a plain cursor move drops it.
+    const bool moveKey = ev.key == Key::Up || ev.key == Key::Down || ev.key == Key::Left ||
+                         ev.key == Key::Right || ev.key == Key::Home || ev.key == Key::End ||
+                         ev.key == Key::PageUp || ev.key == Key::PageDown;
+    if (moveKey) {
+        if (ev.shift) beginSelection();
+        else clearSelection();
+    }
     switch (ev.key) {
         case Key::Up:    moveVert(-1); return KeyEventResult::Consumed;
         case Key::Down:  moveVert(+1); return KeyEventResult::Consumed;
@@ -364,9 +543,27 @@ KeyEventResult TextArea::handleKey(const KeyEvent& ev) {
         }
         case Key::PageUp:   moveVert(-std::max(1, bounds_.h)); return KeyEventResult::Consumed;
         case Key::PageDown: moveVert(+std::max(1, bounds_.h)); return KeyEventResult::Consumed;
-        case Key::Enter:    insertNewline(); ensureVisible(); return KeyEventResult::Consumed;
-        case Key::Backspace: backspace(); ensureVisible(); return KeyEventResult::Consumed;
-        case Key::Delete:   del(); ensureVisible(); return KeyEventResult::Consumed;
+        case Key::Enter:
+            if (selecting_) deleteSelection();
+            insertNewline();
+            ensureVisible();
+            return KeyEventResult::Consumed;
+        case Key::Backspace:
+            if (selecting_) {
+                deleteSelection();
+            } else {
+                backspace();
+            }
+            ensureVisible();
+            return KeyEventResult::Consumed;
+        case Key::Delete:
+            if (selecting_) {
+                deleteSelection();
+            } else {
+                del();
+            }
+            ensureVisible();
+            return KeyEventResult::Consumed;
         case Key::Tab:
             // Pass modified Tab (Alt+Tab/Ctrl+Tab switches windows globally)
             // through to the Desktop; plain Tab inserts a tab character or
@@ -381,7 +578,12 @@ KeyEventResult TextArea::handleKey(const KeyEvent& ev) {
             ensureVisible();
             return KeyEventResult::Consumed;
         case Key::Char:
-            if (!ev.ctrl && !ev.alt) { insertChar(ev.character); ensureVisible(); return KeyEventResult::Consumed; }
+            if (!ev.ctrl && !ev.alt) {
+                if (selecting_) deleteSelection(); // typing replaces the selection
+                insertChar(ev.character);
+                ensureVisible();
+                return KeyEventResult::Consumed;
+            }
             return KeyEventResult::Ignored;
         default: return KeyEventResult::Ignored;
     }
@@ -466,8 +668,15 @@ void TextArea::draw(Screen& screen) {
                 }
                 char32_t ch = line[logicalCol];
                 if (ch == U'\t') ch = U'→';
+                Color cellFg = fg;
+                Color cellBg = t.editorBg;
+                if (isSelected(s.line, static_cast<int>(logicalCol))) {
+                    // The selection is drawn in the theme's accent colors.
+                    cellFg = t.accentText;
+                    cellBg = t.accentBg;
+                }
                 screen.set(bounds_.x + gut + i, bounds_.y + row,
-                           Cell{ch, fg, t.editorBg, style});
+                           Cell{ch, cellFg, cellBg, style});
             }
             continue;
         }
@@ -479,7 +688,36 @@ void TextArea::draw(Screen& screen) {
                                         static_cast<std::size_t>(n)));
         for (char32_t& c : cell)
             if (c == U'\t') c = U'→';
-        screen.putText(bounds_.x + gut, bounds_.y + row, cell, t.editorText, t.editorBg);
+        // Draw the row in up to three parts: before the selection, the
+        // selection itself (accent colors) and the rest.
+        if (!selecting_) {
+            screen.putText(bounds_.x + gut, bounds_.y + row, cell, t.editorText, t.editorBg);
+            continue;
+        }
+        int selFrom = -1, selTo = -1;
+        for (int i = 0; i < n; ++i) {
+            const int logicalCol = start + i;
+            if (isSelected(s.line, logicalCol)) {
+                if (selFrom < 0) selFrom = i;
+                selTo = i + 1;
+            }
+        }
+        if (selFrom < 0) {
+            screen.putText(bounds_.x + gut, bounds_.y + row, cell, t.editorText, t.editorBg);
+            continue;
+        }
+        if (selFrom > 0)
+            screen.putText(bounds_.x + gut, bounds_.y + row,
+                           cell.substr(0, static_cast<std::size_t>(selFrom)),
+                           t.editorText, t.editorBg);
+        screen.putText(bounds_.x + gut + selFrom, bounds_.y + row,
+                       cell.substr(static_cast<std::size_t>(selFrom),
+                                   static_cast<std::size_t>(selTo - selFrom)),
+                       t.accentText, t.accentBg);
+        if (selTo < n)
+            screen.putText(bounds_.x + gut + selTo, bounds_.y + row,
+                           cell.substr(static_cast<std::size_t>(selTo)),
+                           t.editorText, t.editorBg);
     }
 }
 

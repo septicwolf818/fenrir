@@ -124,6 +124,35 @@ int main() {
         check(readFile(target) == "?content", "the buffer is written under the new name");
     }
 
+    // --- Reload from disk: the buffer takes the content of the file ---------
+    {
+        const std::filesystem::path file = root / "reload.txt";
+        {
+            std::ofstream out(file, std::ios::binary);
+            out << "on disk";
+        }
+        FakeContext ctx;
+        apps::TextEditorView view(ctx, file.string());
+        // The user changes the buffer, then someone else changes the file.
+        view.handleKey(KeyEvent{Key::Char, U'!'});
+        {
+            std::ofstream out(file, std::ios::binary | std::ios::trunc);
+            out << "new on disk";
+        }
+
+        view.reloadFromDisk();
+        // The buffer was dirty -> a confirmation is asked first.
+        check(ctx.dialogs.size() == 1, "reloading a dirty buffer asks for confirmation");
+        ctx.dialogs[0].result(0); // OK
+        check(!view.dirty(), "the reloaded buffer is not dirty");
+
+        // Write the buffer out under another name to see what it holds.
+        const std::filesystem::path copy = root / "reload-copy.txt";
+        ctx.saveFilePath = copy.string();
+        view.saveAs();
+        check(readFile(copy) == "new on disk", "the reload took the content from disk");
+    }
+
     std::filesystem::remove_all(root);
     std::cout << "All editor tests passed.\n";
     return 0;

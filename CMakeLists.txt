@@ -21,6 +21,7 @@ add_library(fenrir STATIC
     src/app/FileAssociationRegistry.cpp
     src/terminal/Terminal.cpp
     src/core/Screen.cpp
+    src/core/Clipboard.cpp
     src/core/FileSystem.cpp
     src/core/FileWatchdog.cpp
     src/core/Themes.cpp
@@ -74,6 +75,10 @@ add_test(NAME fenrir_watchdog_tests COMMAND fenrir_watchdog_tests)
 add_executable(fenrir_editor_tests tests/test_editor.cpp)
 target_link_libraries(fenrir_editor_tests PRIVATE fenrir)
 add_test(NAME fenrir_editor_tests COMMAND fenrir_editor_tests)
+
+add_executable(fenrir_clipboard_tests tests/test_clipboard.cpp)
+target_link_libraries(fenrir_clipboard_tests PRIVATE fenrir)
+add_test(NAME fenrir_clipboard_tests COMMAND fenrir_clipboard_tests)
 
 # --- install rules ---------------------------------------------------------
 install(TARGETS fenrir_desktop

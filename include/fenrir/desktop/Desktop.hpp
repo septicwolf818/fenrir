@@ -7,6 +7,7 @@
 #include "fenrir/app/AppContext.hpp"
 #include "fenrir/app/AppRegistry.hpp"
 #include "fenrir/app/FileAssociationRegistry.hpp"
+#include "fenrir/core/Clipboard.hpp"
 #include "fenrir/core/Screen.hpp"
 #include "fenrir/cursor/Cursor.hpp"
 #include "fenrir/input/KeyParser.hpp"
@@ -158,6 +159,8 @@ private:
     void drawTaskBar(Screen& screen);
     void drawDesktopBackground(Screen& screen);
     void positionGuiCursor();
+    // Sends the copied text to the terminal with OSC 52 (clipboard access).
+    void pushClipboardToTerminal(const std::string& utf8);
 
     // Helper functions for keyboard shortcut handling.
     static bool matchesShortcuts(const std::vector<std::pair<KeyShortcut, std::function<void()>>>& sc, const KeyEvent& ev);

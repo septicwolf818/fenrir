@@ -43,6 +43,7 @@ public:
             {U"File panel (Ctrl+B)", [raw] { raw->toggleTree(); }},
             {U"Save (Ctrl+S)", [raw] { raw->save(); }},
             {U"Save as...", [raw] { raw->saveAs(); }},
+            {U"Reload from disk (Ctrl+R)", [raw] { raw->reloadFromDisk(); }},
             {U"Close tab (Ctrl+T)", [raw] { raw->closeTab(); }},
             {U"Previous tab (F3)", [raw] { raw->prevTab(); }},
             {U"Next tab (F4)", [raw] { raw->nextTab(); }},
@@ -60,6 +61,7 @@ public:
         view->pushShortcut({true, Key::Char, U'n'}, [raw] { raw->newFile(); });
         view->pushShortcut({true, Key::Char, U'o'}, [raw] { raw->openFile(); });
         view->pushShortcut({true, Key::Char, U's'}, [raw] { raw->save(); });
+        view->pushShortcut({true, Key::Char, U'r'}, [raw] { raw->reloadFromDisk(); });
         view->pushShortcut({true, Key::Char, U't'}, [raw] { raw->closeTab(); });
         view->pushShortcut({true, Key::Char, U'g'}, [raw] { raw->toggleLineNumbers(); });
         view->pushShortcut({true, Key::Char, U'e'}, [raw] { raw->toggleWrap(); });

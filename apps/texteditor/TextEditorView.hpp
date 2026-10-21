@@ -153,6 +153,42 @@ public:
         });
     }
 
+    // --- Reload from disk ----------------------------------------------------
+
+    // Reads the file again and replaces the buffer with the content on disk.
+    // This is how the user picks up a change made by another program — and it
+    // also drops the editor's own changes, so a dirty buffer asks first.
+    void reloadFromDisk() {
+        const std::string path = cur().path();
+        if (path.empty()) {
+            status_.setMessage(U"Nothing to reload - this tab has no file.");
+            return;
+        }
+        if (!fs::exists(path)) {
+            status_.setMessage(text::toUtf32("The file is gone, nothing to reload: " + path));
+            return;
+        }
+        if (!cur().dirty()) {
+            doReload(path);
+            return;
+        }
+        const auto token = lifetimeToken();
+        ctx_.confirm(U"Unsaved changes will be lost. Reload from disk?",
+                     [token, this, path](bool ok) {
+                         if (!token.lock()) return; // the window may have been closed
+                         if (ok) doReload(path);
+                     });
+    }
+
+    void doReload(const std::string& path) {
+        const auto [line, col] = cur().cursorLineCol();
+        cur().loadFile(path);           // reads the file and refreshes the stamp
+        cur().setCursorLineCol(line, col); // keep the place in the document
+        shownFileState_ = FileState::Unchanged;
+        refreshTabBar();
+        status_.setMessage(text::toUtf32("Reloaded: " + path));
+    }
+
     // --- Format / preferences --------------------------------------------------
 
     void toggleWrap() { cur().toggleWrap(); }
