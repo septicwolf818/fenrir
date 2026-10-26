@@ -135,6 +135,7 @@ private:
     std::vector<BackgroundWorker> backgroundWorkers_;
     bool missedNotificationsShown_ = false;
     std::chrono::steady_clock::time_point lastCursorMove_{};
+    std::chrono::steady_clock::time_point cursorMoveStart_{};
     int cursorMoveStreak_ = 0;
     int lastCursorDx_ = 0;
     int lastCursorDy_ = 0;
