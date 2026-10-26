@@ -267,6 +267,12 @@ public:
     std::unique_ptr<Widget> createView(AppContext& ctx) override {
         auto view = std::make_unique<SettingsView>(ctx);
         SettingsView* raw = view.get();
+        view->setMenuTabs({
+            {U"View", std::vector<MenuItem>{
+                {U"Previous tab (F3)", [raw] { raw->prevTab(); }},
+                {U"Next tab (F4)", [raw] { raw->nextTab(); }},
+            }},
+        });
         addExitMenu(*view, ctx);
         addAboutMenu(*view, ctx, U"Settings",
                      U"Configure the desktop, look and feel, notifications, and background services.");
