@@ -12,7 +12,7 @@ public:
     std::string name() const override { return "Calculator"; }
 
     std::unique_ptr<Widget> createView(AppContext& ctx) override {
-        auto view = std::make_unique<CalculatorView>();
+        auto view = std::make_unique<CalculatorView>(ctx);
         CalculatorView* raw = view.get();
 
         // File menu: clear the calculator (same action as Ctrl+C).

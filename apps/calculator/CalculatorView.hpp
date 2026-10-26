@@ -8,6 +8,7 @@
 #include "fenrir/widgets/Button.hpp"
 #include "fenrir/widgets/Label.hpp"
 #include "fenrir/widgets/Panel.hpp"
+#include "fenrir/app/AppContext.hpp"
 
 #include "CalculatorEngine.hpp"
 
@@ -24,7 +25,7 @@ namespace fenrir::apps {
 
 class CalculatorView : public Widget {
 public:
-    CalculatorView() : panel_(4, 1, 0) {
+    explicit CalculatorView(AppContext& ctx) : ctx_(ctx), panel_(4, 1, 0) {
         const auto& t = theme::active;
         display_ = std::make_unique<Label>(U"0", t.fieldText, t.fieldBg);
         display_->setAlignment(LabelAlign::Right);
@@ -32,6 +33,7 @@ public:
     }
 
     void draw(Screen& screen) override {
+        ctx_.setWindowTitle(std::string("Calculator: ") + engine_.display());
         // Colors from the current theme — theme::apply swaps active on the fly.
         display_->setColors(theme::active.fieldText, theme::active.fieldBg);
         Rect displayRect{bounds_.x, bounds_.y, bounds_.w, std::max(0, bounds_.h / 4)};
@@ -64,6 +66,7 @@ public:
 
 private:
     CalculatorEngine engine_;
+    AppContext& ctx_;
     std::unique_ptr<Label> display_;
     Panel panel_;
 

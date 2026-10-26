@@ -51,6 +51,8 @@ public:
     }
 
     void draw(Screen& screen) override {
+        const char* tabNames[] = {"Desktop", "Look & Feel", "Notifications", "Background"};
+        ctx_.setWindowTitle(std::string("Settings: ") + tabNames[currentTab_ % 4]);
         const int tabH = 1;
         const int statusH = 1;
         tabs_.setBounds(Rect{bounds_.x, bounds_.y, bounds_.w, tabH});
@@ -103,7 +105,8 @@ private:
                 items.push_back({U"Taskbar clock seconds", settings::active.taskbarSeconds ? U"On" : U"Off"});
                 items.push_back({U"Cursor blink", settings::active.cursorBlink ? U"On" : U"Off"});
                 items.push_back({U"Cursor acceleration", settings::active.cursorAcceleration ? U"On" : U"Off"});
-                items.push_back({U"Cursor max speed", text::toUtf32(std::to_string(settings::active.cursorMaxSpeed))});
+                items.push_back({U"Cursor max speed", text::toUtf32(std::to_string(settings::active.cursorMaxSpeed)),
+                                false, settings::active.cursorAcceleration});
                 break;
             }
             case 1: { // Look & Feel
@@ -158,6 +161,7 @@ private:
                     ok = saveChecked("cursor_acceleration", settings::active.cursorAcceleration ? "1" : "0");
                     break;
                 case 4:
+                    if (!settings::active.cursorAcceleration) return;
                     settings::active.cursorMaxSpeed = (settings::active.cursorMaxSpeed % 10) + 1;
                     ok = saveChecked("cursor_max_speed", std::to_string(settings::active.cursorMaxSpeed));
                     break;

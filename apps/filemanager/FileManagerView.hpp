@@ -219,6 +219,7 @@ public:
     // --- Widget --------------------------------------------------------------
 
     void draw(Screen& screen) override {
+        ctx_.setWindowTitle(active().currentDir());
         const int paneH = std::max(0, bounds_.h - 1);
         const int leftW = bounds_.w / 2;
         left_.setBounds(Rect{bounds_.x, bounds_.y, leftW, paneH});

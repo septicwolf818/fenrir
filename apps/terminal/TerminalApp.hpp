@@ -134,6 +134,7 @@ public:
             if (pty_.fd() >= 0) pty_.resize(bounds_.w, bounds_.h);
         }
         pump();
+        if (vt_.hasTitleChanged()) ctx_.setWindowTitle(vt_.consumeTitle());
         for (int y = 0; y < bounds_.h; ++y) {
             for (int x = 0; x < bounds_.w; ++x) {
                 const VtCell c = vt_.at(x, y);

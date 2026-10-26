@@ -451,6 +451,8 @@ private:
         tabBar_.setTabs(std::move(tabs));
         tabBar_.select(current_);
         currentDirtyShown_ = cur().dirty();
+        const std::string title = cur().path().empty() ? std::string("(untitled)") : fs::nameOf(cur().path());
+        ctx_.setWindowTitle(title);
     }
 
     template <typename F>

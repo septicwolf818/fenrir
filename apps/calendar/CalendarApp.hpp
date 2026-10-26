@@ -74,6 +74,8 @@ public:
     static void pollNotifications(AppContext& ctx, bool startup = false);
 
     void draw(Screen& screen) override {
+        std::string viewName = (view_ == View::Month) ? "Month" : (view_ == View::Week ? "Week" : "Day");
+        ctx_.setWindowTitle(viewName + " " + std::to_string(curD_) + "." + std::to_string(month_) + "." + std::to_string(year_));
         const auto& t = theme::active;
         screen.fillRect(bounds_, Cell{U' ', t.windowText, t.windowBg, 0});
         if (bounds_.w <= 0 || bounds_.h <= 0) return;
