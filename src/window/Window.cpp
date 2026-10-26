@@ -334,6 +334,22 @@ void Window::draw(Screen& screen) {
             screen.set(x, y, Cell{U' ', contentFg, contentBg, 0});
 
     if (content_) content_->draw(screen);
+
+    // Redraw the title bar after content so app-updated titles are current.
+    if (hasBorder_ && w >= kMinWidth) {
+        for (int x = x0 + 1; x < x0 + w - 1; ++x)
+            screen.set(x, y0, Cell{' ', titleFg, titleBg, StyleBold});
+        std::u32string titleText(U" ", 1);
+        for (char c : title_)
+            titleText += static_cast<char32_t>(static_cast<unsigned char>(c));
+        titleText += U' ';
+        int maxTitle = std::max(0, w - 2 - kButtonsWidth - 2);
+        if (static_cast<int>(titleText.size()) > maxTitle) titleText.resize(static_cast<std::size_t>(maxTitle));
+        screen.putText(x0 + 1, y0, titleText, titleFg, titleBg, StyleBold);
+        screen.set(x0 + w - 4, y0, Cell{'-', titleFg, titleBg, StyleBold});
+        screen.set(x0 + w - 3, y0, Cell{static_cast<char32_t>(maximized_ ? U'=' : U'+'), titleFg, titleBg, StyleBold});
+        screen.set(x0 + w - 2, y0, Cell{'X', t.closeText, t.closeBg, StyleBold});
+    }
 }
 
 } // namespace fenrir
