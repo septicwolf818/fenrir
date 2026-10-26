@@ -1171,11 +1171,30 @@ void Desktop::drawTaskBar(Screen& screen) {
         if (hoveredIdx != taskbarHoverIdx_) {
             taskbarHoverIdx_ = hoveredIdx;
             taskbarHoverScroll_ = 0;
-            taskbarHoverTick_ = 0;
+            taskbarHoverLastStep_ = std::chrono::steady_clock::now();
         }
+
+        bool hoveredTitleScroll = false;
+        int hoveredTitleLength = 0;
         if (hoveredIdx >= 0) {
-            ++taskbarHoverTick_;
-            if (taskbarHoverTick_ % 1 == 0) ++taskbarHoverScroll_;
+            std::string title(wins[static_cast<std::size_t>(hoveredIdx)]->title());
+            title += " ";
+            hoveredTitleLength = static_cast<int>(title.size());
+            hoveredTitleScroll = hoveredTitleLength > kTaskHandleW - 4;
+        }
+        if (hoveredTitleScroll) {
+            const auto now = std::chrono::steady_clock::now();
+            const auto elapsed = now - taskbarHoverLastStep_;
+            const auto steps = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() /
+                               kTaskbarTitleScrollInterval.count();
+            if (steps > 0) {
+                taskbarHoverScroll_ = (taskbarHoverScroll_ +
+                    static_cast<int>(steps % hoveredTitleLength)) % hoveredTitleLength;
+                taskbarHoverLastStep_ += kTaskbarTitleScrollInterval * steps;
+            }
+        } else {
+            taskbarHoverScroll_ = 0;
+            taskbarHoverLastStep_ = std::chrono::steady_clock::now();
         }
 
         for (int idx = visibleStart; idx < visibleEnd; ++idx) {
@@ -1192,7 +1211,7 @@ void Desktop::drawTaskBar(Screen& screen) {
             // itself when it wraps around.
             if (idx == hoveredIdx) latin += " ";
             int maxChars = kTaskHandleW - 4;  // leave room for [ ] and ...
-            bool hoverScroll = (idx == hoveredIdx) && static_cast<int>(latin.size()) > maxChars;
+            bool hoverScroll = (idx == hoveredIdx) && hoveredTitleScroll;
             if (hoverScroll) {
                 int len = static_cast<int>(latin.size());
                 int off = taskbarHoverScroll_ % len;
@@ -1310,7 +1329,23 @@ void Desktop::tickOnce() {
     char buf[64];
     // With registered sources (terminal window), use a shorter interval so
     // child-process output appears smoothly; without sources, use the usual 400ms.
-    const int timeout = fdSources_.empty() ? 400 : 30;
+    int timeout = fdSources_.empty() ? 400 : 30;
+    if (taskbarHoverIdx_ >= 0 &&
+        taskbarHoverIdx_ < static_cast<int>(wm_.windows().size())) {
+        std::string hoveredTitle(wm_.windows()[static_cast<std::size_t>(taskbarHoverIdx_)]->title());
+        hoveredTitle += " ";
+        if (static_cast<int>(hoveredTitle.size()) > kTaskHandleW - 4) {
+            const auto remaining = kTaskbarTitleScrollInterval -
+                                   (std::chrono::steady_clock::now() - taskbarHoverLastStep_);
+            if (remaining <= std::chrono::steady_clock::duration::zero()) {
+                timeout = 0;
+            } else {
+                const int remainingMs = static_cast<int>(
+                    std::chrono::duration_cast<std::chrono::milliseconds>(remaining).count());
+                timeout = std::min(timeout, std::max(1, remainingMs));
+            }
+        }
+    }
     std::size_t n = terminal_.read(buf, sizeof(buf), timeout);
 
     if (terminal_.consumeResizeFlag()) {
