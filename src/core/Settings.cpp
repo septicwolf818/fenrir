@@ -70,6 +70,12 @@ void load() {
             active.desktopName = val; // empty -> the taskbar shows the startup name (fallback in Desktop)
         } else if (key == "cursor_blink") {
             active.cursorBlink = parseBool(val, active.cursorBlink);
+        } else if (key == "cursor_acceleration") {
+            active.cursorAcceleration = parseBool(val, active.cursorAcceleration);
+        } else if (key == "cursor_max_speed") {
+            try { active.cursorMaxSpeed = std::stoi(val); } catch (...) {}
+            if (active.cursorMaxSpeed < 1) active.cursorMaxSpeed = 1;
+            if (active.cursorMaxSpeed > 10) active.cursorMaxSpeed = 10;
         } else if (key == "app_notifications") {
             active.appNotifications = parseBool(val, active.appNotifications);
         } else if (key == "wallpaper_enabled") {
@@ -103,6 +109,8 @@ void save() {
       << "taskbar_seconds=" << (active.taskbarSeconds ? "1" : "0") << "\n"
       << "desktop_name=" << active.desktopName << "\n"
       << "cursor_blink=" << (active.cursorBlink ? "1" : "0") << "\n"
+      << "cursor_acceleration=" << (active.cursorAcceleration ? "1" : "0") << "\n"
+      << "cursor_max_speed=" << active.cursorMaxSpeed << "\n"
       << "app_notifications=" << (active.appNotifications ? "1" : "0") << "\n"
       << "wallpaper_enabled=" << (active.wallpaper.enabled ? "1" : "0") << "\n"
       << "wallpaper_mode=" << (active.wallpaper.mode == wallpaper::Wallpaper::Mode::Pattern ? "pattern" : "solid") << "\n"
