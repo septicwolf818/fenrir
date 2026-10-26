@@ -139,8 +139,6 @@ private:
     int cursorMoveStreak_ = 0;
     int lastCursorDx_ = 0;
     int lastCursorDy_ = 0;
-    int lastActualDx_ = 0;
-    int lastActualDy_ = 0;
     std::chrono::steady_clock::time_point lastSave_{};
 
     void handleKey(const KeyEvent& ev);          // wrapper: dispatch + flush of pending closes

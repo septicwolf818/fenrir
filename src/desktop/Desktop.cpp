@@ -1034,50 +1034,37 @@ void Desktop::handleKeyEvent(const KeyEvent& ev) {
         case Key::Down: dy = 1; break;
         case Key::Left: dx = -1; break;
         case Key::Right: dx = 1; break;
+        case Key::Home: dx = -1; dy = -1; break;
+        case Key::End: dx = -1; dy = 1; break;
+        case Key::PageUp: dx = 1; dy = -1; break;
+        case Key::PageDown: dx = 1; dy = 1; break;
         case Key::Enter: activateAtCursor(); break;
         case Key::Char: if (!ev.ctrl && ev.character == U' ') activateAtCursor(); break;
         default: break;
     }
     if (dx != 0 || dy != 0) {
-        const auto now = std::chrono::steady_clock::now();
-        const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastCursorMove_).count();
-        const bool differentAxis = (lastCursorDx_ == 0) != (dx == 0);
-        // A quick follow-up arrow on the other axis becomes a diagonal step.
-        if (elapsed < 120 && differentAxis && lastCursorMove_ != std::chrono::steady_clock::time_point{}) {
-            cursor_.moveBy(-lastActualDx_, -lastActualDy_);
-            cursor_.moveBy(lastCursorDx_ + dx, lastCursorDy_ + dy);
-            cursor_.clamp(screenWidth(), screenHeight());
-            lastActualDx_ = lastCursorDx_ + dx;
-            lastActualDy_ = lastCursorDy_ + dy;
-            lastCursorDx_ = lastCursorDx_ + dx;
-            lastCursorDy_ = lastCursorDy_ + dy;
-            lastCursorMove_ = now;
-            cursorMoveStreak_ = 0;
-            cursorMoveStart_ = now;
-        } else {
-            int step = 1;
-            if (settings::active.cursorAcceleration) {
-                if (dx == lastCursorDx_ && dy == lastCursorDy_ && elapsed < 300) {
-                    if (cursorMoveStart_ == std::chrono::steady_clock::time_point{})
-                        cursorMoveStart_ = now;
-                    const auto total = std::chrono::duration_cast<std::chrono::milliseconds>(now - cursorMoveStart_).count();
-                    const int speedStep = std::min(settings::active.cursorMaxSpeed - 1,
-                                                 static_cast<int>(total / 150));
-                    cursorMoveStreak_ = std::max(0, speedStep);
-                } else {
-                    cursorMoveStreak_ = 0;
+        int step = 1;
+        if (settings::active.cursorAcceleration) {
+            const auto now = std::chrono::steady_clock::now();
+            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastCursorMove_).count();
+            if (dx == lastCursorDx_ && dy == lastCursorDy_ && elapsed < 300) {
+                if (cursorMoveStart_ == std::chrono::steady_clock::time_point{})
                     cursorMoveStart_ = now;
-                }
-                step = 1 + cursorMoveStreak_;
+                const auto total = std::chrono::duration_cast<std::chrono::milliseconds>(now - cursorMoveStart_).count();
+                const int speedStep = std::min(settings::active.cursorMaxSpeed - 1,
+                                             static_cast<int>(total / 150));
+                cursorMoveStreak_ = std::max(0, speedStep);
+            } else {
+                cursorMoveStreak_ = 0;
+                cursorMoveStart_ = now;
             }
-            cursor_.moveBy(dx * step, dy * step);
-            cursor_.clamp(screenWidth(), screenHeight());
-            lastActualDx_ = dx * step;
-            lastActualDy_ = dy * step;
+            step = 1 + cursorMoveStreak_;
             lastCursorMove_ = now;
             lastCursorDx_ = dx;
             lastCursorDy_ = dy;
         }
+        cursor_.moveBy(dx * step, dy * step);
+        cursor_.clamp(screenWidth(), screenHeight());
     }
 }
 
