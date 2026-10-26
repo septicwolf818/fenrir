@@ -76,6 +76,8 @@ public:
         }
         if (ev.key == Key::Enter)
             return activate() ? KeyEventResult::Activated : KeyEventResult::Ignored;
+        if (ev.key == Key::Char && !ev.ctrl && ev.character == U' ')
+            return activate() ? KeyEventResult::Activated : KeyEventResult::Ignored;
         return KeyEventResult::Ignored;
     }
 

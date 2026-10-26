@@ -107,7 +107,9 @@ public:
                 }
                 return KeyEventResult::Consumed;
             }
-            case Key::Enter: {
+            case Key::Enter:
+            case Key::Char: {
+                if (ev.key == Key::Char && (ev.ctrl || ev.alt || ev.character != U' ')) return KeyEventResult::Ignored;
                 const Node& n = visible_[static_cast<std::size_t>(sel_)];
                 if (n.isDir) toggleExpand(sel_);
                 else if (onOpen) onOpen(n.path);
