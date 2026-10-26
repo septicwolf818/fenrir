@@ -45,6 +45,7 @@ std::string path() {
 }
 
 void load() {
+    dirty = false;
     // Default values already live in `active` (struct Settings).
     // An unknown theme id falls back to classic — apply() ignores unknown ids,
     // so we set the key manually in case the catalog changed.
@@ -69,6 +70,8 @@ void load() {
             active.desktopName = val; // empty -> the taskbar shows the startup name (fallback in Desktop)
         } else if (key == "cursor_blink") {
             active.cursorBlink = parseBool(val, active.cursorBlink);
+        } else if (key == "app_notifications") {
+            active.appNotifications = parseBool(val, active.appNotifications);
         } else if (key == "wallpaper_enabled") {
             active.wallpaper.enabled = parseBool(val, active.wallpaper.enabled);
         } else if (key == "wallpaper_mode") {
@@ -87,6 +90,8 @@ void load() {
 }
 
 void save() {
+    if (!dirty) return;
+    dirty = false;
     std::error_code ec;
     std::filesystem::path p(path());
     std::filesystem::create_directories(p.parent_path(), ec);
@@ -98,11 +103,18 @@ void save() {
       << "taskbar_seconds=" << (active.taskbarSeconds ? "1" : "0") << "\n"
       << "desktop_name=" << active.desktopName << "\n"
       << "cursor_blink=" << (active.cursorBlink ? "1" : "0") << "\n"
+      << "app_notifications=" << (active.appNotifications ? "1" : "0") << "\n"
       << "wallpaper_enabled=" << (active.wallpaper.enabled ? "1" : "0") << "\n"
       << "wallpaper_mode=" << (active.wallpaper.mode == wallpaper::Wallpaper::Mode::Pattern ? "pattern" : "solid") << "\n"
       << "wallpaper_bg=" << static_cast<int>(active.wallpaper.bg) << "\n"
       << "wallpaper_fg=" << static_cast<int>(active.wallpaper.fg) << "\n"
       << "wallpaper_glyph=" << text::toUtf8(std::u32string(1, active.wallpaper.glyph)) << "\n";
 }
+
+void markDirty() { dirty = true; }
+
+bool isDirty() { return dirty; }
+
+void saveIfDirty() { if (dirty) save(); }
 
 } // namespace fenrir::settings

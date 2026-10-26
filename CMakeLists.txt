@@ -29,6 +29,7 @@ add_library(fenrir STATIC
     src/core/Themes.cpp
     src/core/Settings.cpp
     src/core/Prefs.cpp
+    src/core/Notifications.cpp
     src/input/KeyParser.cpp
     src/renderer/Renderer.cpp
     src/cursor/Cursor.cpp

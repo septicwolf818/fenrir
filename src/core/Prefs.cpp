@@ -87,8 +87,14 @@ int Prefs::getInt(const std::string& key, int fallback) const {
 }
 
 void Prefs::set(const std::string& key, const std::string& value) {
-    if (value.empty()) kv_.erase(key);
-    else kv_[key] = value;
+    auto it = kv_.find(key);
+    if (value.empty()) {
+        if (it == kv_.end()) return; // nothing to remove -> no rewrite
+        kv_.erase(it);
+    } else {
+        if (it != kv_.end() && it->second == value) return; // unchanged -> no rewrite
+        kv_[key] = value;
+    }
     save();
 }
 

@@ -9,7 +9,9 @@
 
 #include "fenrir/app/App.hpp"
 #include "fenrir/app/AppContext.hpp"
+#include "fenrir/core/Notifications.hpp"
 #include "fenrir/core/Prefs.hpp"
+#include "fenrir/core/Settings.hpp"
 #include "fenrir/core/Text.hpp"
 #include "fenrir/core/Theme.hpp"
 #include "fenrir/widgets/Dialog.hpp"
@@ -66,6 +68,10 @@ public:
     void newEvent();
     void eventDialog(const CalEvent* existing);
     void confirmDelete(const CalEvent& e);
+
+    // Scan calendar events and push notifications (missed on startup, or
+    // starting now during background polling).
+    static void pollNotifications(AppContext& ctx, bool startup = false);
 
     void draw(Screen& screen) override {
         const auto& t = theme::active;
@@ -860,9 +866,56 @@ inline void CalendarView::confirmDelete(const CalEvent& e) {
     });
 }
 
+inline void CalendarView::pollNotifications(AppContext& ctx, bool startup) {
+    auto& p = prefs::forApp("calendar");
+    const int n = p.getInt("next_id", 0);
+    std::vector<CalEvent> events;
+    for (int i = 0; i < n; ++i) {
+        CalEvent e;
+        if (parseEvent(p.get("e" + std::to_string(i)), e)) {
+            e.id = i;
+            events.push_back(e);
+        }
+    }
+
+    const time_t now = std::time(nullptr);
+    time_t last = static_cast<time_t>(p.getInt("last_notify", 0));
+    if (startup || last == 0) last = now - 86400;
+    // Throttle background polling to avoid rewriting the prefs file every frame.
+    if (!startup && last != 0 && now - last < 30) return;
+
+    for (const auto& e : events) {
+        std::tm t{};
+        t.tm_year = e.y - 1900;
+        t.tm_mon = e.m - 1;
+        t.tm_mday = e.d;
+        t.tm_hour = e.startMin / 60;
+        t.tm_min = e.startMin % 60;
+        t.tm_sec = 0;
+        t.tm_isdst = -1;
+        const time_t ev = std::mktime(&t);
+        bool inWindow = false;
+        if (startup) inWindow = (ev >= now - 86400 && ev <= now);
+        else inWindow = (ev >= last && ev <= now + 60);
+        if (!inWindow) continue;
+        if (!settings::active.appNotifications) continue;
+        const std::string body = e.title + " at " + hmStr(e.startMin);
+        ctx.notify("calendar", startup ? "Missed calendar event" : "Calendar event", body);
+    }
+
+    p.setInt("last_notify", static_cast<int>(now));
+}
+
 class CalendarApp : public App {
 public:
     std::string name() const override { return "Calendar"; }
+
+    void onStartup(AppContext& ctx) override {
+        CalendarView::pollNotifications(ctx, true);
+        ctx.registerBackgroundWorker("Calendar", [](AppContext& c) {
+            CalendarView::pollNotifications(c, false);
+        });
+    }
 
     std::unique_ptr<Widget> createView(AppContext& ctx) override {
         auto view = std::make_unique<CalendarView>(ctx);

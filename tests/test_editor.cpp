@@ -34,6 +34,14 @@ public:
     void openFileWith(const std::string&) override {}
     void closeWindow() override {}
 
+    void notify(std::string, std::string, std::string) override {}
+    notifications::Bus& notifications() override { return bus_; }
+    void registerBackgroundWorker(std::string, AppContext::BackgroundTick) override {}
+    void unregisterBackgroundWorker(const std::string&) override {}
+    std::vector<std::string> backgroundWorkers() const override { return {}; }
+
+    notifications::Bus bus_;
+
     void saveFile(const std::string& startDir, const std::string&, OnPick onPick, OnCancel) override {
         ++saveFileCalls;
         saveFileStartDir = startDir;

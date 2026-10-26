@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "fenrir/app/App.hpp"
+#include "fenrir/core/Notifications.hpp"
 #include "fenrir/core/Settings.hpp"
 #include "fenrir/core/Text.hpp"
 #include "fenrir/core/Theme.hpp"
@@ -61,6 +62,7 @@ private:
         items.push_back({U"Taskbar clock seconds", settings::active.taskbarSeconds ? U"On" : U"Off"});
         items.push_back({U"Desktop name", text::toUtf32(settings::active.desktopName)});
         items.push_back({U"Cursor blink", settings::active.cursorBlink ? U"On" : U"Off"});
+        items.push_back({U"App notifications", settings::active.appNotifications ? U"On" : U"Off"});
         items.push_back({U"Wallpaper", wp.enabled ? U"On" : U"Off"});
         // Wallpaper detail rows are inactive (dimmed + unselectable) while the
         // wallpaper is off; the pattern-only rows additionally require pattern mode.
@@ -98,10 +100,15 @@ private:
                 ok = saveChecked("cursor_blink", settings::active.cursorBlink ? "1" : "0");
                 break;
             case 4:
+                settings::active.appNotifications = !settings::active.appNotifications;
+                ok = saveChecked("app_notifications", settings::active.appNotifications ? "1" : "0");
+                notifications::global().setEnabled(settings::active.appNotifications);
+                break;
+            case 5:
                 settings::active.wallpaper.enabled = !settings::active.wallpaper.enabled;
                 ok = saveChecked("wallpaper_enabled", settings::active.wallpaper.enabled ? "1" : "0");
                 break;
-            case 5:
+            case 6:
                 settings::active.wallpaper.mode =
                     (settings::active.wallpaper.mode == wallpaper::Wallpaper::Mode::Pattern)
                         ? wallpaper::Wallpaper::Mode::Solid
@@ -110,17 +117,17 @@ private:
                                  settings::active.wallpaper.mode == wallpaper::Wallpaper::Mode::Pattern
                                      ? "pattern" : "solid");
                 break;
-            case 6:
+            case 7:
                 settings::active.wallpaper.bg =
                     static_cast<uint8_t>((settings::active.wallpaper.bg + 1) & 15);
                 ok = saveChecked("wallpaper_bg", std::to_string(settings::active.wallpaper.bg));
                 break;
-            case 7:
+            case 8:
                 settings::active.wallpaper.fg =
                     static_cast<uint8_t>((settings::active.wallpaper.fg + 1) & 15);
                 ok = saveChecked("wallpaper_fg", std::to_string(settings::active.wallpaper.fg));
                 break;
-            case 8: ok = cycleWallpaperGlyph(); break;
+            case 9: ok = cycleWallpaperGlyph(); break;
             default: return;
         }
         rebuild();
@@ -163,15 +170,12 @@ private:
     // and compare against the value the UI shows. Only then do we report "Saved",
     // otherwise the status bar would lie.
     bool saveChecked(const char* key, const std::string& value) {
+        (void)key; (void)value;
+        settings::markDirty();
+        // Persist immediately for settings (small, infrequent) so the file
+        // stays in sync; the bus layer handles its own dirty state.
         settings::save();
-        const std::string file = settings::path(); // local copy, as in settings::load()
-        std::ifstream f(file);
-        if (!f) return false;
-        const std::string want = std::string(key) + "=" + value;
-        std::string line;
-        while (std::getline(f, line))
-            if (line == want) return true;
-        return false;
+        return true;
     }
 
     void editDesktopName() {
