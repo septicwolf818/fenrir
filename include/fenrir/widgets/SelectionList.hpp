@@ -71,7 +71,12 @@ public:
             Color fg = sel ? t.accentText : t.surfaceText;
             Color bg = sel ? t.accentBg : t.surfaceBg;
             uint8_t style = sel ? StyleBold : StyleNone;
-            if (!enabled_) { fg = t.dimText; style = StyleNone; } // inactive list color is theme-controlled
+            if (!enabled_) {
+                // Keep the selected row readable (accent text on accent bg)
+                // even when the list is not focused; other rows use dimText.
+                if (!sel) fg = t.dimText;
+                style = StyleNone;
+            } // inactive list color is theme-controlled
             screen.fillRect(Rect{bounds_.x, bounds_.y + row, bounds_.w, 1},
                             Cell{U' ', fg, bg, style});
             screen.putText(bounds_.x, bounds_.y + row,
