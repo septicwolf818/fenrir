@@ -174,7 +174,7 @@ public:
             bounds_.w <= 0 || bounds_.h <= 0)
             return std::nullopt;
         return std::make_pair(bounds_.x + std::clamp(vt_.cursorX(), 0, bounds_.w - 1),
-                              bounds_.y + std::clamp(vt_.cursorY(), 0, bounds_.h - 1));
+                              bounds_.y + std::clamp(vt_.renderedCursorY(), 0, bounds_.h - 1));
     }
 
     bool wantsGuiCursor() const override {

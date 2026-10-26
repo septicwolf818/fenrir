@@ -131,6 +131,7 @@ public:
     int height() const { return h_; }
     int cursorX() const { return cx_; }
     int cursorY() const { return cy_; }
+    int renderedCursorY() const { return cy_ + (!altOn_ ? topPadding_ : 0); }
     bool cursorVisible() const { return cursorVisible_; }
     bool appCursorKeys() const { return appCursor_; }
 
@@ -142,7 +143,7 @@ public:
             // soft-wrapped line spanning their boundary must be reflowed as a
             // unit when the window width changes.
             const auto& rows = displayRows();
-            const int row = static_cast<int>(normalScreenStartRow_) - view_ + y;
+            const int row = static_cast<int>(normalScreenStartRow_) - view_ + y - topPadding_;
             if (row < 0 || row >= static_cast<int>(rows.size())) return blank;
             const auto& displayRow = rows[static_cast<std::size_t>(row)];
             if (x >= static_cast<int>(displayRow.size())) return blank;
@@ -354,6 +355,17 @@ private:
         }
         normalScreenStartRow_ = rowStart + normalBufferStartOffset_ /
                                                 static_cast<std::size_t>(w_);
+        if (topPadding_ > 0 && normalCursorLine_ + 1 == normalLines_.size()) {
+            std::size_t contentRows = 0;
+            for (const auto& line : normalLines_)
+                contentRows += line.empty()
+                                   ? 1
+                                   : (line.size() + static_cast<std::size_t>(w_) - 1) /
+                                         static_cast<std::size_t>(w_);
+            topPadding_ = contentRows < static_cast<std::size_t>(h_)
+                              ? h_ - static_cast<int>(contentRows)
+                              : 0;
+        } else if (normalCursorLine_ + 1 != normalLines_.size()) topPadding_ = 0;
         displayRowsDirty_ = true;
     }
 
@@ -394,14 +406,19 @@ private:
             rows.push_back(BufferRow{0, 0, 0, false});
         }
 
+        const bool cursorAtBufferEnd = cursorLine + 1 == normalLines_.size();
+        const bool keepBottomAlignment = cursorAtBufferEnd &&
+                                         (normalScreenStartRow_ > 0 || topPadding_ > 0);
         int screenStart = 0;
         if (rows.size() <= static_cast<std::size_t>(h_)) {
             // The complete logical buffer fits. Bring former scrollback back
             // onto the live screen instead of retaining the old screen boundary
             // and counting its now-visible rows as history.
+            topPadding_ = keepBottomAlignment ? h_ - static_cast<int>(rows.size()) : 0;
             normalBufferStartLine_ = 0;
             normalBufferStartOffset_ = 0;
         } else {
+            topPadding_ = 0;
             const int boundaryRow = normalBufferStartLine_ >= lineStarts.size()
                                         ? static_cast<int>(rows.size())
                                         : static_cast<int>(lineStarts[normalBufferStartLine_] +
@@ -504,6 +521,7 @@ private:
         history_.clear();
         historyOpen_ = false;
         view_ = 0;
+        topPadding_ = 0;
         preserveViewOnOutput_ = false;
         syncNormalLinesFromGrid();
     }
@@ -1131,6 +1149,7 @@ private:
         normalCursorPendingWrap_ = normalSavedPendingWrap_ = false;
         displayRowsDirty_ = true;
         view_ = 0;
+        topPadding_ = 0;
         preserveViewOnOutput_ = false;
     }
 
@@ -1155,6 +1174,9 @@ private:
     // growing the grid must not permanently advance this anchor.
     std::size_t normalBufferStartLine_ = 0, normalBufferStartOffset_ = 0;
     std::size_t normalScreenStartRow_ = 0;
+    // Presentation-only leading blanks keep formerly scrolled content
+    // bottom-aligned when a resize makes the complete buffer fit.
+    int topPadding_ = 0;
     bool normalCursorPendingWrap_ = false, normalSavedPendingWrap_ = false;
     // Combined history + live-screen rows, joining an open history line to
     // the grid continuation before rewrapping.

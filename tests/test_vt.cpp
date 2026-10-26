@@ -191,9 +191,10 @@ void runTerminalTests() {
 
         v.resize(12, 4);
         check(v.historyRowCount() == 0, "fitting buffer is restored to the live screen");
-        check(v.at(0, 0).ch == U'o' && v.at(0, 1).ch == U'f' &&
-                  v.at(0, 2).ch == U'p',
-              "resize shows all content with prompt in place");
+        check(v.at(0, 0).ch == U' ' && v.at(0, 1).ch == U'o' &&
+                  v.at(0, 2).ch == U'f' && v.at(0, 3).ch == U'p',
+              "resize bottom-aligns all content when it fits");
+        check(v.renderedCursorY() == 3, "rendered cursor follows bottom-aligned prompt");
     }
     // A scrolled viewport is anchored to its logical line when rewrapping,
     // not to a fixed number of physical rows. Preserve it through the shell's

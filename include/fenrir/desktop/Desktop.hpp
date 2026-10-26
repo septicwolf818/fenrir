@@ -98,6 +98,7 @@ private:
     // --- Taskbar state ----------------------------------------------------
     int taskbarScroll_{0};  // index of first visible handle on task bar
     static constexpr int kTaskHandleW = 12;  // fixed display width per window handle
+    static constexpr std::chrono::milliseconds kTaskbarTitleScrollInterval{250};
     static constexpr int kMenuBarHeight = 1;
     static constexpr int kTaskBarHeight = 1;
 
@@ -137,7 +138,7 @@ private:
     bool missedNotificationsShown_ = false;
     int taskbarHoverIdx_ = -1;
     int taskbarHoverScroll_ = 0;
-    int taskbarHoverTick_ = 0;
+    std::chrono::steady_clock::time_point taskbarHoverLastStep_{};
     std::chrono::steady_clock::time_point lastCursorMove_{};
     std::chrono::steady_clock::time_point cursorMoveStart_{};
     int cursorMoveStreak_ = 0;
