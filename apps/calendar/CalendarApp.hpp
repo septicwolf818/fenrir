@@ -900,7 +900,12 @@ inline void CalendarView::pollNotifications(AppContext& ctx, bool startup) {
         if (!inWindow) continue;
         if (!settings::active.appNotifications) continue;
         const std::string body = e.title + " at " + hmStr(e.startMin);
-        ctx.notify("calendar", startup ? "Missed calendar event" : "Calendar event", body);
+        notifications::Notification n;
+        n.source = "calendar";
+        n.title = "Calendar event";
+        n.body = body;
+        n.when = std::chrono::system_clock::from_time_t(ev);
+        ctx.notifications().push(n);
     }
 
     p.setInt("last_notify", static_cast<int>(now));
