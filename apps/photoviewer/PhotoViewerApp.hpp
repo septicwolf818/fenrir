@@ -244,13 +244,27 @@ private:
                                      left + 1, image_.width());
         const int bottom = std::clamp(std::max(top + 1, static_cast<int>(std::ceil(y1))),
                                       top + 1, image_.height());
+        const int regionW = right - left;
+        const int regionH = bottom - top;
+        const long long area = static_cast<long long>(regionW) * static_cast<long long>(regionH);
+
+        // For large source regions (zoomed out), sample instead of visiting every
+        // pixel so rendering stays responsive on huge images.
+        int stepX = 1;
+        int stepY = 1;
+        if (area > 256) {
+            const int s = std::max(1, static_cast<int>(std::sqrt(static_cast<double>(area) / 64.0)));
+            stepX = stepY = s;
+        }
+
         uint64_t red = 0, green = 0, blue = 0, count = 0;
-        for (int y = top; y < bottom; ++y) {
-            for (int x = left; x < right; ++x) {
+        for (int y = top; y < bottom; y += stepY) {
+            for (int x = left; x < right; x += stepX) {
                 const RgbPixel& p = image_.at(x, y);
                 red += p.r; green += p.g; blue += p.b; ++count;
             }
         }
+        if (count == 0) return RgbPixel{};
         return {static_cast<uint8_t>(red / count), static_cast<uint8_t>(green / count),
                 static_cast<uint8_t>(blue / count)};
     }
