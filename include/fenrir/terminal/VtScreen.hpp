@@ -93,15 +93,16 @@ public:
         w_ = nw;
         h_ = nh;
 
-        int ignoredX = 0, ignoredY = 0;
         if (altOn_) {
             // The normal buffer is re-laid out from logical lines while the
             // alternate grid keeps its own independent cursor and contents.
             reflowInto(altGrid_, altWrap_, oldW, oldH, nw, nh, oldCx, oldCy,
-                       oldCx, oldCy, cx_, cy_, ignoredX, ignoredY);
+                       altSavedX_, altSavedY_, cx_, cy_, altSavedX_, altSavedY_);
             layoutNormalBuffer(normalCursorLine_, normalCursorOffset_, normalCursorPendingWrap_,
                                normalSavedLine_, normalSavedOffset_, normalSavedPendingWrap_,
-                               ignoredX, ignoredY, savedX_, savedY_);
+                               normalRestoreX_, normalRestoreY_, savedX_, savedY_);
+            normalCursorPendingWrap_ = normalRestoreX_ == w_;
+            normalSavedPendingWrap_ = savedX_ == w_;
         } else {
             layoutNormalBuffer(normalCursorLine_, normalCursorOffset_, normalCursorPendingWrap_,
                                normalSavedLine_, normalSavedOffset_, normalSavedPendingWrap_,
@@ -110,9 +111,9 @@ public:
             normalSavedPendingWrap_ = savedX_ == w_;
             // The alternate grid is inactive, but retaining its content across
             // a resize preserves the 1049 round-trip behavior.
-            int altX = 0, altY = 0, altSavedX = 0, altSavedY = 0;
-            reflowInto(altGrid_, altWrap_, oldW, oldH, nw, nh, 0, 0, 0, 0,
-                       altX, altY, altSavedX, altSavedY);
+            int altX = 0, altY = 0;
+            reflowInto(altGrid_, altWrap_, oldW, oldH, nw, nh, 0, 0,
+                       altSavedX_, altSavedY_, altX, altY, altSavedX_, altSavedY_);
         }
         top_ = 0;
         bot_ = h_ - 1;
@@ -725,10 +726,17 @@ private:
             case '[': params_.clear(); param_ = 0; hasParam_ = false; priv_ = false; state_ = St::Csi; break;
             case ']': oscFromApplication_ = feedFromApplication_; state_ = St::Osc; break;
             case '(': case ')': case '*': case '+': state_ = St::Charset; break;
-            case '7': savedX_ = cx_; savedY_ = cy_; break; // DECSC
+            case '7':
+                if (altOn_) { altSavedX_ = cx_; altSavedY_ = cy_; }
+                else { savedX_ = cx_; savedY_ = cy_; }
+                break; // DECSC
             case '8':
-                cx_ = (savedX_ == w_) ? w_ : std::clamp(savedX_, 0, w_ - 1);
-                cy_ = std::clamp(savedY_, 0, h_ - 1);
+                {
+                    const int x = altOn_ ? altSavedX_ : savedX_;
+                    const int y = altOn_ ? altSavedY_ : savedY_;
+                    cx_ = (x == w_) ? w_ : std::clamp(x, 0, w_ - 1);
+                    cy_ = std::clamp(y, 0, h_ - 1);
+                }
                 break; // DECRC
             case 'M': reverseIndex_(); break; // RI
             case 'D':
@@ -836,10 +844,10 @@ private:
         preserveViewOnOutput_ = false;
         if (on) {
             syncNormalLinesFromGrid();
-            if (saveCursor) { savedX_ = cx_; savedY_ = cy_; }
-            normalSavedLine_ = normalCursorLine_;
-            normalSavedOffset_ = normalCursorOffset_;
-            normalSavedPendingWrap_ = normalCursorPendingWrap_;
+            if (saveCursor) {
+                normalRestoreX_ = cx_;
+                normalRestoreY_ = cy_;
+            }
             altOn_ = true;
             clearBuf();
             cx_ = 0;
@@ -847,8 +855,8 @@ private:
         } else {
             altOn_ = false;
             if (saveCursor) {
-                cx_ = (savedX_ == w_) ? w_ : std::clamp(savedX_, 0, w_ - 1);
-                cy_ = std::clamp(savedY_, 0, h_ - 1);
+                cx_ = (normalRestoreX_ == w_) ? w_ : std::clamp(normalRestoreX_, 0, w_ - 1);
+                cy_ = std::clamp(normalRestoreY_, 0, h_ - 1);
             }
         }
     }
@@ -1130,6 +1138,8 @@ private:
         resetSgr();
         cx_ = cy_ = 0;
         savedX_ = savedY_ = 0;
+        altSavedX_ = altSavedY_ = 0;
+        normalRestoreX_ = normalRestoreY_ = 0;
         top_ = 0;
         bot_ = h_ - 1;
         cursorVisible_ = true;
@@ -1159,6 +1169,8 @@ private:
 
     int w_ = 1, h_ = 1, cx_ = 0, cy_ = 0;
     int savedX_ = 0, savedY_ = 0;
+    int altSavedX_ = 0, altSavedY_ = 0;
+    int normalRestoreX_ = 0, normalRestoreY_ = 0;
     int top_ = 0, bot_ = 0;
     std::vector<VtCell> grid_, altGrid_;
     std::vector<uint8_t> gridWrap_, altWrap_;

@@ -168,6 +168,45 @@ void runTerminalTests() {
         v.feed("\x1b[?1049l", 8);
         check(!v.inAltScreen(), "alt exited");
     }
+    // A resize while an alternate-screen app is active must preserve both its
+    // cursor and the bottom-aligned normal buffer/cursor for the 1049 restore.
+    {
+        VtScreen v;
+        v.resize(12, 2);
+        const char* output = "old\r\nfetch\r\nprompt";
+        v.feed(output, std::strlen(output));
+        v.resize(12, 5);
+        check(v.renderedCursorY() == 4, "normal prompt is bottom-aligned before alt entry");
+        v.feed("\x1b[1;2H", 6);
+        v.feed("\x1b" "7", 2); // normal screen's own DECSC state
+        v.feed("\x1b[3;7H", 6);
+
+        v.feed("\x1b[?1049h", 8);
+        v.feed("ALT", 3);
+        v.feed("\x1b[2;3H", 6);
+        v.feed("\x1b" "7", 2); // save the alternate screen's cursor
+        v.feed("\x1b[4;5H", 6);
+        v.resize(10, 6);
+        check(v.inAltScreen() && v.at(0, 0).ch == U'A' &&
+                  v.cursorX() == 4 && v.cursorY() == 3,
+              "alternate content and cursor survive resize with normal padding");
+        v.feed("\x1b" "8", 2);
+        check(v.cursorX() == 2 && v.cursorY() == 1,
+              "alternate screen's saved cursor survives resize");
+
+        v.feed("\x1b[?1049l", 8);
+        check(!v.inAltScreen(), "normal buffer restored after resize in alt screen");
+        check(v.at(0, 3).ch == U'o' && v.at(0, 4).ch == U'f' &&
+                  v.at(0, 5).ch == U'p',
+              "bottom-aligned normal buffer restored after alt screen");
+        check(v.cursorX() == 6 && v.cursorY() == 2 && v.renderedCursorY() == 5,
+              "normal prompt cursor restored at rendered position");
+        v.feed("x", 1);
+        check(v.at(6, 5).ch == U'x', "typing resumes at restored normal prompt");
+        v.feed("\x1b" "8", 2);
+        check(v.cursorX() == 1 && v.cursorY() == 0,
+              "normal DECSC state is independent from alternate-screen DECSC");
+    }
     // Cursor anchors, including the normal cursor saved across 1049, reflow.
     {
         VtScreen v;
@@ -445,6 +484,82 @@ void runTerminalTests() {
         check(v.historyRowCount() == 0, "growing restores the original screen boundary");
         check(v.at(0, 0).ch == U'r' && v.at(31, 1).ch == U't',
               "positioned title and rows return to their original screen positions");
+    }
+    // Debian's Fastfetch 2.30 logo uses '$1'/'$2' color placeholders, then
+    // returns to the top of the logo and prints module text with CSI C/G cursor
+    // positioning. Reflowing and restoring the width must preserve each glyph.
+    {
+        const std::vector<std::string> logo = {
+            "       $2_,met$$$$$$$$$$gg.",
+            "    ,g$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$P.",
+            "  ,g$$$$P\"         \"\"\"Y$$$$.\".",
+            " ,$$$$P'               `$$$$$$.",
+            "',$$$$P       ,ggs.     `$$$$b:",
+            "`d$$$$'     ,$P\"'   $1.$2    $$$$$$",
+            " $$$$P      d$'     $1,$2    $$$$$$P",
+            " $$$$:      $$.   $1-$2    ,d$$$$'",
+            " $$$$;      Y$b._   _,d$P'",
+            " Y$$$$.    `$1.`$2`\"Y$$$$$$$$P\"'",
+            " `$$$$b      $1\"-.__",
+            "  $2`Y$$$$",
+            "   `Y$$$$.",
+            "     `$$$$b.",
+            "       `Y$$$$b.",
+            "          `\"Y$$b._",
+            "             `\"\"\""};
+        std::string output;
+        for (std::size_t y = 0; y < logo.size(); ++y) {
+            const std::string& line = logo[y];
+            for (std::size_t i = 0; i < line.size(); ++i) {
+                if (line[i] == '$' && i + 1 < line.size() &&
+                    (line[i + 1] == '1' || line[i + 1] == '2')) {
+                    output += line[i + 1] == '1' ? "\x1b[31m" : "\x1b[0m";
+                    ++i;
+                } else {
+                    output.push_back(line[i]);
+                }
+            }
+            if (y + 1 < logo.size()) output += "\r\n";
+        }
+        output += "\x1b[1G\x1b[17A"; // Fastfetch returns to the logo's first row.
+        for (int y = 0; y < 12; ++y) {
+            output += "\x1b[38COS:";
+            output += "\x1b[50GDebian GNU/Linux 13\r\n";
+        }
+
+        VtScreen v;
+        v.resize(80, 24);
+        v.feed(output.data(), output.size());
+        std::vector<std::vector<VtCell>> before;
+        for (int y = 0; y < v.height(); ++y) {
+            std::vector<VtCell> row;
+            for (int x = 0; x < v.width(); ++x)
+                row.push_back(v.at(x, y));
+            before.push_back(std::move(row));
+        }
+
+        v.resize(56, 24);
+        v.resize(40, 24);
+        v.resize(80, 24);
+        int firstContentRow = 0;
+        while (firstContentRow < v.height()) {
+            bool nonBlank = false;
+            for (int x = 0; x < v.width(); ++x)
+                nonBlank |= v.at(x, firstContentRow).ch != U' ';
+            if (nonBlank) break;
+            ++firstContentRow;
+        }
+        check(firstContentRow < v.height(), "Debian logo remains visible after width reflow");
+        for (int y = 0; y < static_cast<int>(logo.size()); ++y) {
+            bool same = true;
+            for (int x = 0; x < v.width(); ++x) {
+                const VtCell& expected = before[static_cast<std::size_t>(y)][static_cast<std::size_t>(x)];
+                const VtCell& actual = v.at(x, firstContentRow + y);
+                same &= actual.ch == expected.ch && actual.fg == expected.fg &&
+                        actual.bg == expected.bg && actual.style == expected.style;
+            }
+            check(same, "Debian logo/module row survives horizontal resize with colors");
+        }
     }
     // CSI 3 J removes saved scrollback without erasing the visible screen.
     // The Linux `clear` sequence (CUP home followed by ED 0) clears both.
