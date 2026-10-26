@@ -277,35 +277,6 @@ void Window::draw(Screen& screen) {
         screen.set(x0 + w - 1, y, Cell{U'│', border, t.desktopBg, 0});
     }
 
-    // Title bar (row 1): window name on the left, [-] [+] [X] controls on the right.
-    // Win95: blue background, white text.
-    if (w >= kMinWidth) {
-        // Title bar background
-        for (int x = x0 + 1; x < x0 + w - 1; ++x)
-            screen.set(x, y0, Cell{' ', titleFg, titleBg, StyleBold});
-
-        std::u32string titleText(U" ", 1);
-        for (char c : title_)
-            titleText += static_cast<char32_t>(static_cast<unsigned char>(c));
-        titleText += U' ';
-        int maxTitle = std::max(0, w - 2 - kButtonsWidth - 2);
-        if (static_cast<int>(titleText.size()) > maxTitle) titleText.resize(static_cast<std::size_t>(maxTitle));
-        screen.putText(x0 + 1, y0, titleText, titleFg, titleBg, StyleBold);
-
-        // [-] [+]/[=] [X] controls — hit-tested by titleBarZoneAt().
-        // Each button is padded (" - ", " + ", " X ") with a one-cell gap and
-        // its own background color so it is easy to target with the cursor.
-        const int btnStart = x0 + w - 1 - kButtonsWidth;
-        const Color btnBg = t.buttonBg;
-        const Color btnFg = t.buttonText;
-        for (int i = 0; i < 3; ++i)
-            screen.set(btnStart + i, y0, Cell{i == 1 ? U'-' : U' ', btnFg, btnBg, StyleBold});
-        for (int i = 0; i < 3; ++i)
-            screen.set(btnStart + 4 + i, y0, Cell{i == 1 ? (maximized_ ? U'=' : U'+') : U' ', btnFg, btnBg, StyleBold});
-        for (int i = 0; i < 3; ++i)
-            screen.set(btnStart + 8 + i, y0, Cell{i == 1 ? U'X' : U' ', t.closeText, t.closeBg, StyleBold});
-    }
-
     // Menu bar (row 2, ITS OWN - as in windowing systems: title / menu / content).
     // Deliberately a different color than the blue title bar - menuBg background, menuText text.
     if (hasMenuTabs()) {
