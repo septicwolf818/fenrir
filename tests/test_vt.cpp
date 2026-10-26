@@ -189,12 +189,25 @@ void runTerminalTests() {
         v.feed(output, std::strlen(output));
         check(v.historyRowCount() > 0, "short terminal moves overflow into history");
 
-        v.resize(12, 4);
+        v.resize(12, 5);
         check(v.historyRowCount() == 0, "fitting buffer is restored to the live screen");
-        check(v.at(0, 0).ch == U' ' && v.at(0, 1).ch == U'o' &&
-                  v.at(0, 2).ch == U'f' && v.at(0, 3).ch == U'p',
+        check(v.at(0, 0).ch == U' ' && v.at(0, 1).ch == U' ' &&
+                  v.at(0, 2).ch == U'o' && v.at(0, 3).ch == U'f' &&
+                  v.at(0, 4).ch == U'p',
               "resize bottom-aligns all content when it fits");
-        check(v.renderedCursorY() == 3, "rendered cursor follows bottom-aligned prompt");
+        check(v.renderedCursorY() == 4, "rendered cursor follows bottom-aligned prompt");
+
+        v.feed("\r\nnext", 6);
+        check(v.at(0, 1).ch == U'o' && v.at(0, 2).ch == U'f' &&
+                  v.at(0, 3).ch == U'p' && v.at(0, 4).ch == U'n',
+              "new output fills the resize padding gradually");
+        check(v.renderedCursorY() == 4, "cursor remains anchored while padding shrinks");
+
+        v.feed("\r\nmore", 6);
+        check(v.at(0, 0).ch == U'o' && v.at(0, 1).ch == U'f' &&
+                  v.at(0, 2).ch == U'p' && v.at(0, 3).ch == U'n' &&
+                  v.at(0, 4).ch == U'm',
+              "resize padding is gone when the content fills the window");
     }
     // A scrolled viewport is anchored to its logical line when rewrapping,
     // not to a fixed number of physical rows. Preserve it through the shell's

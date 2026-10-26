@@ -355,7 +355,7 @@ private:
         }
         normalScreenStartRow_ = rowStart + normalBufferStartOffset_ /
                                                 static_cast<std::size_t>(w_);
-        if (topPadding_ > 0 && normalCursorLine_ + 1 == normalLines_.size()) {
+        if (topPadding_ > 0) {
             std::size_t contentRows = 0;
             for (const auto& line : normalLines_)
                 contentRows += line.empty()
@@ -365,7 +365,7 @@ private:
             topPadding_ = contentRows < static_cast<std::size_t>(h_)
                               ? h_ - static_cast<int>(contentRows)
                               : 0;
-        } else if (normalCursorLine_ + 1 != normalLines_.size()) topPadding_ = 0;
+        }
         displayRowsDirty_ = true;
     }
 
