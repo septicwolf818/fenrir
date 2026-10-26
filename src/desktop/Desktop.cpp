@@ -14,6 +14,7 @@
 #include "fenrir/core/Settings.hpp"
 #include "fenrir/core/Text.hpp"
 #include "fenrir/core/Theme.hpp"
+#include "fenrir/widgets/SelectionList.hpp"
 #include "fenrir/window/Window.hpp"
 
 namespace {
@@ -37,6 +38,45 @@ public:
         }
         return Menu::handleKey(ev);
     }
+};
+
+class NotificationCenterView final : public SelectionList {
+public:
+    NotificationCenterView() { refresh(); }
+
+    void refresh() {
+        auto& bus = notifications::global();
+        ids_.clear();
+        std::vector<std::u32string> rows;
+        for (const auto& n : bus.items()) {
+            ids_.push_back(n.id);
+            std::u32string row = (n.read ? U"  " : U"* ");
+            row += text::toUtf32(n.source.empty() ? std::string("app") : n.source);
+            row += U": ";
+            row += text::toUtf32(n.title);
+            if (!n.body.empty()) {
+                row += U" - ";
+                row += text::toUtf32(n.body);
+            }
+            rows.push_back(row);
+        }
+        setItems(rows);
+    }
+
+    KeyEventResult handleKey(const KeyEvent& ev) override {
+        if (ev.key == Key::Delete || ev.key == Key::Backspace) {
+            const int idx = selectedIndex();
+            if (idx >= 0 && idx < static_cast<int>(ids_.size())) {
+                notifications::global().remove(ids_[static_cast<std::size_t>(idx)]);
+                refresh();
+                return KeyEventResult::Consumed;
+            }
+        }
+        return SelectionList::handleKey(ev);
+    }
+
+private:
+    std::vector<int> ids_;
 };
 
 void drawBox(Screen& screen, const Rect& r, std::u32string_view title) {
@@ -227,24 +267,19 @@ void Desktop::performShutdown() {
 
 void Desktop::openNotificationCenter() {
     auto& bus = notifications::global();
-    std::u32string text;
-    if (bus.items().empty()) {
-        text = U"No notifications.";
-    } else {
-        for (const auto& n : bus.items()) {
-            text += (n.read ? U"  " : U"* ");
-            text += text::toUtf32(n.source.empty() ? std::string("app") : n.source);
-            text += U": ";
-            text += text::toUtf32(n.title);
-            if (!n.body.empty()) {
-                text += U"\n    ";
-                text += text::toUtf32(n.body);
-            }
-            text += U"\n";
-        }
-    }
     bus.markAllRead();
-    showMessage(std::move(text));
+
+    Rect area = desktopArea();
+    Rect bounds{area.x + 2, area.y + 1, std::min(60, std::max(30, area.w - 4)),
+                std::min(16, std::max(6, area.h - 3))};
+    auto view = std::make_unique<NotificationCenterView>();
+    view->refresh();
+    Window* w = wm_.createWindow("Notifications", bounds, std::move(view));
+    w->constrainTo(area);
+    wm_.focus(w);
+    cursor_.moveTo(w->bounds().x + 2, w->bounds().y + 1);
+    cursor_.clamp(screenWidth(), screenHeight());
+    mode_ = enterWindowMode(*w);
 }
 
 void Desktop::openBackgroundTasks() {
