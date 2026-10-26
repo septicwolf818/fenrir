@@ -726,16 +726,21 @@ void Desktop::activateAtCursor() {
     }
 
     if (cursor_.y() < kMenuBarHeight) {
-        // Top bar sections: "Applications" opens the app menu; "Notifications"
-        // opens the notification center. Everything else falls back to the app menu.
+        // Top bar: "Applications" on the left opens the app menu; "Notifications"
+        // on the right opens the notification center.
         std::u32string left = U" Applications ";
+        std::u32string modeLabel = U"Desktop";
+        // (mode label not critical for hit testing; recompute right text width roughly)
+        const std::string& name =
+            settings::active.desktopName.empty() ? desktopName_ : settings::active.desktopName;
+        std::u32string right = modeLabel + U" | " + text::toUtf32(name);
         std::u32string notif = U" Notifications ";
         const int notifUnread = notifications::global().unreadCount();
         if (notifUnread > 0) notif = U" Notifications (" + text::toUtf32(std::to_string(notifUnread)) + U") ";
-        int notifStart = static_cast<int>(left.size());
+        int notifStart = screenWidth() - static_cast<int>(right.size()) - static_cast<int>(notif.size()) - 2;
         int notifEnd = notifStart + static_cast<int>(notif.size());
-        if (cursor_.x() < notifStart) openAppMenu();
-        else if (cursor_.x() < notifEnd) openNotificationCenter();
+        if (cursor_.x() < static_cast<int>(left.size())) openAppMenu();
+        else if (cursor_.x() >= notifStart && cursor_.x() < notifEnd) openNotificationCenter();
         return;
     }
 
@@ -1046,23 +1051,17 @@ void Desktop::drawDesktopBackground(Screen& screen) {
     const Color fg = pattern ? Color{static_cast<uint8_t>(wp.fg & 15)} : t.desktopText;
     const Color bg = wp.enabled ? Color{static_cast<uint8_t>(wp.bg & 15)} : t.desktopBg;
     for (int y = kMenuBarHeight; y < screen.height() - kTaskBarHeight; ++y)
-        for (int x = 0; x < screen.width(); ++x)
+        for (int x = 0; x < screenWidth(); ++x)
             screen.set(x, y, Cell{ch, fg, bg, 0});
 }
 
 void Desktop::drawMenuBar(Screen& screen) {
     const auto& t = theme::active;
-    for (int x = 0; x < screen.width(); ++x)
+    for (int x = 0; x < screenWidth(); ++x)
         screen.set(x, 0, Cell{U' ', t.menuBarText, t.menuBarBg, 0});
 
     std::u32string left = U" Applications ";
     screen.putText(0, 0, left, t.menuBarText, t.menuBarBg, StyleBold);
-
-    std::u32string notif = U" Notifications ";
-    const int notifUnread = notifications::global().unreadCount();
-    if (notifUnread > 0) notif = U" Notifications (" + text::toUtf32(std::to_string(notifUnread)) + U") ";
-    int notifX = static_cast<int>(left.size());
-    screen.putText(notifX, 0, notif, t.menuBarText, t.menuBarBg, StyleBold);
 
     // Mode in the upper-right corner: [mode] | Fenrir — where "Fenrir" used to be.
     std::u32string modeLabel = U"Desktop";
@@ -1079,10 +1078,15 @@ void Desktop::drawMenuBar(Screen& screen) {
     const std::string& name =
         settings::active.desktopName.empty() ? desktopName_ : settings::active.desktopName;
     std::u32string right = modeLabel + U" | " + text::toUtf32(name);
-    const int unread = notifications::global().unreadCount();
-    if (unread > 0) right = text::toUtf32(std::to_string(unread)) + U" notif | " + right;
-    int rightX = screen.width() - static_cast<int>(right.size()) - 1;
-    if (rightX > static_cast<int>(left.size()))
+    std::u32string notif = U" Notifications ";
+    const int notifUnread = notifications::global().unreadCount();
+    if (notifUnread > 0) notif = U" Notifications (" + text::toUtf32(std::to_string(notifUnread)) + U") ";
+    int notifX = screenWidth() - static_cast<int>(right.size()) - static_cast<int>(notif.size()) - 2;
+    if (notifX > static_cast<int>(left.size()))
+        screen.putText(notifX, 0, notif, t.menuBarText, t.menuBarBg, StyleBold);
+
+    int rightX = screenWidth() - static_cast<int>(right.size()) - 1;
+    if (rightX > notifX + static_cast<int>(notif.size()))
         screen.putText(rightX, 0, right, t.menuBarText, t.menuBarBg, StyleBold);
 }
 
@@ -1097,7 +1101,7 @@ void Desktop::drawTaskBar(Screen& screen) {
     const Color accent = t.highlightText;
 
     int y = screen.height() - 1;
-    for (int x = 0; x < screen.width(); ++x)
+    for (int x = 0; x < screenWidth(); ++x)
         screen.set(x, y, Cell{' ', inactiveFg, barBg, 0});
 
     const auto& wins = wm_.windows();
@@ -1110,7 +1114,7 @@ void Desktop::drawTaskBar(Screen& screen) {
     int rightArrowWidth = 1;
 
     if (totalHandles > 0) {
-        int usableWidth    = screen.width() - leftArrowWidth - rightArrowWidth;
+        int usableWidth    = screenWidth() - leftArrowWidth - rightArrowWidth;
         int maxVisible     = std::max(1, usableWidth / kTaskHandleW);
 
         if (taskbarScroll_ + maxVisible > totalHandles)
@@ -1141,14 +1145,14 @@ void Desktop::drawTaskBar(Screen& screen) {
             label.insert(1, static_cast<std::size_t>(pad / 2), ' ');
 
             int x = leftArrowWidth + (idx - visibleStart) * kTaskHandleW;
-            if (x + static_cast<int>(label.size()) < screen.width()) {
+            if (x + static_cast<int>(label.size()) < screenWidth()) {
                 screen.putText(x, y, text::toUtf32(label), fg, bg, isActive ? StyleBold : StyleNone);
             }
         }
 
         // ASCII scroll arrows
         if (canScrollLeft) screen.set(0, y, Cell{'<', accent, barBg});
-        if (canScrollRight) screen.set(screen.width() - 1, y, Cell{'>', accent, barBg});
+        if (canScrollRight) screen.set(screenWidth() - 1, y, Cell{'>', accent, barBg});
     }
 
     // --- Date/time: ALWAYS in the same place (right edge, beside the > arrow). ---
@@ -1162,9 +1166,9 @@ void Desktop::drawTaskBar(Screen& screen) {
         const char* fmt = settings::active.taskbarSeconds ? "%Y-%m-%d %H:%M:%S" : "%Y-%m-%d %H:%M";
         strftime(tbuf, sizeof(tbuf), fmt, ti);
         std::string clockStr(tbuf);
-        int clockX = screen.width() - 1 - static_cast<int>(clockStr.size()); // right-aligned
+        int clockX = screenWidth() - 1 - static_cast<int>(clockStr.size()); // right-aligned
         if (clockX < leftArrowWidth) clockX = leftArrowWidth;
-        if (clockX + static_cast<int>(clockStr.size()) <= screen.width()) {
+        if (clockX + static_cast<int>(clockStr.size()) <= screenWidth()) {
             screen.putText(clockX, y, std::u32string(clockStr.begin(), clockStr.end()), accent, barBg);
         }
     }
