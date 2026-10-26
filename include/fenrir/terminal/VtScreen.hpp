@@ -30,14 +30,19 @@ public:
     bool inAltScreen() const { return altOn_; }
     // Scrollback content: the number of logical lines kept above the screen.
     std::size_t historySize() const { return history_.size(); }
-    // Scrollback rows at the current width (the lines are re-wrapped for
-    // display, so a wide line can take several rows).
-    std::size_t historyRowCount() const { return historyRows().size(); }
+    // Rows above the live screen at the current width. A soft-wrapped line
+    // can straddle history and the grid, so count the reflowed combined stream.
+    std::size_t historyRowCount() const {
+        const auto& rows = displayRows();
+        return rows.size() > static_cast<std::size_t>(h_)
+                   ? rows.size() - static_cast<std::size_t>(h_)
+                   : 0;
+    }
     int viewOffset() const { return view_; }
 
-    // Browse the scrollback (positive = older). Clamped to [0, history].
+    // Browse the scrollback (positive = older). Clamped to available rows.
     void scrollView(int lines) {
-        view_ = std::clamp(view_ + lines, 0, static_cast<int>(historyRows().size()));
+        view_ = std::clamp(view_ + lines, 0, static_cast<int>(historyRowCount()));
     }
 
     // Return to the live view (called on new output and on most keys).
@@ -58,7 +63,16 @@ public:
             cy_ = 0;
             top_ = 0;
             bot_ = nh - 1;
+            displayRowsDirty_ = true;
             return;
+        }
+        const bool reflowOpenLine = !altOn_ && historyOpen_ && !history_.empty();
+        std::vector<VtCell> openLine;
+        if (reflowOpenLine) {
+            openLine = history_.back();
+            int nextRow = 0;
+            auto continuation = collectGridLine(0, nextRow);
+            openLine.insert(openLine.end(), continuation.begin(), continuation.end());
         }
         // Reflow both buffers and map each buffer's cursor through its own
         // layout. While the alternate screen is active, savedX_/savedY_ is
@@ -85,8 +99,6 @@ public:
         // they are wrapped for display — the text itself is never rewritten.
         w_ = nw;
         h_ = nh;
-        historyRowsDirty_ = true;
-        view_ = std::clamp(view_, 0, static_cast<int>(historyRows().size()));
         // cx_ == width means the last cell was written and the next printable
         // character wraps. Preserve that state across reflow; clamping it to
         // width-1 makes a subsequent character overwrite the last cell.
@@ -96,6 +108,9 @@ public:
         savedY_ = std::clamp(newSavedY, 0, h_ - 1);
         top_ = 0;
         bot_ = h_ - 1;
+        if (reflowOpenLine) repairOpenHistoryAfterResize(openLine);
+        displayRowsDirty_ = true;
+        view_ = std::clamp(view_, 0, static_cast<int>(historyRowCount()));
     }
 
     int width() const { return w_; }
@@ -108,24 +123,16 @@ public:
     const VtCell& at(int x, int y) const {
         static const VtCell blank;
         if (x < 0 || y < 0 || x >= w_ || y >= h_) return blank;
-        if (view_ > 0 && !altOn_) {
-            // Scrolled back: the visible rows are the tail of the combined
-            // stream (scrollback rows re-wrapped to the current width, then
-            // the live grid), shifted up by view_ rows.
-            const auto& hist = historyRows();
-            const int histCount = static_cast<int>(hist.size());
-            const int row = histCount - view_ + y;
-            if (row < 0) return blank;
-            if (row < histCount) {
-                const auto& hr = hist[static_cast<std::size_t>(row)];
-                if (x >= static_cast<int>(hr.size())) return blank;
-                return hr[static_cast<std::size_t>(x)];
-            }
-            const std::size_t idx =
-                static_cast<std::size_t>(row - histCount) * static_cast<std::size_t>(w_) +
-                static_cast<std::size_t>(x);
-            if (idx >= grid_.size()) return blank;
-            return grid_[idx];
+        if (!altOn_) {
+            // Render history and the live grid from one logical stream. A
+            // soft-wrapped line spanning their boundary must be reflowed as a
+            // unit when the window width changes.
+            const auto& rows = displayRows();
+            const int row = static_cast<int>(rows.size()) - h_ - view_ + y;
+            if (row < 0 || row >= static_cast<int>(rows.size())) return blank;
+            const auto& displayRow = rows[static_cast<std::size_t>(row)];
+            if (x >= static_cast<int>(displayRow.size())) return blank;
+            return displayRow[static_cast<std::size_t>(x)];
         }
         const auto& b = buf();
         const std::size_t idx = static_cast<std::size_t>(y) * static_cast<std::size_t>(w_) +
@@ -135,7 +142,10 @@ public:
     }
 
     void feed(const char* data, std::size_t n) {
-        if (n > 0) view_ = 0; // new output returns to the live view
+        if (n > 0) {
+            view_ = 0; // new output returns to the live view
+            displayRowsDirty_ = true;
+        }
         for (std::size_t i = 0; i < n; ++i) {
             const unsigned char b = static_cast<unsigned char>(data[i]);
             switch (state_) {
@@ -164,26 +174,100 @@ private:
     const std::vector<VtCell>& buf() const { return altOn_ ? altGrid_ : grid_; }
     std::vector<uint8_t>& wraps() { return altOn_ ? altWrap_ : gridWrap_; }
 
-    // Scrollback rows at the current width. The history itself stores logical
-    // lines (the text between newlines, with soft-wrapped rows joined), so a
-    // width change only re-wraps the text for display — nothing is truncated.
-    const std::vector<std::vector<VtCell>>& historyRows() const {
-        if (!historyRowsDirty_) return historyRowsCache_;
-        historyRowsCache_.clear();
-        const std::size_t width = static_cast<std::size_t>(w_);
-        for (const auto& line : history_) {
-            if (line.empty()) {
-                historyRowsCache_.emplace_back();
-                continue;
+    // Collect one logical line beginning at a physical grid row, following
+    // soft-wrap markers. The returned row is clipped at the last written cell,
+    // but retains full wrapped rows and cursor anchor columns.
+    std::vector<VtCell> collectGridLine(int startRow, int& nextRow) const {
+        std::vector<VtCell> line;
+        nextRow = startRow;
+        bool continues = true;
+        while (nextRow < h_ && continues) {
+            const int row = nextRow;
+            const std::size_t base = static_cast<std::size_t>(row) * static_cast<std::size_t>(w_);
+            int last = -1;
+            for (int x = w_ - 1; x >= 0; --x) {
+                if (grid_[base + static_cast<std::size_t>(x)].ch != U' ') {
+                    last = x;
+                    break;
+                }
             }
-            for (std::size_t off = 0; off < line.size(); off += width) {
-                const std::size_t end = std::min(line.size(), off + width);
-                historyRowsCache_.emplace_back(line.begin() + static_cast<long>(off),
-                                               line.begin() + static_cast<long>(end));
-            }
+            int preserve = gridWrap_[static_cast<std::size_t>(row)] ? w_ : last + 1;
+            if (row == cy_) preserve = std::max(preserve, std::clamp(cx_, 0, w_));
+            if (row == savedY_) preserve = std::max(preserve, std::clamp(savedX_, 0, w_));
+            for (int x = 0; x < preserve; ++x)
+                line.push_back(grid_[base + static_cast<std::size_t>(x)]);
+            continues = gridWrap_[static_cast<std::size_t>(row)] != 0;
+            ++nextRow;
         }
-        historyRowsDirty_ = false;
-        return historyRowsCache_;
+        return line;
+    }
+
+    // The grid reflows independently to preserve its cursor and may drop old
+    // rows when the window narrows. Move that dropped prefix into scrollback,
+    // keeping its open-line boundary exactly where the newly reflowed grid
+    // continues it.
+    void repairOpenHistoryAfterResize(const std::vector<VtCell>& originalLine) {
+        if (history_.empty()) return;
+        int nextRow = 0;
+        const auto visibleLine = collectGridLine(0, nextRow);
+        if (visibleLine.size() > originalLine.size()) return;
+        const std::size_t prefixSize = originalLine.size() - visibleLine.size();
+        for (std::size_t i = 0; i < visibleLine.size(); ++i) {
+            if (visibleLine[i].ch != originalLine[prefixSize + i].ch) return;
+        }
+        history_.back().assign(originalLine.begin(), originalLine.begin() +
+                               static_cast<long>(prefixSize));
+        historyOpen_ = !visibleLine.empty();
+        displayRowsDirty_ = true;
+    }
+
+    void appendRewrappedLine(const std::vector<VtCell>& line,
+                             std::vector<std::vector<VtCell>>& rows) const {
+        if (line.empty()) {
+            rows.emplace_back();
+            return;
+        }
+        const std::size_t width = static_cast<std::size_t>(w_);
+        for (std::size_t off = 0; off < line.size(); off += width) {
+            const std::size_t end = std::min(line.size(), off + width);
+            rows.emplace_back(line.begin() + static_cast<long>(off),
+                              line.begin() + static_cast<long>(end));
+        }
+    }
+
+    // A cached row view of scrollback plus the normal grid. An open history
+    // line is joined to the grid rows that continue it before wrapping, which
+    // prevents a false line break (and lost text) at the history/grid boundary.
+    const std::vector<std::vector<VtCell>>& displayRows() const {
+        if (!displayRowsDirty_) return displayRowsCache_;
+        displayRowsCache_.clear();
+        if (grid_.size() != static_cast<std::size_t>(w_) * static_cast<std::size_t>(h_) ||
+            gridWrap_.size() != static_cast<std::size_t>(h_)) {
+            displayRowsCache_.resize(static_cast<std::size_t>(h_));
+            displayRowsDirty_ = false;
+            return displayRowsCache_;
+        }
+
+        const bool joinsHistory = !altOn_ && historyOpen_ && !history_.empty();
+        const std::size_t completeHistory = history_.size() - (joinsHistory ? 1U : 0U);
+        for (std::size_t i = 0; i < completeHistory; ++i)
+            appendRewrappedLine(history_[i], displayRowsCache_);
+
+        int row = 0;
+        if (joinsHistory) {
+            std::vector<VtCell> line = history_.back();
+            auto continuation = collectGridLine(0, row);
+            line.insert(line.end(), continuation.begin(), continuation.end());
+            appendRewrappedLine(line, displayRowsCache_);
+        }
+        while (row < h_) {
+            int nextRow = row;
+            auto line = collectGridLine(row, nextRow);
+            row = nextRow;
+            appendRewrappedLine(line, displayRowsCache_);
+        }
+        displayRowsDirty_ = false;
+        return displayRowsCache_;
     }
 
     // Removes the padding blanks at the end of a completed history line.
@@ -196,7 +280,7 @@ private:
         if (altOn_ || !historyOpen_) return;
         historyOpen_ = false;
         if (!history_.empty()) trimTrailingBlanks(history_.back());
-        historyRowsDirty_ = true;
+        displayRowsDirty_ = true;
     }
 
     // Reflow one cell buffer from oldW×oldH to newW×newH, preserving visible
@@ -580,7 +664,7 @@ private:
                 history_.pop_front();
                 if (history_.empty()) historyOpen_ = false;
             }
-            historyRowsDirty_ = true;
+            displayRowsDirty_ = true;
         }
         for (int y = top_; y < bot_; ++y)
             std::move(g.begin() + static_cast<long>((y + 1) * w_),
@@ -801,7 +885,7 @@ private:
         altWrap_.assign(static_cast<std::size_t>(h_), 0);
         history_.clear();
         historyOpen_ = false;
-        historyRowsDirty_ = true;
+        displayRowsDirty_ = true;
         view_ = 0;
     }
 
@@ -816,9 +900,10 @@ private:
     // The last history line continues on the screen (its remaining rows have
     // not scrolled off yet).
     bool historyOpen_ = false;
-    // Scrollback rows re-wrapped to the current width (display cache).
-    mutable std::vector<std::vector<VtCell>> historyRowsCache_;
-    mutable bool historyRowsDirty_ = true;
+    // Combined history + live-screen rows, joining an open history line to
+    // the grid continuation before rewrapping.
+    mutable std::vector<std::vector<VtCell>> displayRowsCache_;
+    mutable bool displayRowsDirty_ = true;
     int view_ = 0; // scrolled-back lines (0 = live)
     bool altOn_ = false, cursorVisible_ = true, appCursor_ = false;
     Color fg_ = colors::White, bg_ = colors::Black;

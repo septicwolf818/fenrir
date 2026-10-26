@@ -163,6 +163,68 @@ void runTerminalTests() {
         v.resize(4, 3);
         check(v.viewOffset() <= static_cast<int>(v.historyRowCount()), "view clamped");
     }
+    // Resizing must reflow a logical line that currently straddles scrollback
+    // and the live grid as one line. Reflowing the two buffers independently
+    // can drop the visible continuation when it no longer fits in the grid.
+    {
+        const std::string input = "ABCDEFGHIJKLMNOPQR";
+        VtScreen v;
+        v.resize(6, 2);
+        v.feed(input.data(), input.size());
+        check(v.historySize() == 1, "long live line has a history prefix");
+        v.resize(4, 2);
+
+        const int historyRows = static_cast<int>(v.historyRowCount());
+        const int totalRows = historyRows + v.height();
+        std::vector<std::string> stream(static_cast<std::size_t>(totalRows),
+                                        std::string(static_cast<std::size_t>(v.width()), ' '));
+        for (int offset = historyRows; offset >= 0; --offset) {
+            v.follow();
+            v.scrollView(offset);
+            for (int y = 0; y < v.height(); ++y) {
+                const int streamRow = historyRows - offset + y;
+                if (streamRow < 0 || streamRow >= totalRows) continue;
+                for (int x = 0; x < v.width(); ++x)
+                    stream[static_cast<std::size_t>(streamRow)][static_cast<std::size_t>(x)] =
+                        static_cast<char>(v.at(x, y).ch);
+            }
+        }
+        std::string actual;
+        for (const auto& row : stream)
+            for (const char c : row)
+                if (c != ' ') actual.push_back(c);
+        check(actual == input, "resize preserves line spanning history and live grid");
+        check(stream == std::vector<std::string>({"ABCD", "EFGH", "IJKL", "MNOP", "QR  "}),
+              "history and live rows share the same reflow boundaries");
+
+        const char* nextLine = "\r\nNEXT\r\n";
+        v.feed(nextLine, std::strlen(nextLine));
+        const int rowsAbove = static_cast<int>(v.historyRowCount());
+        const int rowsTotal = rowsAbove + v.height();
+        stream.assign(static_cast<std::size_t>(rowsTotal),
+                      std::string(static_cast<std::size_t>(v.width()), ' '));
+        for (int offset = rowsAbove; offset >= 0; --offset) {
+            v.follow();
+            v.scrollView(offset);
+            for (int y = 0; y < v.height(); ++y) {
+                const int streamRow = rowsAbove - offset + y;
+                if (streamRow < 0 || streamRow >= rowsTotal) continue;
+                for (int x = 0; x < v.width(); ++x)
+                    stream[static_cast<std::size_t>(streamRow)][static_cast<std::size_t>(x)] =
+                        static_cast<char>(v.at(x, y).ch);
+            }
+        }
+        actual.clear();
+        for (const auto& row : stream)
+            for (const char c : row)
+                if (c != ' ') actual.push_back(c);
+        check(actual == input + "NEXT", "newline after resize keeps the next line aligned");
+        bool nextLineStartsAtColumnZero = false;
+        for (const auto& row : stream) {
+            if (row == "NEXT") nextLineStartsAtColumnZero = true;
+        }
+        check(nextLineStartsAtColumnZero, "newline after resize starts a new row");
+    }
     // The scrollback keeps the actual text of a line, so it re-wraps to the
     // new width instead of being truncated or padded with blanks.
     {
@@ -221,7 +283,7 @@ void runTerminalTests() {
         v.feed("UVWXYZ12345\r\n", 13);
         check(v.historySize() == 2, "screen clear closes history continuation");
         v.resize(4, 4);
-        check(v.historyRowCount() == 4, "cleared and new history lines remain distinct");
+        check(v.historySize() == 2, "cleared and new history lines remain distinct");
     }
     // Repeated resizing while a soft-wrapped line spans history and screen
     // must neither duplicate nor lose its cells.
