@@ -861,6 +861,9 @@ private:
                 case 7:
                     autoWrap_ = on;
                     if (!on) {
+                        if (!altOn_)
+                            for (auto& line : history_)
+                                for (auto& cell : line) cell.fixedRow = true;
                         auto& grid = buf();
                         for (int y = 0; y < h_; ++y) {
                             const std::size_t base = static_cast<std::size_t>(y) *
