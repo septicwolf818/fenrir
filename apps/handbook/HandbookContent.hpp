@@ -378,6 +378,7 @@ inline Library buildLibrary() {
                     {"Ctrl+X", "Move the selection to the other panel"},
                     {"Ctrl+R", "Rename the selection"},
                     {"Ctrl+G", "Choose a folder for the active panel"},
+                    {"Ctrl+P", "Type a path for the active panel"},
                     {"Ctrl+O", "Choose the application of the selected file"},
                     {"Delete", "Delete the selection"},
                     {"Enter", "Open the selected file"},
