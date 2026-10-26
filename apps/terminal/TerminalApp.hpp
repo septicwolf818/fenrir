@@ -129,6 +129,7 @@ public:
         if (bounds_.w <= 0 || bounds_.h <= 0) return;
         if (!spawned_) spawn();
         if (bounds_.w != vt_.width() || bounds_.h != vt_.height()) {
+            vt_.preserveViewOnResizeOutput();
             vt_.resize(bounds_.w, bounds_.h);
             if (pty_.fd() >= 0) pty_.resize(bounds_.w, bounds_.h);
         }
@@ -198,13 +199,19 @@ private:
         if (pty_.fd() < 0) return;
         pty_.flushOut();
         char buf[4096];
+        bool consumedOutput = false;
         for (;;) {
             const long n = pty_.readSome(buf, sizeof(buf));
             if (n > 0) {
+                consumedOutput = true;
                 vt_.feed(buf, static_cast<std::size_t>(n));
                 continue;
             }
-            if (n == 0) return; // EAGAIN — no data
+            if (n == 0) {
+                if (consumedOutput) vt_.finishOutputBatch();
+                return; // EAGAIN — no data
+            }
+            vt_.finishOutputBatch();
             // Slave closed — shell has exited; use WNOHANG to avoid hanging
             // if the child remains alive without the slave (daemonization).
             int st = 0;

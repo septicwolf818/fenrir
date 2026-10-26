@@ -163,6 +163,40 @@ void runTerminalTests() {
         v.resize(4, 3);
         check(v.viewOffset() <= static_cast<int>(v.historyRowCount()), "view clamped");
     }
+    // A scrolled viewport is anchored to its logical line when rewrapping,
+    // not to a fixed number of physical rows. Preserve it through the shell's
+    // prompt redraw after SIGWINCH, but ordinary later output follows live.
+    {
+        VtScreen v;
+        v.resize(12, 5);
+        for (int i = 0; i < 20; ++i) {
+            std::string line = "L";
+            if (i < 10) line += '0';
+            line += std::to_string(i);
+            line += "-12345678";
+            v.feed(line.data(), line.size());
+            v.feed("\r\n", 2);
+        }
+        v.scrollView(6);
+        const char32_t tens = v.at(1, 0).ch;
+        const char32_t ones = v.at(2, 0).ch;
+        check(v.viewOffset() == 6, "scrollback viewport positioned before resize");
+
+        v.resize(8, 4);
+        check(v.viewOffset() > 0, "resize keeps the scrollback view active");
+        check(v.at(0, 0).ch == U'L' && v.at(1, 0).ch == tens && v.at(2, 0).ch == ones,
+              "resize preserves the logical line at the top of the viewport");
+
+        v.preserveViewOnResizeOutput();
+        v.feed("PROMPT", 6);
+        check(v.viewOffset() > 0, "resize-triggered prompt output keeps scrollback visible");
+        check(v.at(0, 0).ch == U'L' && v.at(1, 0).ch == tens && v.at(2, 0).ch == ones,
+              "prompt redraw does not jump the viewport to the bottom");
+        v.finishOutputBatch();
+
+        v.feed("x", 1);
+        check(v.viewOffset() == 0, "ordinary output returns to the live view");
+    }
     // Resizing must reflow a logical line that currently straddles scrollback
     // and the live grid as one line. Reflowing the two buffers independently
     // can drop the visible continuation when it no longer fits in the grid.
