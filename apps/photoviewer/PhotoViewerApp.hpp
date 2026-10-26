@@ -47,6 +47,7 @@ public:
 
     void zoomIn() { setZoom(std::min(400, zoomPercent_ + std::max(10, zoomPercent_ / 4))); }
     void zoomOut() { setZoom(std::max(1, zoomPercent_ - std::max(10, zoomPercent_ / 4))); }
+    void actualSize() { setZoom(100); }
 
     void fitToView() {
         if (image_.width() <= 0 || image_.height() <= 0 || bounds_.w <= 0 || bounds_.h <= 1) return;
@@ -391,6 +392,14 @@ public:
         addAboutMenu(*view, ctx, U"Photo Viewer",
                      U"View common image formats with ANSI colors and terminal shading.");
         view->pushShortcut({true, Key::Char, U'o'}, [raw] { raw->openImage(); });
+        view->pushShortcut({false, Key::Char, U'+'}, [raw] { raw->zoomIn(); });
+        view->pushShortcut({false, Key::Char, U'='}, [raw] { raw->zoomIn(); });
+        view->pushShortcut({false, Key::Char, U'-'}, [raw] { raw->zoomOut(); });
+        view->pushShortcut({false, Key::Char, U'0'}, [raw] { raw->actualSize(); });
+        view->pushShortcut({false, Key::Char, U'f'}, [raw] { raw->fitToView(); });
+        view->pushShortcut({false, Key::Char, U'F'}, [raw] { raw->fitToView(); });
+        view->pushShortcut({false, Key::PageUp}, [raw] { raw->zoomIn(); });
+        view->pushShortcut({false, Key::PageDown}, [raw] { raw->zoomOut(); });
         return view;
     }
 
