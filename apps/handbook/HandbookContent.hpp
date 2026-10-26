@@ -480,7 +480,9 @@ inline Library buildLibrary() {
                       "subset: colors, cursor movement, and scrolling.")
                 .text("Programs that send OSC 0 or OSC 2 title sequences can update the Fenrir window "
                       "subtitle. Fenrir accepts these sequences from the PTY; a program must emit "
-                      "them (TERM=linux does not make every program set a title automatically).")
+                      "them (TERM=linux does not make every program set a title automatically). "
+                      "Shell titles that only identify the home directory are ignored, leaving the "
+                      "Terminal window with its application name only.")
                 .section("Keys")
                 .keys({
                     {"PgUp / PgDn", "Scroll the scrollback"},

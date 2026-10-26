@@ -1,5 +1,6 @@
 #include "test_harness.hpp"
 
+#include "../apps/terminal/TerminalApp.hpp"
 #include "fenrir/terminal/VtScreen.hpp"
 #include "fenrir/terminal/PtyProcess.hpp"
 
@@ -14,6 +15,15 @@ using fenrir::test::check;
 
 
 void runTerminalTests() {
+    check(apps::isDefaultShellDirectoryTitle("/home/alex", "/home/alex"),
+          "home directory is treated as the default shell title");
+    check(apps::isDefaultShellDirectoryTitle("user@host:~", "/home/alex"),
+          "home shorthand in a shell title is ignored");
+    check(apps::isDefaultShellDirectoryTitle("user@host: /home/alex/", "/home/alex"),
+          "home directory in a shell title is ignored");
+    check(!apps::isDefaultShellDirectoryTitle("editor: main.cpp", "/home/alex"),
+          "application title is not mistaken for the home directory");
+
     // Applications running inside the PTY can set the Fenrir window subtitle
     // using the standard OSC 0/2 title sequences, terminated by BEL or ST.
     {
