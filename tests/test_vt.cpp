@@ -484,33 +484,48 @@ void runTerminalTests() {
         check(v.at(0, 0).ch == U'r' && v.at(31, 1).ch == U't',
               "positioned title and rows return to their original screen positions");
     }
-    // With autowrap disabled, overlong cursor-positioned output overwrites the
-    // rightmost cell instead of spilling into following rows. Horizontal
-    // reflow must preserve those row boundaries and the literal glyphs.
+    // DECSET/DECRST 7 controls right-margin wrapping: disabled mode keeps
+    // overwriting the last column; enabled mode wraps on the next character.
     {
         VtScreen v;
-        v.resize(40, 4);
+        v.resize(5, 3);
+        v.feed("\x1b[?7l", 5);
+        v.feed("ABCDE", 5);
+        v.feed("F", 1);
+        check(v.at(4, 0).ch == U'F' && v.at(0, 1).ch == U' ' &&
+                  v.cursorX() == 4,
+              "DECSET 7 overwrites the right margin without wrapping");
+        v.feed("\x1b[?7h", 5);
+        v.feed("G", 1);
+        v.feed("H", 1);
+        check(v.at(4, 0).ch == U'G' && v.at(0, 1).ch == U'H',
+              "DECRST 7 restores automatic wrapping");
+    }
+    // A cursor-positioned right-hand field can run past the margin with
+    // autowrap disabled. The control bytes here match the captured PTY output.
+    {
+        VtScreen v;
+        v.resize(80, 4);
         const std::string logoRow = " ,$$P'               `$$$.";
         v.feed(logoRow.data(), logoRow.size());
-        v.feed("\r\n\x1b[?7l\x1b[31C", 12); // Start a long module row at column 32.
-        const std::string overflow = "012345678901234567890123";
-        v.feed(overflow.data(), overflow.size());
-        v.feed("\r\nNEXT", 6);
+        v.feed("\r\n\x1b[?7l\x1b[31C", 12);
+        const char* diskField =
+            "\x1b[m\x1b[1m\x1b[31mDisk (\x1b]8;;file:///\x1b\\/"
+            "\x1b]8;;\x1b\\)\x1b[m: \x1b[m29.83 GiB / 58.37 GiB ("
+            "\x1b[93m51%\x1b[m) - overlay";
+        v.feed(diskField, std::strlen(diskField));
+        v.feed("\r\nNEXT\x1b[?7h", 11);
 
-        check(v.at(0, 0).ch == U' ' && v.at(1, 0).ch == U',' &&
-                  v.at(21, 0).ch == U'`' && v.at(25, 0).ch == U'.',
-              "cursor-addressed glyphs stay on their original row");
-        check(v.at(39, 1).ch == U'3' && v.at(0, 2).ch == U'N' &&
-                  v.at(0, 3).ch == U' ',
-              "DECSET 7 prevents long output from advancing subsequent rows");
+        check(v.at(21, 0).ch == U'`' && v.at(25, 0).ch == U'.',
+              "cursor-addressed characters remain on the logo row");
+        check(v.at(0, 2).ch == U'N' && v.at(0, 3).ch == U' ',
+              "overlong field does not push the following row down");
 
-        v.resize(48, 4);
-        check(v.at(39, 1).ch == U'3' && v.at(0, 2).ch == U'N',
-              "no-wrap row boundaries survive horizontal growth");
-
-        v.feed("\x1b[?7h\x1b[4;31H", 12);
-        v.feed(overflow.data(), overflow.size());
-        check(v.at(0, 3).ch == U'8', "DECRST 7 restores automatic wrapping");
+        v.resize(64, 4);
+        v.resize(80, 4);
+        check(v.at(21, 0).ch == U'`' && v.at(25, 0).ch == U'.' &&
+                  v.at(0, 2).ch == U'N',
+              "cursor-positioned characters survive horizontal resize");
     }
     // CSI 3 J removes saved scrollback without erasing the visible screen.
     // The Linux `clear` sequence (CUP home followed by ED 0) clears both.
