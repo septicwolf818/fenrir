@@ -15,6 +15,7 @@
 #include "fenrir/core/Text.hpp"
 #include "fenrir/core/Theme.hpp"
 #include "fenrir/widgets/SelectionList.hpp"
+#include "fenrir/widgets/StatusBar.hpp"
 #include "fenrir/window/Window.hpp"
 
 namespace {
@@ -43,6 +44,18 @@ public:
 class NotificationCenterView final : public SelectionList {
 public:
     NotificationCenterView() { refresh(); }
+
+    void draw(Screen& screen) override {
+        Rect saved = bounds();
+        Rect listBounds{saved.x, saved.y, saved.w, std::max(0, saved.h - 1)};
+        setBounds(listBounds);
+        SelectionList::draw(screen);
+        setBounds(saved);
+        status_.setBounds(Rect{saved.x, saved.y + std::max(0, saved.h - 1), saved.w, 1});
+        status_.setText(U"Del/Backspace: dismiss notification",
+                        text::toUtf32(std::to_string(notifications::global().items().size()) + " total"));
+        status_.draw(screen);
+    }
 
     void refresh() {
         auto& bus = notifications::global();
@@ -76,6 +89,7 @@ public:
     }
 
 private:
+    StatusBar status_;
     std::vector<int> ids_;
 };
 
