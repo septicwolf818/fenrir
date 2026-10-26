@@ -111,7 +111,7 @@ public:
         // Esc = cancel (always, regardless of zone).
         if (ev.key == Key::Escape) {
             fire(-1);
-            return KeyEventResult::Activated;
+            return KeyEventResult::Ignored;
         }
         // Tab = zone switching: field -> next field -> buttons -> field...
         if (ev.key == Key::Tab && hasInput()) {
