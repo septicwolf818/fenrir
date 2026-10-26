@@ -107,9 +107,11 @@ private:
     };
     MenuStrip menuStrip() const;
 
-    static constexpr int kMinWidth = 12;
+    static constexpr int kMinWidth = 14;
     static constexpr int kMinHeight = 4;
-    static constexpr int kButtonsWidth = 6; // " _  X" ~ width reserved for the buttons
+    // Three padded buttons (" - ", " + ", " X ") with a one-cell gap between
+    // them: 3*3 + 2*1 = 11 cells reserved on the right of the title bar.
+    static constexpr int kButtonsWidth = 11;
 
     // Minimum window SIZE derived from the content minimums (the widget's
     // minWidth/minHeight + frame/title bar + optional menu bar) - see Window.cpp.
