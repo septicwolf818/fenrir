@@ -87,6 +87,7 @@ inline Library buildLibrary() {
                     {"F6", "Resize the focused window"},
                     {"F7", "Maximize / restore the focused window"},
                     {"F8", "Minimize the focused window"},
+                    {"F9", "Open the notification center"},
                     {"F12", "Leave the application without closing it"},
                     {"Arrows", "Move the desktop cursor"},
                     {"Enter / Space", "Activate what is under the cursor"},
@@ -121,6 +122,8 @@ inline Library buildLibrary() {
                     "Everything in between is the desktop area, where the windows live.",
                     "The block cursor is Fenrir's own; the terminal's cursor is hidden while "
                     "Fenrir runs.",
+                    "F9 opens the notification center: a list of notifications; Delete or "
+                    "Backspace dismisses the selected one.",
                 })
                 .section("Windows")
                 .text("Every application runs in a window. A window has a title bar with the "
