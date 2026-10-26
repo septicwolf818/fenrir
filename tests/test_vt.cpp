@@ -180,6 +180,21 @@ void runTerminalTests() {
               "resize keeps prompt below the actual content");
         check(v.cursorY() == 1, "trimming blank rows preserves the live prompt cursor");
     }
+    // Content that overflowed a short grid should become live screen content
+    // again when the entire logical buffer fits after enlarging the window.
+    {
+        VtScreen v;
+        v.resize(12, 2);
+        const char* output = "old\r\nfetch\r\nprompt";
+        v.feed(output, std::strlen(output));
+        check(v.historyRowCount() > 0, "short terminal moves overflow into history");
+
+        v.resize(12, 4);
+        check(v.historyRowCount() == 0, "fitting buffer is restored to the live screen");
+        check(v.at(0, 0).ch == U'o' && v.at(0, 1).ch == U'f' &&
+                  v.at(0, 2).ch == U'p',
+              "resize shows all content with prompt in place");
+    }
     // A scrolled viewport is anchored to its logical line when rewrapping,
     // not to a fixed number of physical rows. Preserve it through the shell's
     // prompt redraw after SIGWINCH, but ordinary later output follows live.
