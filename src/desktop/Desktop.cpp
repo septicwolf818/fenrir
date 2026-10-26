@@ -1044,9 +1044,15 @@ void Desktop::handleKeyEvent(const KeyEvent& ev) {
             const auto now = std::chrono::steady_clock::now();
             const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastCursorMove_).count();
             if (dx == lastCursorDx_ && dy == lastCursorDy_ && elapsed < 300) {
-                cursorMoveStreak_ = std::min(cursorMoveStreak_ + 1, std::max(0, settings::active.cursorMaxSpeed - 1));
+                if (cursorMoveStart_ == std::chrono::steady_clock::time_point{})
+                    cursorMoveStart_ = now;
+                const auto total = std::chrono::duration_cast<std::chrono::milliseconds>(now - cursorMoveStart_).count();
+                const int speedStep = std::min(settings::active.cursorMaxSpeed - 1,
+                                             static_cast<int>(total / 150));
+                cursorMoveStreak_ = std::max(0, speedStep);
             } else {
                 cursorMoveStreak_ = 0;
+                cursorMoveStart_ = now;
             }
             step = 1 + cursorMoveStreak_;
             lastCursorMove_ = now;
