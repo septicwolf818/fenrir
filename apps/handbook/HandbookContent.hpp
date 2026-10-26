@@ -78,16 +78,9 @@ inline Library buildLibrary() {
                 .summary("Every global key of the desktop, in one place.")
                 .section("Desktop and windows")
                 .keys({
-                    {"F1", "Applications menu"},
-                    {"F2", "Menu of the focused window"},
                     {"Alt+Tab", "Next window"},
                     {"Ctrl+W", "Close the focused window"},
                     {"Ctrl+Q", "Quit Fenrir"},
-                    {"F5", "Move the focused window"},
-                    {"F6", "Resize the focused window"},
-                    {"F7", "Maximize / restore the focused window"},
-                    {"F8", "Minimize the focused window"},
-                    {"F9", "Open the notification center"},
                     {"F12", "Leave the application without closing it"},
                     {"Arrows", "Move the desktop cursor"},
                     {"Enter / Space", "Activate what is under the cursor"},
@@ -95,8 +88,6 @@ inline Library buildLibrary() {
                 })
                 .section("Inside an application")
                 .keys({
-                    {"F1", "Applications menu"},
-                    {"F2", "Menu of the application"},
                     {"Ctrl+Q", "Quit Fenrir"},
                     {"Ctrl+W", "Close the window"},
                     {"F12", "Leave the application"},
@@ -117,13 +108,14 @@ inline Library buildLibrary() {
                 .summary("The menu bar, the taskbar, the windows, and the free cursor.")
                 .section("The screen")
                 .bullets({
-                    "The top row is the menu bar. F1 opens the applications menu there.",
+                    "The top row is the menu bar. Click \"Applications\" to open the applications menu, "
+                    "or \"Notifications\" to open the notification center.",
                     "The bottom row is the taskbar: one handle per window and the clock.",
                     "Everything in between is the desktop area, where the windows live.",
                     "The block cursor is Fenrir's own; the terminal's cursor is hidden while "
                     "Fenrir runs.",
-                    "F9 opens the notification center: a list of notifications; Delete or "
-                    "Backspace dismisses the selected one.",
+                    "The Notifications section of the top bar opens the notification center: a "
+                    "list of notifications; Delete or Backspace dismisses the selected one.",
                 })
                 .section("Windows")
                 .text("Every application runs in a window. A window has a title bar with the "
