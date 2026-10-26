@@ -830,6 +830,7 @@ private:
         for (const int v : params_) {
             switch (v) {
                 case 1: appCursor_ = on; break;   // DECCKM — application cursor keys
+                case 7: autoWrap_ = on; break;    // DECAWM — automatic right-margin wrap
                 case 25: cursorVisible_ = on; break; // DECTCEM
                 case 47: case 1047: alt(on, false); break;
                 case 1049: alt(on, true); break;  // xterm: alt + save cursor
@@ -874,10 +875,14 @@ private:
         if (cy_ < 0 || cy_ >= h_ || cx_ < 0) return;
         auto& rowWraps = wraps();
         if (rowWraps.size() != static_cast<std::size_t>(h_)) return;
-        if (cx_ >= w_) { // deferred wrap simplified to immediate wrap
-            rowWraps[static_cast<std::size_t>(cy_)] = 1;
-            cx_ = 0;
-            index_();
+        if (cx_ >= w_) {
+            if (autoWrap_) {
+                rowWraps[static_cast<std::size_t>(cy_)] = 1;
+                cx_ = 0;
+                index_();
+            } else {
+                cx_ = w_ - 1;
+            }
         }
         rowWraps[static_cast<std::size_t>(cy_)] = 0;
         auto& b = buf();
@@ -891,7 +896,8 @@ private:
         cell.style = style_;
         if (reverse_) cell.style |= kReverse;
         b[idx] = cell;
-        ++cx_;
+        if (autoWrap_) ++cx_;
+        else cx_ = std::min(cx_ + 1, w_ - 1);
     }
 
     void index_() { // LF
@@ -1137,6 +1143,7 @@ private:
     void hardReset() {
         resetSgr();
         cx_ = cy_ = 0;
+        autoWrap_ = true;
         savedX_ = savedY_ = 0;
         altSavedX_ = altSavedY_ = 0;
         normalRestoreX_ = normalRestoreY_ = 0;
@@ -1200,7 +1207,7 @@ private:
     mutable bool displayRowsDirty_ = true;
     int view_ = 0; // scrolled-back lines (0 = live)
     bool preserveViewOnOutput_ = false;
-    bool altOn_ = false, cursorVisible_ = true, appCursor_ = false;
+    bool altOn_ = false, cursorVisible_ = true, appCursor_ = false, autoWrap_ = true;
     Color fg_ = colors::White, bg_ = colors::Black;
     uint8_t style_ = StyleNone;
     bool reverse_ = false;

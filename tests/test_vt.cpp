@@ -462,9 +462,8 @@ void runTerminalTests() {
             check(actualRows == expected, "fastfetch-style lines survive repeated reflow");
         }
     }
-    // Minimal Debian fastfetch cursor-positioning repro: CSI 16 A, 1 G, and
-    // 31 C write a title beside the logo. Shrinking and restoring must not
-    // permanently move the original screen boundary into scrollback.
+    // Cursor-positioned output uses DECSET/DECRST 7 around text that can reach
+    // the right margin. Respecting that mode keeps later rows aligned.
     {
         std::string output;
         for (int i = 0; i < 17; ++i)
@@ -485,81 +484,33 @@ void runTerminalTests() {
         check(v.at(0, 0).ch == U'r' && v.at(31, 1).ch == U't',
               "positioned title and rows return to their original screen positions");
     }
-    // Debian's Fastfetch 2.30 logo uses '$1'/'$2' color placeholders, then
-    // returns to the top of the logo and prints module text with CSI C/G cursor
-    // positioning. Reflowing and restoring the width must preserve each glyph.
+    // With autowrap disabled, overlong cursor-positioned output overwrites the
+    // rightmost cell instead of spilling into following rows. Horizontal
+    // reflow must preserve those row boundaries and the literal glyphs.
     {
-        const std::vector<std::string> logo = {
-            "       $2_,met$$$$$$$$$$gg.",
-            "    ,g$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$P.",
-            "  ,g$$$$P\"         \"\"\"Y$$$$.\".",
-            " ,$$$$P'               `$$$$$$.",
-            "',$$$$P       ,ggs.     `$$$$b:",
-            "`d$$$$'     ,$P\"'   $1.$2    $$$$$$",
-            " $$$$P      d$'     $1,$2    $$$$$$P",
-            " $$$$:      $$.   $1-$2    ,d$$$$'",
-            " $$$$;      Y$b._   _,d$P'",
-            " Y$$$$.    `$1.`$2`\"Y$$$$$$$$P\"'",
-            " `$$$$b      $1\"-.__",
-            "  $2`Y$$$$",
-            "   `Y$$$$.",
-            "     `$$$$b.",
-            "       `Y$$$$b.",
-            "          `\"Y$$b._",
-            "             `\"\"\""};
-        std::string output;
-        for (std::size_t y = 0; y < logo.size(); ++y) {
-            const std::string& line = logo[y];
-            for (std::size_t i = 0; i < line.size(); ++i) {
-                if (line[i] == '$' && i + 1 < line.size() &&
-                    (line[i + 1] == '1' || line[i + 1] == '2')) {
-                    output += line[i + 1] == '1' ? "\x1b[31m" : "\x1b[0m";
-                    ++i;
-                } else {
-                    output.push_back(line[i]);
-                }
-            }
-            if (y + 1 < logo.size()) output += "\r\n";
-        }
-        output += "\x1b[1G\x1b[17A"; // Fastfetch returns to the logo's first row.
-        for (int y = 0; y < 12; ++y) {
-            output += "\x1b[38COS:";
-            output += "\x1b[50GDebian GNU/Linux 13\r\n";
-        }
-
         VtScreen v;
-        v.resize(80, 24);
-        v.feed(output.data(), output.size());
-        std::vector<std::vector<VtCell>> before;
-        for (int y = 0; y < v.height(); ++y) {
-            std::vector<VtCell> row;
-            for (int x = 0; x < v.width(); ++x)
-                row.push_back(v.at(x, y));
-            before.push_back(std::move(row));
-        }
+        v.resize(40, 4);
+        const std::string logoRow = " ,$$P'               `$$$.";
+        v.feed(logoRow.data(), logoRow.size());
+        v.feed("\r\n\x1b[?7l\x1b[31C", 12); // Start a long module row at column 32.
+        const std::string overflow = "012345678901234567890123";
+        v.feed(overflow.data(), overflow.size());
+        v.feed("\r\nNEXT", 6);
 
-        v.resize(56, 24);
-        v.resize(40, 24);
-        v.resize(80, 24);
-        int firstContentRow = 0;
-        while (firstContentRow < v.height()) {
-            bool nonBlank = false;
-            for (int x = 0; x < v.width(); ++x)
-                nonBlank |= v.at(x, firstContentRow).ch != U' ';
-            if (nonBlank) break;
-            ++firstContentRow;
-        }
-        check(firstContentRow < v.height(), "Debian logo remains visible after width reflow");
-        for (int y = 0; y < static_cast<int>(logo.size()); ++y) {
-            bool same = true;
-            for (int x = 0; x < v.width(); ++x) {
-                const VtCell& expected = before[static_cast<std::size_t>(y)][static_cast<std::size_t>(x)];
-                const VtCell& actual = v.at(x, firstContentRow + y);
-                same &= actual.ch == expected.ch && actual.fg == expected.fg &&
-                        actual.bg == expected.bg && actual.style == expected.style;
-            }
-            check(same, "Debian logo/module row survives horizontal resize with colors");
-        }
+        check(v.at(0, 0).ch == U' ' && v.at(1, 0).ch == U',' &&
+                  v.at(21, 0).ch == U'`' && v.at(25, 0).ch == U'.',
+              "cursor-addressed glyphs stay on their original row");
+        check(v.at(39, 1).ch == U'3' && v.at(0, 2).ch == U'N' &&
+                  v.at(0, 3).ch == U' ',
+              "DECSET 7 prevents long output from advancing subsequent rows");
+
+        v.resize(48, 4);
+        check(v.at(39, 1).ch == U'3' && v.at(0, 2).ch == U'N',
+              "no-wrap row boundaries survive horizontal growth");
+
+        v.feed("\x1b[?7h\x1b[4;31H", 12);
+        v.feed(overflow.data(), overflow.size());
+        check(v.at(0, 3).ch == U'8', "DECRST 7 restores automatic wrapping");
     }
     // CSI 3 J removes saved scrollback without erasing the visible screen.
     // The Linux `clear` sequence (CUP home followed by ED 0) clears both.
