@@ -394,13 +394,22 @@ private:
             rows.push_back(BufferRow{0, 0, 0, false});
         }
 
-        const int boundaryRow = normalBufferStartLine_ >= lineStarts.size()
-                                    ? static_cast<int>(rows.size())
-                                    : static_cast<int>(lineStarts[normalBufferStartLine_] +
-                                          normalBufferStartOffset_ / width);
-        const int screenStart = std::clamp(
-            std::max(boundaryRow, std::max(0, static_cast<int>(rows.size()) - h_)),
-            0, static_cast<int>(rows.size()));
+        int screenStart = 0;
+        if (rows.size() <= static_cast<std::size_t>(h_)) {
+            // The complete logical buffer fits. Bring former scrollback back
+            // onto the live screen instead of retaining the old screen boundary
+            // and counting its now-visible rows as history.
+            normalBufferStartLine_ = 0;
+            normalBufferStartOffset_ = 0;
+        } else {
+            const int boundaryRow = normalBufferStartLine_ >= lineStarts.size()
+                                        ? static_cast<int>(rows.size())
+                                        : static_cast<int>(lineStarts[normalBufferStartLine_] +
+                                              normalBufferStartOffset_ / width);
+            screenStart = std::clamp(
+                std::max(boundaryRow, std::max(0, static_cast<int>(rows.size()) - h_)),
+                0, static_cast<int>(rows.size()));
+        }
         normalScreenStartRow_ = static_cast<std::size_t>(screenStart);
         grid_.assign(width * static_cast<std::size_t>(h_), VtCell{});
         gridWrap_.assign(static_cast<std::size_t>(h_), 0);
