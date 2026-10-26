@@ -1094,8 +1094,6 @@ void Desktop::drawMenuBar(Screen& screen) {
     std::u32string right = modeLabel + U" | " + text::toUtf32(name);
     const int unread = notifications::global().unreadCount();
     if (unread > 0) right = text::toUtf32(std::to_string(unread)) + U" notif | " + right;
-    if (!backgroundWorkers().empty())
-        right = text::toUtf32(std::to_string(backgroundWorkers().size())) + U" bg | " + right;
     int rightX = screen.width() - static_cast<int>(right.size()) - 1;
     if (rightX > static_cast<int>(left.size()))
         screen.putText(rightX, 0, right, t.menuBarText, t.menuBarBg, StyleBold);
