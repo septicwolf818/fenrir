@@ -355,9 +355,15 @@ void Window::draw(Screen& screen) {
         int maxTitle = std::max(0, w - 2 - kButtonsWidth - 2);
         if (static_cast<int>(titleText.size()) > maxTitle) titleText.resize(static_cast<std::size_t>(maxTitle));
         screen.putText(x0 + 1, y0, titleText, titleFg, titleBg, StyleBold);
-        screen.set(x0 + w - 4, y0, Cell{'-', titleFg, titleBg, StyleBold});
-        screen.set(x0 + w - 3, y0, Cell{static_cast<char32_t>(maximized_ ? U'=' : U'+'), titleFg, titleBg, StyleBold});
-        screen.set(x0 + w - 2, y0, Cell{'X', t.closeText, t.closeBg, StyleBold});
+        const int btnStart2 = x0 + w - 1 - kButtonsWidth;
+        const Color btnBg2 = t.buttonBg;
+        const Color btnFg2 = t.buttonText;
+        for (int i = 0; i < 3; ++i)
+            screen.set(btnStart2 + i, y0, Cell{i == 1 ? U'-' : U' ', btnFg2, btnBg2, StyleBold});
+        for (int i = 0; i < 3; ++i)
+            screen.set(btnStart2 + 4 + i, y0, Cell{i == 1 ? (maximized_ ? U'=' : U'+') : U' ', btnFg2, btnBg2, StyleBold});
+        for (int i = 0; i < 3; ++i)
+            screen.set(btnStart2 + 8 + i, y0, Cell{i == 1 ? U'X' : U' ', t.closeText, t.closeBg, StyleBold});
     }
 }
 
