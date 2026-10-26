@@ -520,6 +520,7 @@ inline Library buildLibrary() {
                     "Taskbar clock seconds - on or off.",
                     "Desktop name - the name shown in the menu bar.",
                     "Cursor blink - on or off.",
+                    "Cursor acceleration - on or off, with a maximum speed.",
                     "App notifications - on or off.",
                     "Wallpaper - on or off, with a style, a background color, a pattern color, and "
                     "a pattern character.",

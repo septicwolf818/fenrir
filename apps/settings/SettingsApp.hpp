@@ -102,6 +102,8 @@ private:
                 items.push_back({U"Desktop name", text::toUtf32(settings::active.desktopName)});
                 items.push_back({U"Taskbar clock seconds", settings::active.taskbarSeconds ? U"On" : U"Off"});
                 items.push_back({U"Cursor blink", settings::active.cursorBlink ? U"On" : U"Off"});
+                items.push_back({U"Cursor acceleration", settings::active.cursorAcceleration ? U"On" : U"Off"});
+                items.push_back({U"Cursor max speed", text::toUtf32(std::to_string(settings::active.cursorMaxSpeed))});
                 break;
             }
             case 1: { // Look & Feel
@@ -150,6 +152,14 @@ private:
                 case 2:
                     settings::active.cursorBlink = !settings::active.cursorBlink;
                     ok = saveChecked("cursor_blink", settings::active.cursorBlink ? "1" : "0");
+                    break;
+                case 3:
+                    settings::active.cursorAcceleration = !settings::active.cursorAcceleration;
+                    ok = saveChecked("cursor_acceleration", settings::active.cursorAcceleration ? "1" : "0");
+                    break;
+                case 4:
+                    settings::active.cursorMaxSpeed = (settings::active.cursorMaxSpeed % 10) + 1;
+                    ok = saveChecked("cursor_max_speed", std::to_string(settings::active.cursorMaxSpeed));
                     break;
                 default: return;
             }

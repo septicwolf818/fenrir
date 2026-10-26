@@ -15,6 +15,8 @@ struct Settings {
     bool taskbarSeconds = false;   // taskbar clock shows seconds
     std::string desktopName = "Fenrir"; // name in the menu bar (right side)
     bool cursorBlink = true;       // blinking GUI cursor
+    bool cursorAcceleration = true; // accelerate the virtual cursor while an arrow is held
+    int cursorMaxSpeed = 5;        // maximum cursor speed multiplier (1-10)
     bool appNotifications = true;  // allow apps to push notifications
     wallpaper::Wallpaper wallpaper; // desktop background (color or glyph pattern)
 };

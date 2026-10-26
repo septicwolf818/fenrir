@@ -134,6 +134,10 @@ private:
     };
     std::vector<BackgroundWorker> backgroundWorkers_;
     bool missedNotificationsShown_ = false;
+    std::chrono::steady_clock::time_point lastCursorMove_{};
+    int cursorMoveStreak_ = 0;
+    int lastCursorDx_ = 0;
+    int lastCursorDy_ = 0;
     std::chrono::steady_clock::time_point lastSave_{};
 
     void handleKey(const KeyEvent& ev);          // wrapper: dispatch + flush of pending closes
