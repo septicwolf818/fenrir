@@ -77,7 +77,6 @@ public:
             top_ = 0;
             bot_ = nh - 1;
             syncNormalLinesFromGrid();
-            topPadding_ = 0;
             displayRowsDirty_ = true;
             return;
         }
@@ -144,7 +143,7 @@ public:
             // soft-wrapped line spanning their boundary must be reflowed as a
             // unit when the window width changes.
             const auto& rows = displayRows();
-            const int row = static_cast<int>(normalScreenStartRow_) - view_ + y - topPadding_;
+            const int row = static_cast<int>(normalScreenStartRow_) - view_ + y;
             if (row < 0 || row >= static_cast<int>(rows.size())) return blank;
             const auto& displayRow = rows[static_cast<std::size_t>(row)];
             if (x >= static_cast<int>(displayRow.size())) return blank;
@@ -396,12 +395,6 @@ private:
             std::max(boundaryRow, std::max(0, static_cast<int>(rows.size()) - h_)),
             0, static_cast<int>(rows.size()));
         normalScreenStartRow_ = static_cast<std::size_t>(screenStart);
-        // Bottom-align short content: keep a top padding of blank rows so the
-        // prompt sits at the bottom instead of leaving a gap below it.
-        if (screenStart == 0 && static_cast<int>(rows.size()) < h_)
-            topPadding_ = h_ - static_cast<int>(rows.size());
-        else
-            topPadding_ = 0;
         grid_.assign(width * static_cast<std::size_t>(h_), VtCell{});
         gridWrap_.assign(static_cast<std::size_t>(h_), 0);
         for (int screenY = 0; screenY < h_; ++screenY) {
@@ -1158,7 +1151,6 @@ private:
     uint8_t style_ = StyleNone;
     bool reverse_ = false;
     St state_ = St::Ground;
-    int topPadding_ = 0;
     std::string oscBuf_;
     std::string title_;
     bool titleChanged_ = false;
