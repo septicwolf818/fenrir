@@ -220,6 +220,13 @@ public:
     // --- Widget ----------------------------------------------------------------
 
     void draw(Screen& screen) override {
+        // The view is constructed before Desktop creates/focuses its Window.
+        // Defer the initial subtitle until draw, when setWindowTitle targets
+        // this editor rather than whichever window was focused previously.
+        if (!windowTitleReady_) {
+            ctx_.setWindowTitle(windowSubtitle_);
+            windowTitleReady_ = true;
+        }
         // TextArea dirty state changes while typing; update tab markers only
         // only when the active tab's state changes instead of rebuilding every frame.
         if (currentDirtyShown_ != cur().dirty()) {
@@ -451,8 +458,8 @@ private:
         tabBar_.setTabs(std::move(tabs));
         tabBar_.select(current_);
         currentDirtyShown_ = cur().dirty();
-        const std::string title = cur().path().empty() ? std::string("(untitled)") : fs::nameOf(cur().path());
-        ctx_.setWindowTitle(title);
+        windowSubtitle_ = cur().path().empty() ? std::string{} : fs::nameOf(cur().path());
+        if (windowTitleReady_) ctx_.setWindowTitle(windowSubtitle_);
     }
 
     template <typename F>
@@ -472,6 +479,8 @@ private:
     }
 
     AppContext& ctx_;
+    std::string windowSubtitle_;
+    bool windowTitleReady_ = false;
     std::vector<std::unique_ptr<TextArea>> tabs_;
     int current_ = 0;
     TabBar tabBar_;
