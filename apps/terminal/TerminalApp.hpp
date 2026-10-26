@@ -129,6 +129,10 @@ public:
         if (bounds_.w <= 0 || bounds_.h <= 0) return;
         if (!spawned_) spawn();
         if (bounds_.w != vt_.width() || bounds_.h != vt_.height()) {
+            // Drain bytes produced for the old PTY geometry before changing
+            // either the virtual screen or the child PTY size. On slower hosts
+            // tools may still have logo/cursor-positioned output queued here.
+            pump();
             vt_.preserveViewOnResizeOutput();
             vt_.resize(bounds_.w, bounds_.h);
             if (pty_.fd() >= 0) pty_.resize(bounds_.w, bounds_.h);
