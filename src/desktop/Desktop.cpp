@@ -1034,6 +1034,10 @@ void Desktop::handleKeyEvent(const KeyEvent& ev) {
         case Key::Down: dy = 1; break;
         case Key::Left: dx = -1; break;
         case Key::Right: dx = 1; break;
+        case Key::Home: dx = -1; dy = -1; break;
+        case Key::End: dx = -1; dy = 1; break;
+        case Key::PageUp: dx = 1; dy = -1; break;
+        case Key::PageDown: dx = 1; dy = 1; break;
         case Key::Enter: activateAtCursor(); break;
         case Key::Char: if (!ev.ctrl && ev.character == U' ') activateAtCursor(); break;
         default: break;
