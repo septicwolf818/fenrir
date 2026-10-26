@@ -725,7 +725,19 @@ void Desktop::activateAtCursor() {
         }
     }
 
-    if (cursor_.y() < kMenuBarHeight) { openAppMenu(); return; }
+    if (cursor_.y() < kMenuBarHeight) {
+        // Top bar sections: "Applications" opens the app menu; "Notifications"
+        // opens the notification center. Everything else falls back to the app menu.
+        std::u32string left = U" Applications ";
+        std::u32string notif = U" Notifications ";
+        const int notifUnread = notifications::global().unreadCount();
+        if (notifUnread > 0) notif = U" Notifications (" + text::toUtf32(std::to_string(notifUnread)) + U") ";
+        int notifStart = static_cast<int>(left.size());
+        int notifEnd = notifStart + static_cast<int>(notif.size());
+        if (cursor_.x() < notifStart) openAppMenu();
+        else if (cursor_.x() < notifEnd) openNotificationCenter();
+        return;
+    }
 
     // --- Taskbar (status bar) — activate a window handle -------------------
     if (cursor_.y() >= screenHeight() - kTaskBarHeight) {
@@ -858,19 +870,12 @@ void Desktop::handleKeyEvent(const KeyEvent& ev) {
     // emits NO bytes with the default keymap, and keymaps with a separate
     // sequence do not switch windows either).
     if (ev.key == Key::Tab && ev.alt) { wm_.focusNext(); return; }
-    if (ev.key == Key::F1) { openAppMenu(); return; }
-    if (ev.key == Key::F9) { openNotificationCenter(); return; }
-    if (ev.key == Key::F10) { openBackgroundTasks(); return; }
     if (ev.ctrl && ev.key == Key::Char && ev.character == U'w') {
         // Guard: a dirty window (Widget::dirty) prompts for confirmation before closing.
         Window* w = wm_.focused();
         closeWithConfirm(*this, w, [this, w] { closePending_.push_back(w); });
         return;
     }
-    if (ev.key == Key::F5 && wm_.focused()) { mode_ = CursorMode::WindowMove; return; }
-    if (ev.key == Key::F6 && wm_.focused()) { mode_ = CursorMode::WindowResize; return; }
-    if (ev.key == Key::F7 && wm_.focused()) { toggleMaximize(*wm_.focused()); return; }
-    if (ev.key == Key::F8 && wm_.focused()) { wm_.focused()->setMinimized(true); return; }
 
     // --- WindowMove / WindowResize (handled first so Esc exits immediately) ---
     if (mode_ == CursorMode::WindowMove || mode_ == CursorMode::WindowResize) {
@@ -900,10 +905,6 @@ void Desktop::handleKeyEvent(const KeyEvent& ev) {
         if (!f || f->minimized()) { mode_ = CursorMode::Desktop; return; }
 
         // F2 opens the application menu (also works in Edit mode).
-        if (ev.key == Key::F2) {
-            if (f->content() && !f->content()->menuTabs().empty()) openWinMenu(*f, 0);
-            return;
-        }
         auto* content = f->content();
         // Check application shortcuts BEFORE the widget (e.g. Ctrl+S in TextEditor).
         if (content && matchesShortcuts(content->shortcuts(), ev)) {
@@ -923,11 +924,6 @@ void Desktop::handleKeyEvent(const KeyEvent& ev) {
         if (!f || f->minimized()) { mode_ = CursorMode::Desktop; return; }
 
         // F2 opens or switches to the application's menu (first tab).
-        if (ev.key == Key::F2) {
-            auto& tabs = f->content()->menuTabs();
-            if (!tabs.empty()) openWinMenu(*f, 0);
-            return;
-        }
 
         // Check application shortcuts BEFORE the widget.
         auto* content = f->content();
@@ -950,21 +946,6 @@ void Desktop::handleKeyEvent(const KeyEvent& ev) {
     }
 
     // --- Desktop mode — free cursor movement across the screen ---
-    if (ev.key == Key::F2) {
-        // Open the menu of the first window whose title bar contains the cursor;
-        // otherwise, open the focused window's menu.
-        Window* under = wm_.windowAt(cursor_.x(), cursor_.y());
-        Window* target = (under && !under->minimized() && under->content() &&
-                          under->content()->menuTabs().size() > 0 &&
-                          (under->onTitleBar(cursor_.x(), cursor_.y()) ||
-                           under->onMenuRow(cursor_.x(), cursor_.y())))
-                             ? under
-                             : wm_.focused();
-        if (target && target->content() && !target->content()->menuTabs().empty())
-            openWinMenu(*target, 0);
-        return;
-    }
-
     // Plain Tab deliberately does NOT switch windows on the desktop — the only
     // ways to switch are Alt+Tab (global; see above) and the taskbar (Enter on a
     // window handle).
@@ -1076,6 +1057,12 @@ void Desktop::drawMenuBar(Screen& screen) {
 
     std::u32string left = U" Applications ";
     screen.putText(0, 0, left, t.menuBarText, t.menuBarBg, StyleBold);
+
+    std::u32string notif = U" Notifications ";
+    const int notifUnread = notifications::global().unreadCount();
+    if (notifUnread > 0) notif = U" Notifications (" + text::toUtf32(std::to_string(notifUnread)) + U") ";
+    int notifX = static_cast<int>(left.size());
+    screen.putText(notifX, 0, notif, t.menuBarText, t.menuBarBg, StyleBold);
 
     // Mode in the upper-right corner: [mode] | Fenrir — where "Fenrir" used to be.
     std::u32string modeLabel = U"Desktop";
