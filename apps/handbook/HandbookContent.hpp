@@ -30,7 +30,7 @@ inline Library buildLibrary() {
                       "without a graphical desktop environment, so it also runs on small machines "
                       "such as a Raspberry Pi 3.")
                 .section("Opening the handbook")
-                .text("Press F1 to open the applications menu and choose Handbook. The handbook "
+                .text("Click Applications on the top bar to open the applications menu and choose Handbook. The handbook "
                       "is an ordinary application: you can move it, resize it, and keep it open "
                       "next to your work.")
                 .section("How to read it")
@@ -51,7 +51,7 @@ inline Library buildLibrary() {
                 .steps({
                     "Start Fenrir from a text console. It takes over the terminal while it runs "
                     "and restores the terminal when it quits.",
-                    "Press F1 to open the applications menu and start an application - the Text "
+                    "Click Applications on the top bar to start an application - the Text "
                     "Editor is a good place to begin.",
                     "Move the focused window: press F5, use the arrow keys, and press Enter or "
                     "Esc to finish.",
@@ -60,7 +60,6 @@ inline Library buildLibrary() {
                 })
                 .section("Keys")
                 .keys({
-                    {"F1", "Applications menu"},
                     {"F5", "Move the window"},
                     {"F12", "Leave the application"},
                     {"Alt+Tab", "Next window"},
@@ -161,8 +160,8 @@ inline Library buildLibrary() {
 
     lib.add(PageBuilder("desktop", "menubar", "Menu bar and taskbar")
                 .summary("The applications menu, the window menus, and the taskbar.")
-                .section("The menu bar (F1)")
-                .text("F1 opens the applications menu: it lists every registered application and "
+                .section("The menu bar")
+                .text("Click Applications on the top bar to open the applications menu: it lists every registered application and "
                       "Quit desktop. Choose one to start it in a new window.")
                 .section("The window menus (F2)")
                 .text("F2 opens the menu of the focused window; in the desktop mode it opens the "
@@ -260,7 +259,6 @@ inline Library buildLibrary() {
                 .keys({
                     {"Arrows", "Move the cursor"},
                     {"Enter / Space", "Activate what is under the cursor"},
-                    {"F1", "Applications menu"},
                     {"F2", "Menu of the window under the cursor"},
                     {"F5 / F6", "Move / resize the focused window"},
                     {"F7 / F8", "Maximize / minimize the focused window"},
