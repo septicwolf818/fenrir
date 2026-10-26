@@ -9,7 +9,8 @@
 
 namespace {
 std::string signature(const std::string& source, const std::string& title, const std::string& body) {
-    return source + "\x1f" + title + "\x1f" + body;
+    const std::string s = source + "\x1f" + title + "\x1f" + body;
+    return std::to_string(std::hash<std::string>{}(s));
 }
 }
 
