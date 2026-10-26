@@ -169,6 +169,7 @@ private:
     void buildWinMenu(Window& w, int tab);
     // Whether the window still exists in the manager (guard for raw pointers in callbacks).
     bool windowAlive(Window* w) const;
+    void moveCursorBy(int dx, int dy);
     void activateAtCursor();
     void launchApp(App& app);
     bool launchFile(App& app, const std::string& path);
