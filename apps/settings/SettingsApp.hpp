@@ -37,6 +37,19 @@ public:
         rebuild();
     }
 
+    void prevTab() {
+        if (tabs_.count() == 0) return;
+        int next = (tabs_.selected() - 1 + tabs_.count()) % tabs_.count();
+        tabs_.select(next);
+        if (tabs_.onSwitch) tabs_.onSwitch(next);
+    }
+    void nextTab() {
+        if (tabs_.count() == 0) return;
+        int next = (tabs_.selected() + 1) % tabs_.count();
+        tabs_.select(next);
+        if (tabs_.onSwitch) tabs_.onSwitch(next);
+    }
+
     void draw(Screen& screen) override {
         const int tabH = 1;
         const int statusH = 1;
@@ -63,14 +76,11 @@ public:
         }
         // Let the tab bar handle Left/Right when it has focus-ish; otherwise list.
         if (ev.key == Key::Left || ev.key == Key::Right) {
-            // Only switch tabs with Alt+Left/Right to avoid stealing list navigation.
-            if (ev.alt) {
-                int delta = (ev.key == Key::Right) ? 1 : -1;
-                int next = (tabs_.selected() + delta + tabs_.count()) % std::max(1, tabs_.count());
-                tabs_.select(next);
-                if (tabs_.onSwitch) tabs_.onSwitch(next);
-                return KeyEventResult::Consumed;
-            }
+            int delta = (ev.key == Key::Right) ? 1 : -1;
+            int next = (tabs_.selected() + delta + tabs_.count()) % std::max(1, tabs_.count());
+            tabs_.select(next);
+            if (tabs_.onSwitch) tabs_.onSwitch(next);
+            return KeyEventResult::Consumed;
         }
         return list_.handleKey(ev);
     }
@@ -256,9 +266,12 @@ public:
 
     std::unique_ptr<Widget> createView(AppContext& ctx) override {
         auto view = std::make_unique<SettingsView>(ctx);
+        SettingsView* raw = view.get();
         addExitMenu(*view, ctx);
         addAboutMenu(*view, ctx, U"Settings",
                      U"Configure the desktop, look and feel, notifications, and background services.");
+        view->pushShortcut({false, Key::F3, std::nullopt, false}, [raw] { raw->prevTab(); });
+        view->pushShortcut({false, Key::F4, std::nullopt, false}, [raw] { raw->nextTab(); });
         return view;
     }
 
