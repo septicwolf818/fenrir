@@ -41,6 +41,10 @@ std::string joinIds(const std::vector<Notification>& items) {
 
 int Bus::push(std::string source, std::string title, std::string body) {
     if (!enabled_) return -1;
+    for (const auto& existing : items_) {
+        if (existing.source == source && existing.title == title && existing.body == body)
+            return existing.id;
+    }
     Notification n;
     n.id = nextId_++;
     n.source = std::move(source);
@@ -55,6 +59,10 @@ int Bus::push(std::string source, std::string title, std::string body) {
 
 int Bus::push(const Notification& n) {
     if (!enabled_) return -1;
+    for (const auto& existing : items_) {
+        if (existing.source == n.source && existing.title == n.title && existing.body == n.body)
+            return existing.id;
+    }
     Notification copy = n;
     if (copy.id <= 0) copy.id = nextId_++;
     else nextId_ = std::max(nextId_, copy.id + 1);
