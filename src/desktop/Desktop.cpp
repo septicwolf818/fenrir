@@ -1174,7 +1174,7 @@ void Desktop::drawTaskBar(Screen& screen) {
         }
         if (hoveredIdx >= 0) {
             ++taskbarHoverTick_;
-            if (taskbarHoverTick_ % 3 == 0) ++taskbarHoverScroll_;
+            if (taskbarHoverTick_ % 1 == 0) ++taskbarHoverScroll_;
         }
 
         for (int idx = visibleStart; idx < visibleEnd; ++idx) {
