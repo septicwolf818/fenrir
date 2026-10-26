@@ -106,6 +106,7 @@ public:
     // --- Widget --------------------------------------------------------------
 
     void draw(Screen& screen) override {
+        if (!path_.empty()) ctx_.setWindowTitle(fs::nameOf(path_));
         const auto& t = theme::active;
         if (bounds_.w <= 0 || bounds_.h <= 0) return;
         const int viewW = bounds_.w;

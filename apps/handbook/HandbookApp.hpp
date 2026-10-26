@@ -258,6 +258,8 @@ public:
     // --- Widget ---------------------------------------------------------------
 
     void draw(Screen& screen) override {
+        if (currentPage_ >= 0) ctx_.setWindowTitle(library_.pages()[static_cast<std::size_t>(currentPage_)].title);
+        else ctx_.setWindowTitle("Handbook");
         const int paneHeight = std::max(0, bounds_.h - 1); // the status bar takes the last row
         const int totalWidth = std::max(0, bounds_.w);
         const int tocWidth = std::min(std::clamp(totalWidth / 3, 16, 28), totalWidth);
