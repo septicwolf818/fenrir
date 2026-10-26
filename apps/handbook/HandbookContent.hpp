@@ -507,13 +507,28 @@ inline Library buildLibrary() {
                 .build());
 
     lib.add(PageBuilder("apps", "settings-app", "Settings")
-                .summary("Theme, clock, cursor, and wallpaper.")
+                .summary("Desktop, look and feel, notifications, and background services.")
+                .section("Tabs")
+                .bullets({
+                    "Desktop - desktop name, taskbar clock seconds, cursor blink.",
+                    "Look & Feel - theme and wallpaper (style, colors, pattern character).",
+                    "Notifications - enable or disable application notifications.",
+                    "Background - lists the background services currently running.",
+                })
+                .section("Navigation")
+                .keys({
+                    {"Tab", "Next tab"},
+                    {"Alt+Left / Alt+Right", "Previous / next tab"},
+                    {"Arrows", "Move through the settings of the active tab"},
+                    {"Enter / Space", "Change the selected setting"},
+                })
                 .section("The rows")
                 .bullets({
                     "Theme - Classic, Midnight, Amber, Forest, or High Contrast.",
                     "Taskbar clock seconds - on or off.",
                     "Desktop name - the name shown in the menu bar.",
                     "Cursor blink - on or off.",
+                    "App notifications - on or off.",
                     "Wallpaper - on or off, with a style, a background color, a pattern color, and "
                     "a pattern character.",
                 })
