@@ -973,8 +973,7 @@ void Desktop::handleKeyEvent(const KeyEvent& ev) {
             if (ev.key == Key::Up) {
                 cursor_.moveTo(cursor_.x(), screenHeight() - kTaskBarHeight - 1);
             } else if (ev.key == Key::Left || ev.key == Key::Right) {
-                cursor_.moveBy(ev.key == Key::Left ? -1 : 1, 0);
-                cursor_.clamp(screenWidth(), screenHeight());
+                moveCursorBy(ev.key == Key::Left ? -1 : 1, 0);
             }
             return;
         }
@@ -989,7 +988,7 @@ void Desktop::handleKeyEvent(const KeyEvent& ev) {
             if (canScrollLeft && cursor_.x() <= kTaskHandleW) {
                 taskbarScroll_ = std::max(0, taskbarScroll_ - 1);
             } else {
-                cursor_.moveBy(-1, 0);
+                moveCursorBy(-1, 0);
             }
             return;
         }
@@ -1000,7 +999,7 @@ void Desktop::handleKeyEvent(const KeyEvent& ev) {
             if (canScrollRight && cursor_.x() >= arrowX - kTaskHandleW + 1) {
                 taskbarScroll_ += 1;
             } else {
-                cursor_.moveBy(1, 0);
+                moveCursorBy(1, 0);
             }
             return;
         }
@@ -1039,38 +1038,40 @@ void Desktop::handleKeyEvent(const KeyEvent& ev) {
         case Key::Down: dy = 1; break;
         case Key::Left: dx = -1; break;
         case Key::Right: dx = 1; break;
-        case Key::Home: dx = -1; dy = -1; break;
-        case Key::End: dx = -1; dy = 1; break;
-        case Key::PageUp: dx = 1; dy = -1; break;
-        case Key::PageDown: dx = 1; dy = 1; break;
         case Key::Enter: activateAtCursor(); break;
         case Key::Char: if (!ev.ctrl && ev.character == U' ') activateAtCursor(); break;
         default: break;
     }
     if (dx != 0 || dy != 0) {
-        int step = 1;
-        if (settings::active.cursorAcceleration) {
-            const auto now = std::chrono::steady_clock::now();
-            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastCursorMove_).count();
-            if (dx == lastCursorDx_ && dy == lastCursorDy_ && elapsed < 300) {
-                if (cursorMoveStart_ == std::chrono::steady_clock::time_point{})
-                    cursorMoveStart_ = now;
-                const auto total = std::chrono::duration_cast<std::chrono::milliseconds>(now - cursorMoveStart_).count();
-                const int speedStep = std::min(settings::active.cursorMaxSpeed - 1,
-                                             static_cast<int>(total / 150));
-                cursorMoveStreak_ = std::max(0, speedStep);
-            } else {
-                cursorMoveStreak_ = 0;
-                cursorMoveStart_ = now;
-            }
-            step = 1 + cursorMoveStreak_;
-            lastCursorMove_ = now;
-            lastCursorDx_ = dx;
-            lastCursorDy_ = dy;
-        }
-        cursor_.moveBy(dx * step, dy * step);
-        cursor_.clamp(screenWidth(), screenHeight());
+        moveCursorBy(dx, dy);
     }
+}
+
+
+void Desktop::moveCursorBy(int dx, int dy) {
+    if (dx == 0 && dy == 0) return;
+    int step = 1;
+    if (settings::active.cursorAcceleration) {
+        const auto now = std::chrono::steady_clock::now();
+        const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastCursorMove_).count();
+        if (dx == lastCursorDx_ && dy == lastCursorDy_ && elapsed < 300) {
+            if (cursorMoveStart_ == std::chrono::steady_clock::time_point{})
+                cursorMoveStart_ = now;
+            const auto total = std::chrono::duration_cast<std::chrono::milliseconds>(now - cursorMoveStart_).count();
+            const int speedStep = std::min(settings::active.cursorMaxSpeed - 1,
+                                         static_cast<int>(total / 150));
+            cursorMoveStreak_ = std::max(0, speedStep);
+        } else {
+            cursorMoveStreak_ = 0;
+            cursorMoveStart_ = now;
+        }
+        step = 1 + cursorMoveStreak_;
+        lastCursorMove_ = now;
+        lastCursorDx_ = dx;
+        lastCursorDy_ = dy;
+    }
+    cursor_.moveBy(dx * step, dy * step);
+    cursor_.clamp(screenWidth(), screenHeight());
 }
 
 void Desktop::drawDesktopBackground(Screen& screen) {
