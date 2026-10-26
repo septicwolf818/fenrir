@@ -50,6 +50,7 @@ public:
 
 private:
     std::vector<Notification> items_;
+    std::vector<std::string> dismissed_;
     int nextId_ = 1;
     bool enabled_ = true;
     mutable bool dirty_ = false;

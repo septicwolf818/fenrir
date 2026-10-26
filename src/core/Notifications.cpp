@@ -7,6 +7,12 @@
 
 #include "fenrir/core/Prefs.hpp"
 
+namespace {
+std::string signature(const std::string& source, const std::string& title, const std::string& body) {
+    return source + "\x1f" + title + "\x1f" + body;
+}
+}
+
 namespace fenrir::notifications {
 
 namespace {
@@ -41,6 +47,8 @@ std::string joinIds(const std::vector<Notification>& items) {
 
 int Bus::push(std::string source, std::string title, std::string body) {
     if (!enabled_) return -1;
+    const std::string sig = signature(source, title, body);
+    for (const auto& d : dismissed_) if (d == sig) return -1;
     for (const auto& existing : items_) {
         if (existing.source == source && existing.title == title && existing.body == body)
             return existing.id;
@@ -59,6 +67,8 @@ int Bus::push(std::string source, std::string title, std::string body) {
 
 int Bus::push(const Notification& n) {
     if (!enabled_) return -1;
+    const std::string sig = signature(n.source, n.title, n.body);
+    for (const auto& d : dismissed_) if (d == sig) return -1;
     for (const auto& existing : items_) {
         if (existing.source == n.source && existing.title == n.title && existing.body == n.body)
             return existing.id;
@@ -96,6 +106,14 @@ void Bus::markAllRead() {
 }
 
 void Bus::remove(int id) {
+    for (const auto& n : items_) {
+        if (n.id == id) {
+            const std::string sig = signature(n.source, n.title, n.body);
+            if (std::find(dismissed_.begin(), dismissed_.end(), sig) == dismissed_.end())
+                dismissed_.push_back(sig);
+            break;
+        }
+    }
     std::erase_if(items_, [id](const Notification& n) { return n.id == id; });
     markDirty();
 }
@@ -124,6 +142,11 @@ void Bus::load() {
     }
     nextId_ = std::max(nextId_, 1);
     for (const auto& n : items_) nextId_ = std::max(nextId_, n.id + 1);
+    const int dismissedCount = p.getInt("dismissed_count", 0);
+    dismissed_.clear();
+    for (int i = 0; i < dismissedCount; ++i) {
+        dismissed_.push_back(p.get("dismissed_" + std::to_string(i)));
+    }
     dirty_ = false;
 }
 
@@ -133,6 +156,9 @@ void Bus::save() const {
     auto& p = prefs::forApp("notifications");
     p.setInt("next_id", nextId_);
     p.set("ids", joinIds(items_));
+    p.setInt("dismissed_count", static_cast<int>(dismissed_.size()));
+    for (std::size_t i = 0; i < dismissed_.size(); ++i)
+        p.set("dismissed_" + std::to_string(i), dismissed_[i]);
     for (const auto& n : items_) {
         const std::string prefix = "n" + std::to_string(n.id) + "_";
         p.set(prefix + "source", n.source);
