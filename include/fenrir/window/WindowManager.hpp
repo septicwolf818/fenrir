@@ -1,5 +1,6 @@
 #pragma once
 #include <memory>
+#include <string_view>
 #include <vector>
 
 #include "fenrir/window/Window.hpp"
@@ -19,6 +20,13 @@ public:
 
     Window* windowAt(int x, int y) const; // topmost z-order under (x,y); nullptr if desktop
     Widget* widgetAt(int x, int y) const;
+
+    // Look up a window by its title (first match in z-order/back-to-front).
+    Window* findWindow(std::string_view title) const;
+    // True when a window with the given title currently exists.
+    bool hasWindow(std::string_view title) const;
+    // True when the given pointer still refers to a live window.
+    bool containsWindow(const Window* w) const;
 
     void draw(Screen& screen); // draws all windows in z-order (back -> front)
 
