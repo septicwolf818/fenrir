@@ -38,10 +38,22 @@ public:
     // Browse the scrollback (positive = older). Clamped to available rows.
     void scrollView(int lines) {
         view_ = std::clamp(view_ + lines, 0, static_cast<int>(historyRowCount()));
+        if (view_ == 0) preserveViewOnOutput_ = false;
     }
 
     // Return to the live view (called on new output and on most keys).
-    void follow() { view_ = 0; }
+    void follow() {
+        view_ = 0;
+        preserveViewOnOutput_ = false;
+    }
+
+    // A resize can make a shell redraw its prompt. Keep a scrolled viewport
+    // through that output batch instead of jumping back to the live view.
+    void preserveViewOnResizeOutput() {
+        preserveViewOnOutput_ = !altOn_ && view_ > 0;
+    }
+
+    void finishOutputBatch() { preserveViewOnOutput_ = false; }
 
     void resize(int w, int h) {
         const int nw = std::max(1, w);
@@ -61,6 +73,12 @@ public:
             syncNormalLinesFromGrid();
             displayRowsDirty_ = true;
             return;
+        }
+        const bool preserveScrolledView = !altOn_ && view_ > 0;
+        LogicalPoint viewAnchor{};
+        if (preserveScrolledView) {
+            const std::size_t topRow = normalScreenStartRow_ - static_cast<std::size_t>(view_);
+            viewAnchor = logicalPointAtRow(topRow, w_);
         }
         const int oldW = w_;
         const int oldH = h_;
@@ -93,7 +111,13 @@ public:
         top_ = 0;
         bot_ = h_ - 1;
         displayRowsDirty_ = true;
-        view_ = std::clamp(view_, 0, static_cast<int>(historyRowCount()));
+        if (preserveScrolledView) {
+            const std::size_t anchorRow = rowForLogicalPoint(viewAnchor, w_);
+            const int offset = static_cast<int>(normalScreenStartRow_) - static_cast<int>(anchorRow);
+            view_ = std::clamp(offset, 0, static_cast<int>(historyRowCount()));
+        } else {
+            view_ = std::clamp(view_, 0, static_cast<int>(historyRowCount()));
+        }
     }
 
     int width() const { return w_; }
@@ -125,8 +149,14 @@ public:
     }
 
     void feed(const char* data, std::size_t n) {
+        const bool keepView = n > 0 && preserveViewOnOutput_ && !altOn_ && view_ > 0;
+        LogicalPoint viewAnchor{};
+        if (keepView) {
+            const std::size_t topRow = normalScreenStartRow_ - static_cast<std::size_t>(view_);
+            viewAnchor = logicalPointAtRow(topRow, w_);
+        }
         if (n > 0) {
-            view_ = 0; // new output returns to the live view
+            if (!keepView) view_ = 0; // ordinary output returns to the live view
             displayRowsDirty_ = true;
         }
         for (std::size_t i = 0; i < n; ++i) {
@@ -148,15 +178,57 @@ public:
                 case St::Charset: state_ = St::Ground; break; // character set selection — ignore
             }
         }
-        if (n > 0 && !altOn_) syncNormalLinesFromGrid();
+        if (n > 0 && !altOn_) {
+            syncNormalLinesFromGrid();
+            if (keepView) {
+                const std::size_t anchorRow = rowForLogicalPoint(viewAnchor, w_);
+                const int offset = static_cast<int>(normalScreenStartRow_) - static_cast<int>(anchorRow);
+                view_ = std::clamp(offset, 0, static_cast<int>(historyRowCount()));
+            }
+        }
     }
 
 private:
     enum class St { Ground, Utf8, Esc, Csi, CsiIgnore, Osc, OscEsc, Charset };
 
+    struct LogicalPoint {
+        std::size_t line = 0;
+        std::size_t offset = 0;
+    };
+
     std::vector<VtCell>& buf() { return altOn_ ? altGrid_ : grid_; }
     const std::vector<VtCell>& buf() const { return altOn_ ? altGrid_ : grid_; }
     std::vector<uint8_t>& wraps() { return altOn_ ? altWrap_ : gridWrap_; }
+
+    LogicalPoint logicalPointAtRow(std::size_t row, int width) const {
+        if (normalLines_.empty()) return {};
+        const std::size_t cellWidth = static_cast<std::size_t>(std::max(1, width));
+        std::size_t rowStart = 0;
+        for (std::size_t lineIndex = 0; lineIndex < normalLines_.size(); ++lineIndex) {
+            const auto& line = normalLines_[lineIndex];
+            const std::size_t rowCount = line.empty() ? 1 : (line.size() + cellWidth - 1) / cellWidth;
+            if (row < rowStart + rowCount) {
+                const std::size_t offset = (row - rowStart) * cellWidth;
+                return LogicalPoint{lineIndex, std::min(offset, line.size())};
+            }
+            rowStart += rowCount;
+        }
+        const std::size_t last = normalLines_.size() - 1;
+        return LogicalPoint{last, normalLines_[last].size()};
+    }
+
+    std::size_t rowForLogicalPoint(LogicalPoint point, int width) const {
+        if (normalLines_.empty()) return 0;
+        const std::size_t cellWidth = static_cast<std::size_t>(std::max(1, width));
+        point.line = std::min(point.line, normalLines_.size() - 1);
+        std::size_t row = 0;
+        for (std::size_t lineIndex = 0; lineIndex < point.line; ++lineIndex) {
+            const auto& line = normalLines_[lineIndex];
+            row += line.empty() ? 1 : (line.size() + cellWidth - 1) / cellWidth;
+        }
+        point.offset = std::min(point.offset, normalLines_[point.line].size());
+        return row + point.offset / cellWidth;
+    }
 
     // Collect one logical line beginning at a physical grid row, following
     // soft-wrap markers. The returned row is clipped at the last written cell,
@@ -394,6 +466,7 @@ private:
         history_.clear();
         historyOpen_ = false;
         view_ = 0;
+        preserveViewOnOutput_ = false;
         syncNormalLinesFromGrid();
     }
 
@@ -700,6 +773,7 @@ private:
     void alt(bool on, bool saveCursor) {
         if (on == altOn_) return;
         view_ = 0; // the alternate screen has no scrollback view
+        preserveViewOnOutput_ = false;
         if (on) {
             syncNormalLinesFromGrid();
             if (saveCursor) { savedX_ = cx_; savedY_ = cy_; }
@@ -1019,6 +1093,7 @@ private:
         normalCursorPendingWrap_ = normalSavedPendingWrap_ = false;
         displayRowsDirty_ = true;
         view_ = 0;
+        preserveViewOnOutput_ = false;
     }
 
     int w_ = 1, h_ = 1, cx_ = 0, cy_ = 0;
@@ -1048,6 +1123,7 @@ private:
     mutable std::vector<std::vector<VtCell>> displayRowsCache_;
     mutable bool displayRowsDirty_ = true;
     int view_ = 0; // scrolled-back lines (0 = live)
+    bool preserveViewOnOutput_ = false;
     bool altOn_ = false, cursorVisible_ = true, appCursor_ = false;
     Color fg_ = colors::White, bg_ = colors::Black;
     uint8_t style_ = StyleNone;
