@@ -280,6 +280,16 @@ void Desktop::performShutdown() {
 }
 
 void Desktop::openNotificationCenter() {
+    // Only one Notification window at a time: focus the existing one instead
+    // of opening a duplicate.
+    if (Window* existing = wm_.findWindow("Notifications")) {
+        wm_.focus(existing);
+        cursor_.moveTo(existing->bounds().x + 2, existing->bounds().y + 1);
+        cursor_.clamp(screenWidth(), screenHeight());
+        mode_ = enterWindowMode(*existing);
+        return;
+    }
+
     auto& bus = notifications::global();
     bus.markAllRead();
 

@@ -87,6 +87,25 @@ Window* WindowManager::windowAt(int x, int y) const {
     return best;
 }
 
+Window* WindowManager::findWindow(std::string_view title) const {
+    for (const auto& p : windows_) {
+        if (p->title() == title) return p.get();
+    }
+    return nullptr;
+}
+
+bool WindowManager::hasWindow(std::string_view title) const {
+    return findWindow(title) != nullptr;
+}
+
+bool WindowManager::containsWindow(const Window* w) const {
+    if (!w) return false;
+    for (const auto& p : windows_) {
+        if (p.get() == w) return true;
+    }
+    return false;
+}
+
 Widget* WindowManager::widgetAt(int x, int y) const {
     Window* w = windowAt(x, y);
     return w ? w->content() : nullptr;
