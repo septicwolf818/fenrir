@@ -110,7 +110,8 @@ public:
     KeyEventResult handleKey(const KeyEvent& ev) override {
         // Esc = cancel (always, regardless of zone).
         if (ev.key == Key::Escape) {
-            fire(-1);
+            // Do not close the dialog on Escape: let it propagate so the
+            // desktop can unwind Keyboard mode (move/resize windows, etc.).
             return KeyEventResult::Ignored;
         }
         // Tab = zone switching: field -> next field -> buttons -> field...
