@@ -163,6 +163,23 @@ void runTerminalTests() {
         v.resize(4, 3);
         check(v.viewOffset() <= static_cast<int>(v.historyRowCount()), "view clamped");
     }
+    // Blank grid rows below the prompt are resize padding, not scrollback
+    // content. A saved cursor in that padding must not force the prompt into
+    // history when the resized viewport can hold the actual output.
+    {
+        VtScreen v;
+        v.resize(8, 4);
+        v.feed("fetch\r\nprompt", 13);
+        v.feed("\x1b[4;1H", 6);
+        v.feed("\x1b" "7", 2);
+        v.feed("\x1b[2;7H", 6); // restore the live cursor to the prompt row
+
+        v.resize(8, 3);
+        check(v.historyRowCount() == 0, "blank rows below prompt do not count after resize");
+        check(v.at(0, 0).ch == U'f' && v.at(0, 1).ch == U'p',
+              "resize keeps prompt below the actual content");
+        check(v.cursorY() == 1, "trimming blank rows preserves the live prompt cursor");
+    }
     // A scrolled viewport is anchored to its logical line when rewrapping,
     // not to a fixed number of physical rows. Preserve it through the shell's
     // prompt redraw after SIGWINCH, but ordinary later output follows live.
