@@ -124,6 +124,8 @@ public:
         } else {
             view_ = std::clamp(view_, 0, static_cast<int>(historyRowCount()));
         }
+        // If all content fits in the window, anchor at the bottom (no scroll).
+        if (historyRowCount() <= static_cast<std::size_t>(h_)) view_ = 0;
     }
 
     int width() const { return w_; }
