@@ -209,6 +209,21 @@ public:
         });
     }
 
+    void goToPath() {
+        const bool toRight = rightActive_;
+        const auto token = lifetimeToken();
+        ctx_.prompt(U"Go to path", U"Enter a directory path:", U"Path: ",
+                    text::toUtf32(active().currentDir()),
+                    [this, token, toRight](std::optional<std::u32string> v) {
+                        if (!token.lock()) return;
+                        if (!v) return;
+                        const std::string path = text::toUtf8(*v);
+                        if (!fs::isDirectory(path)) { status("Not a directory: " + path); return; }
+                        (toRight ? right_ : left_).setDirectory(path);
+                        status("Panel: " + path);
+                    });
+    }
+
     bool isRightActive() const { return rightActive_; }
 
     // Keep both panels visible while allowing the window to fit smaller TTYs.

@@ -23,6 +23,7 @@ public:
             {U"New directory... (Ctrl+M)", [raw] { raw->makeDirectory(); }},
             {U"Open with... (Ctrl+O)", [raw] { raw->openWithSelected(); }},
             {U"Go to folder... (Ctrl+G)", [raw] { raw->goToFolder(); }},
+            {U"Go to path... (Ctrl+P)", [raw] { raw->goToPath(); }},
             {U"Refresh", [raw] { raw->refreshBoth(); }},
         }},
         {U"Edit", std::vector<MenuItem>{
@@ -42,6 +43,7 @@ public:
         view->pushShortcut({true, Key::Char, U'm'}, [raw] { raw->makeDirectory(); });
         view->pushShortcut({true, Key::Char, U'o'}, [raw] { raw->openWithSelected(); });
         view->pushShortcut({true, Key::Char, U'g'}, [raw] { raw->goToFolder(); });
+        view->pushShortcut({true, Key::Char, U'p'}, [raw] { raw->goToPath(); });
         view->pushShortcut({true, Key::Char, U'c'}, [raw] { raw->copySelected(); });
         view->pushShortcut({true, Key::Char, U'x'}, [raw] { raw->moveSelected(); });
         view->pushShortcut({true, Key::Char, U'r'}, [raw] { raw->renameSelected(); });
