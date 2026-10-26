@@ -521,7 +521,9 @@ void runTerminalTests() {
         check(v.at(0, 2).ch == U'N' && v.at(0, 3).ch == U' ',
               "overlong field does not push the following row down");
 
-        v.resize(64, 4);
+        v.resize(40, 4);
+        check(v.at(0, 2).ch == U'N' && v.at(0, 3).ch == U' ',
+              "fixed cursor-positioned row stays put after mode reset");
         v.resize(80, 4);
         check(v.at(21, 0).ch == U'`' && v.at(25, 0).ch == U'.' &&
                   v.at(0, 2).ch == U'N',

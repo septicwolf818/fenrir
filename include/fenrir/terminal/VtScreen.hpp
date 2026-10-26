@@ -17,6 +17,7 @@ struct VtCell {
     Color fg = colors::White;
     Color bg = colors::Black;
     uint8_t style = StyleNone; // bit 7 (internal) = reverse video
+    bool fixedRow = false; // written in a cursor-positioned/no-wrap screen layout
 };
 
 class VtScreen {
@@ -224,15 +225,24 @@ private:
     const std::vector<VtCell>& buf() const { return altOn_ ? altGrid_ : grid_; }
     std::vector<uint8_t>& wraps() { return altOn_ ? altWrap_ : gridWrap_; }
 
+    static bool isFixedRow(const std::vector<VtCell>& line) {
+        return !line.empty() && line.front().fixedRow;
+    }
+
+    std::size_t logicalRowCount(const std::vector<VtCell>& line, std::size_t width) const {
+        if (line.empty() || isFixedRow(line)) return 1;
+        return (line.size() + width - 1) / width;
+    }
+
     LogicalPoint logicalPointAtRow(std::size_t row, int width) const {
         if (normalLines_.empty()) return {};
         const std::size_t cellWidth = static_cast<std::size_t>(std::max(1, width));
         std::size_t rowStart = 0;
         for (std::size_t lineIndex = 0; lineIndex < normalLines_.size(); ++lineIndex) {
             const auto& line = normalLines_[lineIndex];
-            const std::size_t rowCount = line.empty() ? 1 : (line.size() + cellWidth - 1) / cellWidth;
+            const std::size_t rowCount = logicalRowCount(line, cellWidth);
             if (row < rowStart + rowCount) {
-                const std::size_t offset = (row - rowStart) * cellWidth;
+                const std::size_t offset = isFixedRow(line) ? 0 : (row - rowStart) * cellWidth;
                 return LogicalPoint{lineIndex, std::min(offset, line.size())};
             }
             rowStart += rowCount;
@@ -248,10 +258,10 @@ private:
         std::size_t row = 0;
         for (std::size_t lineIndex = 0; lineIndex < point.line; ++lineIndex) {
             const auto& line = normalLines_[lineIndex];
-            row += line.empty() ? 1 : (line.size() + cellWidth - 1) / cellWidth;
+            row += logicalRowCount(line, cellWidth);
         }
         point.offset = std::min(point.offset, normalLines_[point.line].size());
-        return row + point.offset / cellWidth;
+        return row + (isFixedRow(normalLines_[point.line]) ? 0 : point.offset / cellWidth);
     }
 
     // Collect one logical line beginning at a physical grid row, following
@@ -355,18 +365,17 @@ private:
         std::size_t rowStart = 0;
         for (std::size_t li = 0; li < normalBufferStartLine_; ++li) {
             const auto& line = normalLines_[li];
-            rowStart += line.empty() ? 1 : (line.size() + static_cast<std::size_t>(w_) - 1) /
-                                                static_cast<std::size_t>(w_);
+            rowStart += logicalRowCount(line, static_cast<std::size_t>(w_));
         }
-        normalScreenStartRow_ = rowStart + normalBufferStartOffset_ /
-                                                static_cast<std::size_t>(w_);
+        const auto& boundaryLine = normalLines_[normalBufferStartLine_];
+        normalScreenStartRow_ = rowStart + (isFixedRow(boundaryLine)
+                                                ? 0
+                                                : normalBufferStartOffset_ /
+                                                      static_cast<std::size_t>(w_));
         if (topPadding_ > 0) {
             std::size_t contentRows = 0;
             for (const auto& line : normalLines_)
-                contentRows += line.empty()
-                                   ? 1
-                                   : (line.size() + static_cast<std::size_t>(w_) - 1) /
-                                         static_cast<std::size_t>(w_);
+                contentRows += logicalRowCount(line, static_cast<std::size_t>(w_));
             topPadding_ = contentRows < static_cast<std::size_t>(h_)
                               ? h_ - static_cast<int>(contentRows)
                               : 0;
@@ -396,6 +405,8 @@ private:
             lineStarts[li] = rows.size();
             if (line.empty()) {
                 rows.push_back(BufferRow{li, 0, 0, false});
+            } else if (isFixedRow(line)) {
+                rows.push_back(BufferRow{li, 0, std::min(width, line.size()), false});
             } else {
                 for (std::size_t off = 0; off < line.size(); off += width) {
                     const std::size_t len = std::min(width, line.size() - off);
@@ -427,7 +438,9 @@ private:
             const int boundaryRow = normalBufferStartLine_ >= lineStarts.size()
                                         ? static_cast<int>(rows.size())
                                         : static_cast<int>(lineStarts[normalBufferStartLine_] +
-                                              normalBufferStartOffset_ / width);
+                                              (isFixedRow(normalLines_[normalBufferStartLine_])
+                                                   ? 0
+                                                   : normalBufferStartOffset_ / width));
             screenStart = std::clamp(
                 std::max(boundaryRow, std::max(0, static_cast<int>(rows.size()) - h_)),
                 0, static_cast<int>(rows.size()));
@@ -457,7 +470,9 @@ private:
             const std::size_t before = static_cast<std::size_t>(
                 std::clamp(screenStart - static_cast<int>(start), 0, static_cast<int>(count)));
             if (before == 0) continue;
-            const std::size_t prefixLength = std::min(normalLines_[li].size(), before * width);
+            const std::size_t prefixLength = isFixedRow(normalLines_[li])
+                                                 ? normalLines_[li].size()
+                                                 : std::min(normalLines_[li].size(), before * width);
             history_.emplace_back(normalLines_[li].begin(),
                                   normalLines_[li].begin() + static_cast<long>(prefixLength));
             if (before < count) historyOpen_ = true;
@@ -469,10 +484,12 @@ private:
                             int& x, int& y) {
             line = std::min(line, lineStarts.size() - 1);
             offset = std::min(offset, normalLines_[line].size());
+            const bool fixed = isFixedRow(normalLines_[line]);
             const bool exactBoundary = pendingWrap && offset > 0 && offset % width == 0;
             const int row = static_cast<int>(lineStarts[line]) + static_cast<int>(
-                exactBoundary ? offset / width - 1 : offset / width);
-            x = exactBoundary ? w_ : static_cast<int>(offset % width);
+                fixed ? 0 : (exactBoundary ? offset / width - 1 : offset / width));
+            x = fixed ? (pendingWrap ? w_ : std::min(static_cast<int>(offset), w_ - 1))
+                      : (exactBoundary ? w_ : static_cast<int>(offset % width));
             const int screenY = row - screenStart;
             y = std::clamp(screenY, 0, h_ - 1);
             if (screenY < 0) x = 0;
@@ -488,6 +505,11 @@ private:
             return;
         }
         const std::size_t width = static_cast<std::size_t>(w_);
+        if (isFixedRow(line)) {
+            const std::size_t end = std::min(line.size(), width);
+            rows.emplace_back(line.begin(), line.begin() + static_cast<long>(end));
+            return;
+        }
         for (std::size_t off = 0; off < line.size(); off += width) {
             const std::size_t end = std::min(line.size(), off + width);
             rows.emplace_back(line.begin() + static_cast<long>(off),
@@ -629,6 +651,10 @@ private:
             if (line.empty()) {
                 phys.emplace_back();
                 physWrap.push_back(0);
+            } else if (isFixedRow(line)) {
+                const std::size_t end = std::min(line.size(), static_cast<std::size_t>(newW));
+                phys.emplace_back(line.begin(), line.begin() + static_cast<long>(end));
+                physWrap.push_back(0);
             } else {
                 for (std::size_t off = 0; off < line.size(); off += static_cast<std::size_t>(newW)) {
                     phys.push_back(std::vector<VtCell>(line.begin() + static_cast<long>(off),
@@ -667,10 +693,12 @@ private:
         auto mapPoint = [&](int line, std::size_t offset, bool pendingWrap, int& x, int& y) {
             const int startRow = logicStart[static_cast<std::size_t>(line)] - drop;
             const std::size_t width = static_cast<std::size_t>(newW);
-            const bool exactBoundary = pendingWrap && offset > 0 && offset % width == 0;
-            const int row = startRow + static_cast<int>(
-                exactBoundary ? (offset / width) - 1 : offset / width);
-            x = exactBoundary ? newW : static_cast<int>(offset % width);
+            const bool fixed = isFixedRow(logical[static_cast<std::size_t>(line)]);
+            const bool exactBoundary = !fixed && pendingWrap && offset > 0 && offset % width == 0;
+            const int row = startRow + static_cast<int>(fixed ? 0 :
+                (exactBoundary ? (offset / width) - 1 : offset / width));
+            x = fixed ? (pendingWrap ? newW : std::min(static_cast<int>(offset), newW - 1))
+                      : (exactBoundary ? newW : static_cast<int>(offset % width));
             y = std::clamp(row, 0, newH - 1);
             if (row < 0) x = 0; // cursor scrolled off the top — park at origin
         };
@@ -830,7 +858,24 @@ private:
         for (const int v : params_) {
             switch (v) {
                 case 1: appCursor_ = on; break;   // DECCKM — application cursor keys
-                case 7: autoWrap_ = on; break;    // DECAWM — automatic right-margin wrap
+                case 7:
+                    autoWrap_ = on;
+                    if (!on) {
+                        auto& grid = buf();
+                        auto& rowWraps = wraps();
+                        for (int y = 0; y < h_; ++y) {
+                            const std::size_t base = static_cast<std::size_t>(y) *
+                                                     static_cast<std::size_t>(w_);
+                            const auto first = grid.begin() + static_cast<long>(base);
+                            const auto last = first + w_;
+                            const bool hasContent = y == cy_ || std::any_of(
+                                first, last, [](const VtCell& cell) { return cell.ch != U' '; });
+                            if (!hasContent) continue;
+                            for (auto cell = first; cell != last; ++cell) cell->fixedRow = true;
+                            rowWraps[static_cast<std::size_t>(y)] = 0;
+                        }
+                    }
+                    break; // DECAWM — automatic right-margin wrap
                 case 25: cursorVisible_ = on; break; // DECTCEM
                 case 47: case 1047: alt(on, false); break;
                 case 1049: alt(on, true); break;  // xterm: alt + save cursor
@@ -875,8 +920,14 @@ private:
         if (cy_ < 0 || cy_ >= h_ || cx_ < 0) return;
         auto& rowWraps = wraps();
         if (rowWraps.size() != static_cast<std::size_t>(h_)) return;
+        auto& b = buf();
         if (cx_ >= w_) {
             if (autoWrap_) {
+                const std::size_t rowBase = static_cast<std::size_t>(cy_) *
+                                            static_cast<std::size_t>(w_);
+                if (b[rowBase].fixedRow)
+                    for (int x = 0; x < w_; ++x)
+                        b[rowBase + static_cast<std::size_t>(x)].fixedRow = false;
                 rowWraps[static_cast<std::size_t>(cy_)] = 1;
                 cx_ = 0;
                 index_();
@@ -885,7 +936,9 @@ private:
             }
         }
         rowWraps[static_cast<std::size_t>(cy_)] = 0;
-        auto& b = buf();
+        const std::size_t rowBase = static_cast<std::size_t>(cy_) * static_cast<std::size_t>(w_);
+        if (!autoWrap_ && !b[rowBase].fixedRow)
+            for (int x = 0; x < w_; ++x) b[rowBase + static_cast<std::size_t>(x)].fixedRow = true;
         const std::size_t idx = static_cast<std::size_t>(cy_) * static_cast<std::size_t>(w_) +
                                 static_cast<std::size_t>(cx_);
         if (idx >= b.size()) return;
@@ -895,6 +948,7 @@ private:
         cell.bg = bg_;
         cell.style = style_;
         if (reverse_) cell.style |= kReverse;
+        cell.fixedRow = b[idx].fixedRow || !autoWrap_;
         b[idx] = cell;
         if (autoWrap_) ++cx_;
         else cx_ = std::min(cx_ + 1, w_ - 1);
