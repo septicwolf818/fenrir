@@ -30,25 +30,42 @@ public:
         std::error_code ec;
         const auto size = std::filesystem::file_size(path, ec);
         if (ec) { error = "Cannot read file."; return false; }
-        if (size > kMaxFileBytes) { error = "Image file is too large."; return false; }
 
         std::ifstream file(path, std::ios::binary);
         if (!file) { error = "Cannot open file."; return false; }
-        std::vector<uint8_t> bytes(static_cast<std::size_t>(size));
+        std::vector<uint8_t> bytes;
+        try {
+            bytes.resize(static_cast<std::size_t>(size));
+        } catch (...) {
+            error = "Image file is too large to load.";
+            return false;
+        }
         if (!bytes.empty()) file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
         if (!file && !bytes.empty()) { error = "Could not read the complete file."; return false; }
 
         bool decoded = false;
-        if (bytes.size() >= 2 && bytes[0] == 'B' && bytes[1] == 'M')
-            decoded = decodeBmp(bytes, error);
-        else if (!bytes.empty() && bytes[0] == 'P')
-            decoded = decodePnm(bytes, error);
-        else
-            error = "Unsupported image format.";
-        if (!decoded) {
+        try {
+            if (bytes.size() >= 2 && bytes[0] == 'B' && bytes[1] == 'M')
+                decoded = decodeBmp(bytes, error);
+            else if (!bytes.empty() && bytes[0] == 'P')
+                decoded = decodePnm(bytes, error);
+            else
+                error = "Unsupported image format.";
+            if (!decoded) {
+                width_ = height_ = 0;
+                pixels_.clear();
+                decoded = decodeCommon(bytes, error);
+            }
+        } catch (const std::bad_alloc&) {
             width_ = height_ = 0;
             pixels_.clear();
-            decoded = decodeCommon(bytes, error);
+            error = "Image is too large to load into memory.";
+            decoded = false;
+        } catch (const std::exception& e) {
+            width_ = height_ = 0;
+            pixels_.clear();
+            error = e.what();
+            decoded = false;
         }
         if (!decoded) {
             width_ = height_ = 0;
@@ -67,11 +84,13 @@ public:
     }
 
 private:
-    static constexpr uint64_t kMaxPixels = 8'000'000;
-    static constexpr uintmax_t kMaxFileBytes = 128ull * 1024ull * 1024ull;
-
     static bool validDimensions(uint64_t w, uint64_t h) {
-        return w > 0 && h > 0 && w <= kMaxPixels && h <= kMaxPixels && w * h <= kMaxPixels;
+        if (w == 0 || h == 0) return false;
+        if (w > static_cast<uint64_t>(std::numeric_limits<int>::max())) return false;
+        if (h > static_cast<uint64_t>(std::numeric_limits<int>::max())) return false;
+        // Guard against size_t overflow when allocating the pixel buffer.
+        if (w > std::numeric_limits<std::size_t>::max() / h) return false;
+        return true;
     }
 
     bool decodeCommon(const std::vector<uint8_t>& bytes, std::string& error) {
@@ -87,7 +106,7 @@ private:
             return false;
         }
         if (!validDimensions(static_cast<uint64_t>(w), static_cast<uint64_t>(h))) {
-            error = "Image dimensions exceed the Photo Viewer limit.";
+            error = "Image dimensions are invalid.";
             return false;
         }
 
@@ -100,7 +119,7 @@ private:
         }
         if (!validDimensions(static_cast<uint64_t>(w), static_cast<uint64_t>(h))) {
             stbi_image_free(rgba);
-            error = "Image dimensions exceed the Photo Viewer limit.";
+            error = "Image dimensions are invalid.";
             return false;
         }
 
@@ -165,6 +184,10 @@ private:
         }
 
         const uint64_t rowBytes = (static_cast<uint64_t>(width) * bitsPerPixel + 31) / 32 * 4;
+        if (rowBytes == 0 || height > std::numeric_limits<std::size_t>::max() / rowBytes) {
+            error = "BMP pixel data is incomplete.";
+            return false;
+        }
         if (pixelOffset > b.size() || rowBytes * height > b.size() - pixelOffset) {
             error = "BMP pixel data is incomplete.";
             return false;
