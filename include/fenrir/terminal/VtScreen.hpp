@@ -55,6 +55,12 @@ public:
 
     void finishOutputBatch() { preserveViewOnOutput_ = false; }
 
+    bool hasTitleChanged() const { return titleChanged_; }
+    std::string consumeTitle() {
+        titleChanged_ = false;
+        return std::move(title_);
+    }
+
     void resize(int w, int h) {
         const int nw = std::max(1, w);
         const int nh = std::max(1, h);
@@ -170,11 +176,15 @@ public:
                     if (b == 0x1b) state_ = St::Esc;
                     else if (b >= 0x40 && b <= 0x7e) state_ = St::Ground;
                     break;
-                case St::Osc: // window title — skip until BEL or ST
-                    if (b == 0x07) state_ = St::Ground;
+                case St::Osc: // window title — collect until BEL or ST
+                    if (b == 0x07) { finishOsc(); state_ = St::Ground; }
                     else if (b == 0x1b) state_ = St::OscEsc;
+                    else oscBuf_.push_back(static_cast<char>(b));
                     break;
-                case St::OscEsc: state_ = (b == '\\') ? St::Ground : St::Osc; break;
+                case St::OscEsc:
+                    if (b == '\\') { finishOsc(); state_ = St::Ground; }
+                    else { oscBuf_.push_back(0x1b); oscBuf_.push_back(static_cast<char>(b)); state_ = St::Osc; }
+                    break;
                 case St::Charset: state_ = St::Ground; break; // character set selection — ignore
             }
         }
@@ -189,6 +199,13 @@ public:
     }
 
 private:
+    void finishOsc() {
+        if (oscBuf_.size() >= 2 && (oscBuf_[0] == '0' || oscBuf_[0] == '2') && oscBuf_[1] == ';') {
+            title_ = oscBuf_.substr(2);
+            titleChanged_ = true;
+        }
+        oscBuf_.clear();
+    }
     enum class St { Ground, Utf8, Esc, Csi, CsiIgnore, Osc, OscEsc, Charset };
 
     struct LogicalPoint {
@@ -1129,6 +1146,9 @@ private:
     uint8_t style_ = StyleNone;
     bool reverse_ = false;
     St state_ = St::Ground;
+    std::string oscBuf_;
+    std::string title_;
+    bool titleChanged_ = false;
     std::vector<int> params_;
     int param_ = 0;
     bool hasParam_ = false;
