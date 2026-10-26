@@ -32,12 +32,7 @@ public:
     std::size_t historySize() const { return history_.size(); }
     // Rows above the live screen at the current width. A soft-wrapped line
     // can straddle history and the grid, so count the reflowed combined stream.
-    std::size_t historyRowCount() const {
-        const auto& rows = displayRows();
-        return rows.size() > static_cast<std::size_t>(h_)
-                   ? rows.size() - static_cast<std::size_t>(h_)
-                   : 0;
-    }
+    std::size_t historyRowCount() const { return normalScreenStartRow_; }
     int viewOffset() const { return view_; }
 
     // Browse the scrollback (positive = older). Clamped to available rows.
@@ -63,52 +58,40 @@ public:
             cy_ = 0;
             top_ = 0;
             bot_ = nh - 1;
+            syncNormalLinesFromGrid();
             displayRowsDirty_ = true;
             return;
         }
-        const bool reflowOpenLine = !altOn_ && historyOpen_ && !history_.empty();
-        std::vector<VtCell> openLine;
-        if (reflowOpenLine) {
-            openLine = history_.back();
-            int nextRow = 0;
-            auto continuation = collectGridLine(0, nextRow);
-            openLine.insert(openLine.end(), continuation.begin(), continuation.end());
-        }
-        // Reflow both buffers and map each buffer's cursor through its own
-        // layout. While the alternate screen is active, savedX_/savedY_ is
-        // the normal-screen cursor saved by 1049; cx_/cy_ belongs to altGrid_.
-        int newCx = cx_, newCy = cy_;
-        int newSavedX = savedX_, newSavedY = savedY_;
-        if (altOn_) {
-            int normalX = savedX_, normalY = savedY_;
-            int ignoredX = 0, ignoredY = 0;
-            reflowInto(grid_, gridWrap_, w_, h_, nw, nh, savedX_, savedY_, savedX_, savedY_,
-                       normalX, normalY, ignoredX, ignoredY);
-            reflowInto(altGrid_, altWrap_, w_, h_, nw, nh, cx_, cy_, cx_, cy_,
-                       newCx, newCy, ignoredX, ignoredY);
-            newSavedX = normalX;
-            newSavedY = normalY;
-        } else {
-            int ignoredX = 0, ignoredY = 0;
-            reflowInto(grid_, gridWrap_, w_, h_, nw, nh, cx_, cy_, savedX_, savedY_,
-                       newCx, newCy, newSavedX, newSavedY);
-            reflowInto(altGrid_, altWrap_, w_, h_, nw, nh, 0, 0, 0, 0,
-                       ignoredX, ignoredY, ignoredX, ignoredY);
-        }
-        // The scrollback holds logical lines, so a resize only changes how
-        // they are wrapped for display — the text itself is never rewritten.
+        const int oldW = w_;
+        const int oldH = h_;
+
+        const int oldCx = cx_, oldCy = cy_;
         w_ = nw;
         h_ = nh;
-        // cx_ == width means the last cell was written and the next printable
-        // character wraps. Preserve that state across reflow; clamping it to
-        // width-1 makes a subsequent character overwrite the last cell.
-        cx_ = (newCx == w_) ? w_ : std::clamp(newCx, 0, w_ - 1);
-        cy_ = std::clamp(newCy, 0, h_ - 1);
-        savedX_ = (newSavedX == w_) ? w_ : std::clamp(newSavedX, 0, w_ - 1);
-        savedY_ = std::clamp(newSavedY, 0, h_ - 1);
+
+        int ignoredX = 0, ignoredY = 0;
+        if (altOn_) {
+            // The normal buffer is re-laid out from logical lines while the
+            // alternate grid keeps its own independent cursor and contents.
+            reflowInto(altGrid_, altWrap_, oldW, oldH, nw, nh, oldCx, oldCy,
+                       oldCx, oldCy, cx_, cy_, ignoredX, ignoredY);
+            layoutNormalBuffer(normalCursorLine_, normalCursorOffset_, normalCursorPendingWrap_,
+                               normalSavedLine_, normalSavedOffset_, normalSavedPendingWrap_,
+                               ignoredX, ignoredY, savedX_, savedY_);
+        } else {
+            layoutNormalBuffer(normalCursorLine_, normalCursorOffset_, normalCursorPendingWrap_,
+                               normalSavedLine_, normalSavedOffset_, normalSavedPendingWrap_,
+                               cx_, cy_, savedX_, savedY_);
+            normalCursorPendingWrap_ = cx_ == w_;
+            normalSavedPendingWrap_ = savedX_ == w_;
+            // The alternate grid is inactive, but retaining its content across
+            // a resize preserves the 1049 round-trip behavior.
+            int altX = 0, altY = 0, altSavedX = 0, altSavedY = 0;
+            reflowInto(altGrid_, altWrap_, oldW, oldH, nw, nh, 0, 0, 0, 0,
+                       altX, altY, altSavedX, altSavedY);
+        }
         top_ = 0;
         bot_ = h_ - 1;
-        if (reflowOpenLine) repairOpenHistoryAfterResize(openLine);
         displayRowsDirty_ = true;
         view_ = std::clamp(view_, 0, static_cast<int>(historyRowCount()));
     }
@@ -128,7 +111,7 @@ public:
             // soft-wrapped line spanning their boundary must be reflowed as a
             // unit when the window width changes.
             const auto& rows = displayRows();
-            const int row = static_cast<int>(rows.size()) - h_ - view_ + y;
+            const int row = static_cast<int>(normalScreenStartRow_) - view_ + y;
             if (row < 0 || row >= static_cast<int>(rows.size())) return blank;
             const auto& displayRow = rows[static_cast<std::size_t>(row)];
             if (x >= static_cast<int>(displayRow.size())) return blank;
@@ -165,6 +148,7 @@ public:
                 case St::Charset: state_ = St::Ground; break; // character set selection — ignore
             }
         }
+        if (n > 0 && !altOn_) syncNormalLinesFromGrid();
     }
 
 private:
@@ -202,23 +186,176 @@ private:
         return line;
     }
 
-    // The grid reflows independently to preserve its cursor and may drop old
-    // rows when the window narrows. Move that dropped prefix into scrollback,
-    // keeping its open-line boundary exactly where the newly reflowed grid
-    // continues it.
-    void repairOpenHistoryAfterResize(const std::vector<VtCell>& originalLine) {
-        if (history_.empty()) return;
-        int nextRow = 0;
-        const auto visibleLine = collectGridLine(0, nextRow);
-        if (visibleLine.size() > originalLine.size()) return;
-        const std::size_t prefixSize = originalLine.size() - visibleLine.size();
-        for (std::size_t i = 0; i < visibleLine.size(); ++i) {
-            if (visibleLine[i].ch != originalLine[prefixSize + i].ch) return;
+    void syncNormalLinesFromGrid() {
+        normalLines_.assign(history_.begin(), history_.end());
+        normalCursorLine_ = normalSavedLine_ = 0;
+        normalCursorOffset_ = normalSavedOffset_ = 0;
+        normalCursorPendingWrap_ = normalSavedPendingWrap_ = false;
+
+        auto recordPoint = [&](int startRow, int endRow, std::size_t lineIndex,
+                               std::size_t lineBase, int targetY, int targetX,
+                               std::size_t& pointLine, std::size_t& pointOffset,
+                               bool& pendingWrap) {
+            if (targetY < startRow || targetY >= endRow) return;
+            pointLine = lineIndex;
+            pointOffset = lineBase + static_cast<std::size_t>(targetY - startRow) *
+                                      static_cast<std::size_t>(w_) +
+                          static_cast<std::size_t>(std::clamp(targetX, 0, w_));
+            pendingWrap = targetX == w_;
+        };
+
+        int row = 0;
+        if (historyOpen_ && !history_.empty()) {
+            const std::size_t lineIndex = normalLines_.size() - 1;
+            const std::size_t lineBase = normalLines_.back().size();
+            int nextRow = 0;
+            auto continuation = collectGridLine(0, nextRow);
+            normalLines_.back().insert(normalLines_.back().end(),
+                                       continuation.begin(), continuation.end());
+            recordPoint(0, nextRow, lineIndex, lineBase, cy_, cx_,
+                        normalCursorLine_, normalCursorOffset_, normalCursorPendingWrap_);
+            recordPoint(0, nextRow, lineIndex, lineBase, savedY_, savedX_,
+                        normalSavedLine_, normalSavedOffset_, normalSavedPendingWrap_);
+            row = nextRow;
         }
-        history_.back().assign(originalLine.begin(), originalLine.begin() +
-                               static_cast<long>(prefixSize));
-        historyOpen_ = !visibleLine.empty();
+
+        while (row < h_) {
+            const int startRow = row;
+            int nextRow = row;
+            auto line = collectGridLine(row, nextRow);
+            const std::size_t lineIndex = normalLines_.size();
+            normalLines_.push_back(std::move(line));
+            recordPoint(startRow, nextRow, lineIndex, 0, cy_, cx_,
+                        normalCursorLine_, normalCursorOffset_, normalCursorPendingWrap_);
+            recordPoint(startRow, nextRow, lineIndex, 0, savedY_, savedX_,
+                        normalSavedLine_, normalSavedOffset_, normalSavedPendingWrap_);
+            row = nextRow;
+        }
+
+        if (normalLines_.empty()) normalLines_.emplace_back();
+        const std::size_t lastAnchor = std::max(normalCursorLine_, normalSavedLine_);
+        while (normalLines_.size() > lastAnchor + 1 && normalLines_.back().empty())
+            normalLines_.pop_back();
+        normalCursorLine_ = std::min(normalCursorLine_, normalLines_.size() - 1);
+        normalSavedLine_ = std::min(normalSavedLine_, normalLines_.size() - 1);
+        normalCursorOffset_ = std::min(normalCursorOffset_, normalLines_[normalCursorLine_].size());
+        normalSavedOffset_ = std::min(normalSavedOffset_, normalLines_[normalSavedLine_].size());
+
+        normalScreenStartLine_ = historyOpen_ && !history_.empty()
+                                     ? history_.size() - 1
+                                     : history_.size();
+        normalScreenStartOffset_ = historyOpen_ && !history_.empty()
+                                       ? history_.back().size()
+                                       : 0;
+        normalScreenStartLine_ = std::min(normalScreenStartLine_, normalLines_.size() - 1);
+        std::size_t rowStart = 0;
+        for (std::size_t li = 0; li < normalScreenStartLine_; ++li) {
+            const auto& line = normalLines_[li];
+            rowStart += line.empty() ? 1 : (line.size() + static_cast<std::size_t>(w_) - 1) /
+                                                static_cast<std::size_t>(w_);
+        }
+        normalScreenStartRow_ = rowStart + normalScreenStartOffset_ /
+                                                static_cast<std::size_t>(w_);
         displayRowsDirty_ = true;
+    }
+
+    struct BufferRow {
+        std::size_t line = 0;
+        std::size_t offset = 0;
+        std::size_t length = 0;
+        bool wraps = false;
+    };
+
+    void layoutNormalBuffer(std::size_t cursorLine, std::size_t cursorOffset,
+                            bool cursorPendingWrap, std::size_t savedLine,
+                            std::size_t savedOffset, bool savedPendingWrap,
+                            int& outCursorX, int& outCursorY,
+                            int& outSavedX, int& outSavedY) {
+        std::vector<BufferRow> rows;
+        std::vector<std::size_t> lineStarts(normalLines_.size(), 0);
+        std::vector<std::size_t> lineRowCounts(normalLines_.size(), 0);
+        const std::size_t width = static_cast<std::size_t>(w_);
+
+        for (std::size_t li = 0; li < normalLines_.size(); ++li) {
+            const auto& line = normalLines_[li];
+            lineStarts[li] = rows.size();
+            if (line.empty()) {
+                rows.push_back(BufferRow{li, 0, 0, false});
+            } else {
+                for (std::size_t off = 0; off < line.size(); off += width) {
+                    const std::size_t len = std::min(width, line.size() - off);
+                    rows.push_back(BufferRow{li, off, len, off + len < line.size()});
+                }
+            }
+            lineRowCounts[li] = rows.size() - lineStarts[li];
+        }
+        if (rows.empty()) {
+            normalLines_.emplace_back();
+            lineStarts.push_back(0);
+            lineRowCounts.push_back(1);
+            rows.push_back(BufferRow{0, 0, 0, false});
+        }
+
+        const int boundaryRow = normalScreenStartLine_ >= lineStarts.size()
+                                    ? static_cast<int>(rows.size())
+                                    : static_cast<int>(lineStarts[normalScreenStartLine_] +
+                                          normalScreenStartOffset_ / width);
+        const int screenStart = std::clamp(
+            std::max(boundaryRow, std::max(0, static_cast<int>(rows.size()) - h_)),
+            0, static_cast<int>(rows.size()));
+        normalScreenStartRow_ = static_cast<std::size_t>(screenStart);
+        grid_.assign(width * static_cast<std::size_t>(h_), VtCell{});
+        gridWrap_.assign(static_cast<std::size_t>(h_), 0);
+        for (int screenY = 0; screenY < h_; ++screenY) {
+            const int sourceY = screenStart + screenY;
+            if (sourceY < 0 || sourceY >= static_cast<int>(rows.size())) continue;
+            const auto& row = rows[static_cast<std::size_t>(sourceY)];
+            const auto& line = normalLines_[row.line];
+            const std::size_t dst = static_cast<std::size_t>(screenY) * width;
+            for (std::size_t x = 0; x < row.length; ++x)
+                grid_[dst + x] = line[row.offset + x];
+            gridWrap_[static_cast<std::size_t>(screenY)] = row.wraps ? 1 : 0;
+        }
+
+        history_.clear();
+        historyOpen_ = false;
+        for (std::size_t li = 0; li < normalLines_.size(); ++li) {
+            const std::size_t start = lineStarts[li];
+            const std::size_t count = lineRowCounts[li];
+            const std::size_t before = static_cast<std::size_t>(
+                std::clamp(screenStart - static_cast<int>(start), 0, static_cast<int>(count)));
+            if (before == 0) continue;
+            const std::size_t prefixLength = std::min(normalLines_[li].size(), before * width);
+            history_.emplace_back(normalLines_[li].begin(),
+                                  normalLines_[li].begin() + static_cast<long>(prefixLength));
+            if (before < count) historyOpen_ = true;
+        }
+        while (history_.size() > kMaxHistory) history_.pop_front();
+        if (history_.empty()) historyOpen_ = false;
+
+        if (screenStart < static_cast<int>(rows.size())) {
+            const auto& firstVisible = rows[static_cast<std::size_t>(screenStart)];
+            normalScreenStartLine_ = firstVisible.line;
+            normalScreenStartOffset_ = firstVisible.offset;
+        } else {
+            normalScreenStartLine_ = normalLines_.size();
+            normalScreenStartOffset_ = 0;
+        }
+
+        auto mapPoint = [&](std::size_t line, std::size_t offset, bool pendingWrap,
+                            int& x, int& y) {
+            line = std::min(line, lineStarts.size() - 1);
+            offset = std::min(offset, normalLines_[line].size());
+            const bool exactBoundary = pendingWrap && offset > 0 && offset % width == 0;
+            const int row = static_cast<int>(lineStarts[line]) + static_cast<int>(
+                exactBoundary ? offset / width - 1 : offset / width);
+            x = exactBoundary ? w_ : static_cast<int>(offset % width);
+            const int screenY = row - screenStart;
+            y = std::clamp(screenY, 0, h_ - 1);
+            if (screenY < 0) x = 0;
+        };
+        mapPoint(cursorLine, cursorOffset, cursorPendingWrap, outCursorX, outCursorY);
+        mapPoint(savedLine, savedOffset, savedPendingWrap, outSavedX, outSavedY);
     }
 
     void appendRewrappedLine(const std::vector<VtCell>& line,
@@ -236,36 +373,14 @@ private:
     }
 
     // A cached row view of scrollback plus the normal grid. An open history
-    // line is joined to the grid rows that continue it before wrapping, which
-    // prevents a false line break (and lost text) at the history/grid boundary.
+    // line is rendered from the logical buffer rather than reconstructed from
+    // the current fixed-size grid.
     const std::vector<std::vector<VtCell>>& displayRows() const {
         if (!displayRowsDirty_) return displayRowsCache_;
         displayRowsCache_.clear();
-        if (grid_.size() != static_cast<std::size_t>(w_) * static_cast<std::size_t>(h_) ||
-            gridWrap_.size() != static_cast<std::size_t>(h_)) {
-            displayRowsCache_.resize(static_cast<std::size_t>(h_));
-            displayRowsDirty_ = false;
-            return displayRowsCache_;
-        }
-
-        const bool joinsHistory = !altOn_ && historyOpen_ && !history_.empty();
-        const std::size_t completeHistory = history_.size() - (joinsHistory ? 1U : 0U);
-        for (std::size_t i = 0; i < completeHistory; ++i)
-            appendRewrappedLine(history_[i], displayRowsCache_);
-
-        int row = 0;
-        if (joinsHistory) {
-            std::vector<VtCell> line = history_.back();
-            auto continuation = collectGridLine(0, row);
-            line.insert(line.end(), continuation.begin(), continuation.end());
-            appendRewrappedLine(line, displayRowsCache_);
-        }
-        while (row < h_) {
-            int nextRow = row;
-            auto line = collectGridLine(row, nextRow);
-            row = nextRow;
-            appendRewrappedLine(line, displayRowsCache_);
-        }
+        for (const auto& line : normalLines_) appendRewrappedLine(line, displayRowsCache_);
+        while (displayRowsCache_.size() < normalScreenStartRow_ + static_cast<std::size_t>(h_))
+            displayRowsCache_.emplace_back();
         displayRowsDirty_ = false;
         return displayRowsCache_;
     }
@@ -281,6 +396,14 @@ private:
         historyOpen_ = false;
         if (!history_.empty()) trimTrailingBlanks(history_.back());
         displayRowsDirty_ = true;
+    }
+
+    void eraseScrollback() {
+        if (altOn_) return;
+        history_.clear();
+        historyOpen_ = false;
+        view_ = 0;
+        syncNormalLinesFromGrid();
     }
 
     // Reflow one cell buffer from oldW×oldH to newW×newH, preserving visible
@@ -542,7 +665,12 @@ private:
                 cy_ = std::clamp(pnum(0, 1) - 1, 0, h_ - 1);
                 cx_ = std::clamp(pnum(1, 1) - 1, 0, w_ - 1);
                 break;
-            case 'J': eraseDisplay(pnum(0, 0)); break;
+            case 'J': {
+                const int mode = pnum(0, 0);
+                if (mode == 3) eraseScrollback();
+                else eraseDisplay(mode);
+                break;
+            }
             case 'K': eraseLine(pnum(0, 0)); break;
             case 'L': insertLines(n); break;
             case 'M': deleteLines(n); break;
@@ -582,7 +710,11 @@ private:
         if (on == altOn_) return;
         view_ = 0; // the alternate screen has no scrollback view
         if (on) {
+            syncNormalLinesFromGrid();
             if (saveCursor) { savedX_ = cx_; savedY_ = cy_; }
+            normalSavedLine_ = normalCursorLine_;
+            normalSavedOffset_ = normalCursorOffset_;
+            normalSavedPendingWrap_ = normalCursorPendingWrap_;
             altOn_ = true;
             clearBuf();
             cx_ = 0;
@@ -710,7 +842,11 @@ private:
             for (int y = cy_ + 1; y < h_; ++y)
                 std::fill(g.begin() + static_cast<long>(y * w_),
                           g.begin() + static_cast<long>((y + 1) * w_), c);
-            if (cy_ == 0 && cx_ == 0) closeHistoryContinuation();
+            // Linux `clear` emits CUP-to-home followed by ED 0. At the origin
+            // that erases the entire visible display, so discard saved lines
+            // as well; CSI 3 J is also handled explicitly for programs that
+            // request scrollback erasure without clearing the screen.
+            if (cy_ == 0 && cx_ == 0) eraseScrollback();
         } else if (mode == 1) {
             for (int y = 0; y < cy_; ++y)
                 std::fill(g.begin() + static_cast<long>(y * w_),
@@ -885,6 +1021,11 @@ private:
         altWrap_.assign(static_cast<std::size_t>(h_), 0);
         history_.clear();
         historyOpen_ = false;
+        normalLines_.clear();
+        normalCursorLine_ = normalSavedLine_ = 0;
+        normalCursorOffset_ = normalSavedOffset_ = 0;
+        normalScreenStartLine_ = normalScreenStartOffset_ = normalScreenStartRow_ = 0;
+        normalCursorPendingWrap_ = normalSavedPendingWrap_ = false;
         displayRowsDirty_ = true;
         view_ = 0;
     }
@@ -900,6 +1041,14 @@ private:
     // The last history line continues on the screen (its remaining rows have
     // not scrolled off yet).
     bool historyOpen_ = false;
+    // The normal screen's source of truth: one cell vector per logical line,
+    // including scrollback and lines still visible in the current grid.
+    std::vector<std::vector<VtCell>> normalLines_;
+    std::size_t normalCursorLine_ = 0, normalCursorOffset_ = 0;
+    std::size_t normalSavedLine_ = 0, normalSavedOffset_ = 0;
+    std::size_t normalScreenStartLine_ = 0, normalScreenStartOffset_ = 0;
+    std::size_t normalScreenStartRow_ = 0;
+    bool normalCursorPendingWrap_ = false, normalSavedPendingWrap_ = false;
     // Combined history + live-screen rows, joining an open history line to
     // the grid continuation before rewrapping.
     mutable std::vector<std::vector<VtCell>> displayRowsCache_;

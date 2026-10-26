@@ -34,7 +34,9 @@ public:
             return false;
         }
         if (pid_ == 0) { // child: slave is now stdin/stdout/stderr
-            ::setenv("TERM", "xterm", 1);
+            // Advertise the Linux virtual-console sequences implemented by
+            // Fenrir so utilities such as `clear` emit the right capabilities.
+            ::setenv("TERM", "linux", 1);
             const char* sh = ::getenv("SHELL");
             if (!sh || !*sh) sh = "/bin/sh";
             ::execl(sh, sh, static_cast<char*>(nullptr));
