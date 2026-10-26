@@ -206,13 +206,14 @@ TitleBarZone Window::titleBarZoneAt(int x, int y) const {
         if (menuTabIndexAt(x, y) >= 0) return TitleBarZone::MenuTab;
     }
     if (onTitleBar(x, y)) {
-        const int closeX = bounds_.x + bounds_.w - 2;
-        const int maxX = bounds_.x + bounds_.w - 3;
-        const int minX = bounds_.x + bounds_.w - 4;
         if (bounds_.w >= kMinWidth) {
-            if (x == closeX) return TitleBarZone::CloseButton;
-            if (x == maxX) return TitleBarZone::MaximizeButton;
-            if (x == minX) return TitleBarZone::MinimizeButton;
+            const int btnStart = bounds_.x + bounds_.w - 1 - kButtonsWidth;
+            const int minX0 = btnStart;
+            const int maxX0 = btnStart + 4;
+            const int closeX0 = btnStart + 8;
+            if (x >= closeX0 && x < closeX0 + 3) return TitleBarZone::CloseButton;
+            if (x >= maxX0 && x < maxX0 + 3) return TitleBarZone::MaximizeButton;
+            if (x >= minX0 && x < minX0 + 3) return TitleBarZone::MinimizeButton;
         }
         return TitleBarZone::Drag;
     }
@@ -292,9 +293,17 @@ void Window::draw(Screen& screen) {
         screen.putText(x0 + 1, y0, titleText, titleFg, titleBg, StyleBold);
 
         // [-] [+]/[=] [X] controls — hit-tested by titleBarZoneAt().
-        screen.set(x0 + w - 4, y0, Cell{'-', titleFg, titleBg, StyleBold});
-        screen.set(x0 + w - 3, y0, Cell{static_cast<char32_t>(maximized_ ? U'=' : U'+'), titleFg, titleBg, StyleBold});
-        screen.set(x0 + w - 2, y0, Cell{'X', t.closeText, t.closeBg, StyleBold});
+        // Each button is padded (" - ", " + ", " X ") with a one-cell gap and
+        // its own background color so it is easy to target with the cursor.
+        const int btnStart = x0 + w - 1 - kButtonsWidth;
+        const Color btnBg = t.buttonBg;
+        const Color btnFg = t.buttonText;
+        for (int i = 0; i < 3; ++i)
+            screen.set(btnStart + i, y0, Cell{i == 1 ? U'-' : U' ', btnFg, btnBg, StyleBold});
+        for (int i = 0; i < 3; ++i)
+            screen.set(btnStart + 4 + i, y0, Cell{i == 1 ? (maximized_ ? U'=' : U'+') : U' ', btnFg, btnBg, StyleBold});
+        for (int i = 0; i < 3; ++i)
+            screen.set(btnStart + 8 + i, y0, Cell{i == 1 ? U'X' : U' ', t.closeText, t.closeBg, StyleBold});
     }
 
     // Menu bar (row 2, ITS OWN - as in windowing systems: title / menu / content).
