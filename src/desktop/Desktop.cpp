@@ -733,11 +733,11 @@ void Desktop::activateAtCursor() {
         // (mode label not critical for hit testing; recompute right text width roughly)
         const std::string& name =
             settings::active.desktopName.empty() ? desktopName_ : settings::active.desktopName;
-        std::u32string right = modeLabel + U" | " + text::toUtf32(name);
+        std::u32string right = text::toUtf32(name) + U" | MODE: " + modeLabel;
         std::u32string notif = U" Notifications ";
         const int notifUnread = notifications::global().unreadCount();
         if (notifUnread > 0) notif = U" Notifications (" + text::toUtf32(std::to_string(notifUnread)) + U") ";
-        int notifStart = screenWidth() - static_cast<int>(right.size()) - static_cast<int>(notif.size()) - 2;
+        int notifStart = screenWidth() - static_cast<int>(notif.size()) - 1;
         int notifEnd = notifStart + static_cast<int>(notif.size());
         if (cursor_.x() < static_cast<int>(left.size())) openAppMenu();
         else if (cursor_.x() >= notifStart && cursor_.x() < notifEnd) openNotificationCenter();
@@ -1077,16 +1077,16 @@ void Desktop::drawMenuBar(Screen& screen) {
     // immediately because drawMenuBar reads the settings on each draw).
     const std::string& name =
         settings::active.desktopName.empty() ? desktopName_ : settings::active.desktopName;
-    std::u32string right = modeLabel + U" | " + text::toUtf32(name);
+    std::u32string right = text::toUtf32(name) + U" | MODE: " + modeLabel;
     std::u32string notif = U" Notifications ";
     const int notifUnread = notifications::global().unreadCount();
     if (notifUnread > 0) notif = U" Notifications (" + text::toUtf32(std::to_string(notifUnread)) + U") ";
-    int notifX = screenWidth() - static_cast<int>(right.size()) - static_cast<int>(notif.size()) - 2;
+    int notifX = screenWidth() - static_cast<int>(notif.size()) - 1;
     if (notifX > static_cast<int>(left.size()))
         screen.putText(notifX, 0, notif, t.menuBarText, t.menuBarBg, StyleBold);
 
-    int rightX = screenWidth() - static_cast<int>(right.size()) - 1;
-    if (rightX > notifX + static_cast<int>(notif.size()))
+    int rightX = notifX - static_cast<int>(right.size()) - 1;
+    if (rightX > static_cast<int>(left.size()))
         screen.putText(rightX, 0, right, t.menuBarText, t.menuBarBg, StyleBold);
 }
 
