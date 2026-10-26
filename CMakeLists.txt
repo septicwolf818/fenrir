@@ -3,6 +3,8 @@ project(fenrir LANGUAGES CXX)
 
 enable_testing()
 
+option(BUILD_TESTING "Build the test suite" OFF)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -62,26 +64,23 @@ set_target_properties(fenrir_desktop PROPERTIES OUTPUT_NAME fenrir)
 # --- tests -----------------------------------------------------------------
 # ONE test binary: the test sources are split by area (tests/test_*.cpp) and
 # the runner (tests/main.cpp) executes every suite. `make test` runs it.
-add_executable(fenrir_tests
-    tests/main.cpp
-    tests/test_vt.cpp
-    tests/test_filetree.cpp
-    tests/test_watchdog.cpp
-    tests/test_editor.cpp
-    tests/test_clipboard.cpp
-    tests/test_handbook.cpp
-    tests/test_window.cpp
-)
-target_link_libraries(fenrir_tests PRIVATE fenrir)
-add_test(NAME fenrir_tests COMMAND fenrir_tests)
+if(BUILD_TESTING)
+    add_executable(fenrir_tests
+        tests/main.cpp
+        tests/test_vt.cpp
+        tests/test_filetree.cpp
+        tests/test_watchdog.cpp
+        tests/test_editor.cpp
+        tests/test_clipboard.cpp
+        tests/test_handbook.cpp
+        tests/test_window.cpp
+    )
+    target_link_libraries(fenrir_tests PRIVATE fenrir)
+    add_test(NAME fenrir_tests COMMAND fenrir_tests)
+endif()
 
 # --- install rules ---------------------------------------------------------
+# Only the compiled binary is installed.
 install(TARGETS fenrir_desktop
     RUNTIME DESTINATION bin
-)
-install(TARGETS fenrir
-    ARCHIVE DESTINATION lib
-)
-install(DIRECTORY include/fenrir
-    DESTINATION include
 )
