@@ -7,7 +7,7 @@
 namespace fenrir {
 
 Window::Window(std::string title, Rect bounds, std::unique_ptr<Widget> content, bool hasBorder)
-    : title_(std::move(title)), bounds_(bounds), content_(std::move(content)), hasBorder_(hasBorder) {
+    : title_(std::move(title)), baseTitle_(title_), bounds_(bounds), content_(std::move(content)), hasBorder_(hasBorder) {
     // A window cannot be created smaller than what the content needs (app
     // preferredBounds are often clipped on small terminals).
     bounds_.w = std::max(bounds_.w, minWindowWidth());
