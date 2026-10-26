@@ -562,6 +562,7 @@ public:
         view->pushShortcut({true, Key::Char, U'o'}, [raw] { raw->openFile(); });
         view->pushShortcut({true, Key::Char, U's'}, [raw] { raw->save(); });
         view->pushShortcut({true, Key::Char, U'z'}, [raw] { raw->undoLast(); });
+        view->pushShortcut({false, Key::F3, std::nullopt, false}, [raw] { raw->showPalette(); });
 
         return view;
     }
