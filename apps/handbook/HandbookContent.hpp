@@ -30,7 +30,7 @@ inline Library buildLibrary() {
                       "without a graphical desktop environment, so it also runs on small machines "
                       "such as a Raspberry Pi 3.")
                 .section("Opening the handbook")
-                .text("Press F1 to open the applications menu and choose Handbook. The handbook "
+                .text("Click Applications on the top bar to open the applications menu and choose Handbook. The handbook "
                       "is an ordinary application: you can move it, resize it, and keep it open "
                       "next to your work.")
                 .section("How to read it")
@@ -51,17 +51,15 @@ inline Library buildLibrary() {
                 .steps({
                     "Start Fenrir from a text console. It takes over the terminal while it runs "
                     "and restores the terminal when it quits.",
-                    "Press F1 to open the applications menu and start an application - the Text "
+                    "Click Applications on the top bar to start an application - the Text "
                     "Editor is a good place to begin.",
-                    "Move the focused window: press F5, use the arrow keys, and press Enter or "
-                    "Esc to finish.",
+                    "Move the focused window: activate its title bar, use the arrow keys, and "
+                    "press Enter or Esc to finish.",
                     "Open a file with Ctrl+O, type something, and save it with Ctrl+S.",
                     "Switch to another window with Alt+Tab, and leave the application with F12.",
                 })
                 .section("Keys")
                 .keys({
-                    {"F1", "Applications menu"},
-                    {"F5", "Move the window"},
                     {"F12", "Leave the application"},
                     {"Alt+Tab", "Next window"},
                     {"Ctrl+O", "Open a file"},
@@ -134,13 +132,9 @@ inline Library buildLibrary() {
                 .summary("Move, resize, minimize, maximize, and close the windows.")
                 .section("Keys")
                 .keys({
-                    {"F5", "Move the window"},
-                    {"F6", "Resize the window"},
                     {"Arrows", "Move or resize, depending on the mode"},
                     {"Enter", "Keep the new position or size"},
                     {"Esc", "Finish moving or resizing"},
-                    {"F7", "Maximize / restore"},
-                    {"F8", "Minimize"},
                     {"Ctrl+W", "Close the window"},
                 })
                 .section("The title bar")
@@ -150,7 +144,7 @@ inline Library buildLibrary() {
                     "Left and Right switch between the menus while a menu is open.",
                     "The buttons on the right close, minimize, and maximize the window.",
                     "Activate the title bar to move the window; activate its border to resize it. "
-                    "F5 and F6 work on the focused window.",
+                    "The title bar buttons close, minimize, and maximize the window.",
                 })
                 .section("Unsaved changes")
                 .note("Closing a window with unsaved changes (the Text Editor, Paint) asks for "
@@ -161,11 +155,11 @@ inline Library buildLibrary() {
 
     lib.add(PageBuilder("desktop", "menubar", "Menu bar and taskbar")
                 .summary("The applications menu, the window menus, and the taskbar.")
-                .section("The menu bar (F1)")
-                .text("F1 opens the applications menu: it lists every registered application and "
+                .section("The menu bar")
+                .text("Click Applications on the top bar to open the applications menu: it lists every registered application and "
                       "Quit desktop. Choose one to start it in a new window.")
-                .section("The window menus (F2)")
-                .text("F2 opens the menu of the focused window; in the desktop mode it opens the "
+                .section("The window menus")
+                .text("Click a tab in the title bar to open a window menu; in the desktop mode it opens the "
                       "menu of the window under the cursor. Applications add their own tabs, "
                       "such as File, Edit, View, and Format, plus a Help > About entry.")
                 .section("The taskbar")
@@ -260,10 +254,6 @@ inline Library buildLibrary() {
                 .keys({
                     {"Arrows", "Move the cursor"},
                     {"Enter / Space", "Activate what is under the cursor"},
-                    {"F1", "Applications menu"},
-                    {"F2", "Menu of the window under the cursor"},
-                    {"F5 / F6", "Move / resize the focused window"},
-                    {"F7 / F8", "Maximize / minimize the focused window"},
                     {"Alt+Tab", "Next window"},
                     {"Ctrl+W", "Close the focused window"},
                     {"Ctrl+Q", "Quit Fenrir"},
@@ -292,7 +282,6 @@ inline Library buildLibrary() {
                     {"Arrows", "Move the selection"},
                     {"Enter / Space", "Activate the selected widget"},
                     {"Tab", "Next widget (in some applications: the file tree or the other panel)"},
-                    {"F2", "Menu of the application"},
                     {"Esc", "Back to the desktop"},
                 })
                 .note("In the File Manager, Tab switches between the two panels. In the Text "
@@ -312,7 +301,6 @@ inline Library buildLibrary() {
                     {"Arrows", "Move the cursor"},
                     {"Ctrl+C / Ctrl+X / Ctrl+V", "Copy / cut / paste"},
                     {"Ctrl+Space", "Text Editor: toggle selection mode"},
-                    {"F2", "Menu of the application"},
                     {"Esc", "Back to the keyboard mode of the window"},
                 })
                 .note("The Terminal application is the exception: it is always in the edit mode, "
@@ -322,11 +310,9 @@ inline Library buildLibrary() {
                 .build());
 
     lib.add(PageBuilder("modes", "window-modes", "Move and resize modes")
-                .summary("F5 and F6: placing a window by hand.")
+                .summary("Placing a window by hand.")
                 .section("Keys")
                 .keys({
-                    {"F5", "Move the focused window"},
-                    {"F6", "Resize the focused window"},
                     {"Arrows", "Move or resize by one cell"},
                     {"Enter", "Keep the new position or size"},
                     {"Esc", "Finish moving or resizing"},
@@ -492,7 +478,7 @@ inline Library buildLibrary() {
                     {"PgUp / PgDn", "Scroll the scrollback"},
                     {"Any other key", "Return to the live view"},
                     {"F12", "Back to the desktop, the shell keeps running"},
-                    {"Alt+Tab, F2, F8, Ctrl+W", "Stay Fenrir window controls"},
+                    {"Alt+Tab, Ctrl+W", "Stay Fenrir window controls"},
                 })
                 .note("Esc is sent to the shell, not to Fenrir - the shell decides what to do "
                       "with it. Use F12 to leave the Terminal. On the alternate screen (a "
@@ -573,7 +559,7 @@ inline Library buildLibrary() {
                       "use the PgUp and PgDn keys of the application (the Terminal application "
                       "uses them for its own scrollback).")
                 .section("The window is too small")
-                .text("Resize it with F6, or maximize it with F7. Every application has a "
+                .text("Resize it by activating its border, or maximize it with the title bar button. Every application has a "
                       "minimum size, so it never becomes unusable.")
                 .section("The colors look wrong")
                 .text("Try another theme in the Settings application. A text console has 16 "
