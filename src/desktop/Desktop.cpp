@@ -1190,9 +1190,17 @@ void Desktop::drawTaskBar(Screen& screen) {
             int maxChars = kTaskHandleW - 4;  // leave room for [ ] and ...
             bool hoverScroll = (idx == hoveredIdx) && static_cast<int>(latin.size()) > maxChars;
             if (hoverScroll) {
-                int maxScroll = static_cast<int>(latin.size()) - maxChars;
-                int off = taskbarHoverScroll_ % (maxScroll + 1);
-                latin = latin.substr(static_cast<std::size_t>(off), static_cast<std::size_t>(maxChars));
+                int len = static_cast<int>(latin.size());
+                int off = taskbarHoverScroll_ % len;
+                if (off + maxChars <= len) {
+                    latin = latin.substr(static_cast<std::size_t>(off), static_cast<std::size_t>(maxChars));
+                } else {
+                    // Wrap around smoothly instead of jumping.
+                    int first = len - off;
+                    std::string part = latin.substr(static_cast<std::size_t>(off));
+                    part += latin.substr(0, static_cast<std::size_t>(maxChars - first));
+                    latin = part;
+                }
             } else if (static_cast<int>(latin.size()) > maxChars) {
                 latin.resize(static_cast<std::size_t>(maxChars));
             }
