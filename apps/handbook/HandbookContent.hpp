@@ -114,6 +114,8 @@ inline Library buildLibrary() {
                     "Everything in between is the desktop area, where the windows live.",
                     "The block cursor is Fenrir's own; the terminal's cursor is hidden while "
                     "Fenrir runs.",
+                    "The window title and the taskbar handle reflect the current document, "
+                    "directory, or view.",
                     "The Notifications section of the top bar opens the notification center: a "
                     "list of notifications; Delete or Backspace dismisses the selected one.",
                 })
