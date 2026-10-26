@@ -14,6 +14,26 @@ using fenrir::test::check;
 
 
 void runTerminalTests() {
+    // Applications running inside the PTY can set the Fenrir window subtitle
+    // using the standard OSC 0/2 title sequences, terminated by BEL or ST.
+    {
+        VtScreen v;
+        v.resize(20, 3);
+        const char* iconAndTitle = "\x1b]0;Build output\x07";
+        v.feed(iconAndTitle, std::strlen(iconAndTitle));
+        check(v.hasTitleChanged(), "OSC 0 title is reported");
+        check(v.consumeTitle() == "Build output", "OSC 0 title text is preserved");
+
+        const char* windowTitle = "\x1b]2;main.cpp\x1b\\";
+        v.feed(windowTitle, std::strlen(windowTitle));
+        check(v.hasTitleChanged() && v.consumeTitle() == "main.cpp",
+              "OSC 2 title with ST is reported");
+
+        const char* clearTitle = "\x1b]2;\x07";
+        v.feed(clearTitle, std::strlen(clearTitle));
+        check(v.hasTitleChanged() && v.consumeTitle().empty(),
+              "empty OSC title clears the application subtitle");
+    }
     // Basic resize preserves content and cursor.
     {
         VtScreen v;

@@ -139,6 +139,8 @@ inline Library buildLibrary() {
                 })
                 .section("The title bar")
                 .bullets({
+                    "The application name is shown by itself unless the application provides a subtitle; "
+                    "then the title is \"App name - subtitle\".",
                     "The tabs are the menus of the application: move the cursor to one and "
                     "activate it.",
                     "Left and Right switch between the menus while a menu is open.",
@@ -333,6 +335,8 @@ inline Library buildLibrary() {
                       "the left, the text itself, and a status bar. Ctrl+B shows and hides the "
                       "tree, Ctrl+D opens a folder in it.")
                 .section("Files")
+                .text("A saved document's filename appears in the window title after the application name. "
+                      "An untitled document leaves the application name by itself.")
                 .keys({
                     {"Ctrl+N", "New tab"},
                     {"Ctrl+O", "Open a file"},
@@ -474,6 +478,9 @@ inline Library buildLibrary() {
                 .text("The Terminal application starts $SHELL (or /bin/sh) in a pseudoterminal "
                       "and forwards the keys to it. The window shows a practical VT100/xterm "
                       "subset: colors, cursor movement, and scrolling.")
+                .text("Programs that send OSC 0 or OSC 2 title sequences can update the Fenrir window "
+                      "subtitle. Fenrir accepts these sequences from the PTY; a program must emit "
+                      "them (TERM=linux does not make every program set a title automatically).")
                 .section("Keys")
                 .keys({
                     {"PgUp / PgDn", "Scroll the scrollback"},

@@ -26,6 +26,12 @@ void runWindowTests() {
     Window window("Focus test", Rect{2, 2, 20, 10}, std::make_unique<FocusColorWidget>());
     Screen screen(40, 20);
 
+    check(window.title() == "Focus test", "window defaults to app name only");
+    window.setSubtitle("doc.txt");
+    check(window.title() == "Focus test - doc.txt", "window subtitle follows app name");
+    window.setSubtitle("");
+    check(window.title() == "Focus test", "empty subtitle restores app name only");
+
     window.setFocused(true);
     window.draw(screen);
     const Cell activeContent = screen.at(5, 5);

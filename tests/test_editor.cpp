@@ -27,12 +27,18 @@ public:
     int saveFileCalls = 0;
     std::string saveFilePath;   // where the next save goes
     std::string saveFileStartDir;
+    std::string windowTitle;
+    int windowTitleCalls = 0;
 
     void openFile(const std::string&, OnPick, OnCancel) override {}
     void openFolder(const std::string&, OnPick, OnCancel) override {}
     void openAssociatedFile(const std::string&) override {}
     void openFileWith(const std::string&) override {}
     void closeWindow() override {}
+    void setWindowTitle(std::string title) override {
+        windowTitle = std::move(title);
+        ++windowTitleCalls;
+    }
 
     void notify(std::string, std::string, std::string) override {}
     notifications::Bus& notifications() override { return bus_; }
@@ -72,6 +78,25 @@ void runEditorTests() {
         std::filesystem::temp_directory_path() / "fenrir_editor_conflict";
     std::filesystem::remove_all(root);
     std::filesystem::create_directories(root);
+
+    // The view is created before its window is focused, so its initial title
+    // must be deferred until draw. Untitled tabs clear the subtitle entirely.
+    {
+        const std::filesystem::path file = root / "title.txt";
+        { std::ofstream out(file); out << "title test"; }
+        FakeContext ctx;
+        ctx.windowTitle = "Terminal"; // currently focused before the editor window exists
+        apps::TextEditorView view(ctx, file.string());
+        check(ctx.windowTitleCalls == 0, "editor defers title during construction");
+        check(ctx.windowTitle == "Terminal", "editor construction does not rename the previous window");
+        view.setBounds(Rect{0, 0, 80, 20});
+        Screen screen(80, 20);
+        view.draw(screen);
+        check(ctx.windowTitle == "title.txt", "editor sets the opened file title on first draw");
+
+        view.newFile();
+        check(ctx.windowTitle.empty(), "untitled editor tab clears its subtitle");
+    }
 
     // --- The file was changed outside the editor: a dialog asks what to do ---
     {
