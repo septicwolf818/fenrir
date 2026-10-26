@@ -323,8 +323,16 @@ private:
         }
 
         if (normalLines_.empty()) normalLines_.emplace_back();
-        const std::size_t lastAnchor = std::max(normalCursorLine_, normalSavedLine_);
-        while (normalLines_.size() > lastAnchor + 1 && normalLines_.back().empty())
+        // A saved cursor can point into the grid's unused rows (shells and
+        // full-screen programs commonly save/restore it while drawing). Those
+        // padding rows are not terminal content and must not inflate scrollback
+        // after a resize. Keep the live cursor row, but trim blank rows below it.
+        const std::size_t lastLiveLine = normalCursorLine_;
+        auto isBlankLine = [](const std::vector<VtCell>& line) {
+            return std::all_of(line.begin(), line.end(),
+                               [](const VtCell& cell) { return cell.ch == U' '; });
+        };
+        while (normalLines_.size() > lastLiveLine + 1 && isBlankLine(normalLines_.back()))
             normalLines_.pop_back();
         normalCursorLine_ = std::min(normalCursorLine_, normalLines_.size() - 1);
         normalSavedLine_ = std::min(normalSavedLine_, normalLines_.size() - 1);
