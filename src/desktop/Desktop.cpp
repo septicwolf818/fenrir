@@ -633,6 +633,11 @@ void Desktop::saveFile(const std::string& startDir, const std::string& suggested
                      std::move(onCancel));
 }
 
+void Desktop::setWindowTitle(std::string title) {
+    Window* w = wm_.focused();
+    if (w) w->setSubtitle(std::move(title));
+}
+
 void Desktop::closeWindow() {
     // File > Exit in apps: the same dirty-guard as Ctrl+W (a dirty window
     // asks for confirmation; the close itself is always deferred past the
@@ -1153,6 +1158,25 @@ void Desktop::drawTaskBar(Screen& screen) {
         int visibleStart = taskbarScroll_;
         int visibleEnd   = std::min(visibleStart + maxVisible, totalHandles);
 
+        // Hovered handle (desktop mode only) scrolls its (possibly long) title.
+        int hoveredIdx = -1;
+        if (mode_ == CursorMode::Desktop && cursor_.y() == screenHeight() - 1) {
+            int hx = cursor_.x() - leftArrowWidth;
+            if (hx >= 0) {
+                int hi = taskbarScroll_ + (hx / kTaskHandleW);
+                if (hi >= visibleStart && hi < visibleEnd) hoveredIdx = hi;
+            }
+        }
+        if (hoveredIdx != taskbarHoverIdx_) {
+            taskbarHoverIdx_ = hoveredIdx;
+            taskbarHoverScroll_ = 0;
+            taskbarHoverTick_ = 0;
+        }
+        if (hoveredIdx >= 0) {
+            ++taskbarHoverTick_;
+            if (taskbarHoverTick_ % 3 == 0) ++taskbarHoverScroll_;
+        }
+
         for (int idx = visibleStart; idx < visibleEnd; ++idx) {
             Window* w = wins[static_cast<std::size_t>(idx)].get();
             bool isMinimized = w->minimized();
@@ -1164,7 +1188,12 @@ void Desktop::drawTaskBar(Screen& screen) {
             // Build title label with ASCII-only [ ] brackets and ... for truncation
             std::string latin(w->title());
             int maxChars = kTaskHandleW - 4;  // leave room for [ ] and ...
-            if (static_cast<int>(latin.size()) > maxChars) {
+            bool hoverScroll = (idx == hoveredIdx) && static_cast<int>(latin.size()) > maxChars;
+            if (hoverScroll) {
+                int maxScroll = static_cast<int>(latin.size()) - maxChars;
+                int off = taskbarHoverScroll_ % (maxScroll + 1);
+                latin = latin.substr(static_cast<std::size_t>(off), static_cast<std::size_t>(maxChars));
+            } else if (static_cast<int>(latin.size()) > maxChars) {
                 latin.resize(static_cast<std::size_t>(maxChars));
             }
             std::string label = "[" + latin + "]";

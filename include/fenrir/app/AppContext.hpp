@@ -66,6 +66,10 @@ public:
     // for confirmation first, exactly like Ctrl+W.
     virtual void closeWindow() = 0;
 
+    // Sets a subtitle for the focused window's title bar/taskbar handle.
+    // The app name stays first: "App name - <title>".
+    virtual void setWindowTitle(std::string /*title*/) {}
+
     // --- Asynchronous data sources (e.g. a terminal PTY) --------------------
     // Registers an fd polled once per tick (non-blocking). onReady is called
     // when it is readable, or writable while wantsWrite() returns true. The

@@ -64,6 +64,7 @@ public:
     void openDialog(std::u32string title, std::unique_ptr<Dialog> content,
                     OnDialogResult onResult) override;
     void closeWindow() override;
+    void setWindowTitle(std::string title) override;
     void notify(std::string source, std::string title, std::string body = {}) override;
     notifications::Bus& notifications() override;
     void registerBackgroundWorker(std::string name, AppContext::BackgroundTick tick) override;
@@ -134,6 +135,9 @@ private:
     };
     std::vector<BackgroundWorker> backgroundWorkers_;
     bool missedNotificationsShown_ = false;
+    int taskbarHoverIdx_ = -1;
+    int taskbarHoverScroll_ = 0;
+    int taskbarHoverTick_ = 0;
     std::chrono::steady_clock::time_point lastCursorMove_{};
     std::chrono::steady_clock::time_point cursorMoveStart_{};
     int cursorMoveStreak_ = 0;

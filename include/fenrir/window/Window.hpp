@@ -19,7 +19,12 @@ public:
     Window(std::string title, Rect bounds, std::unique_ptr<Widget> content, bool hasBorder = true);
 
     const std::string& title() const { return title_; }
-    void setTitle(std::string t) { title_ = std::move(t); }
+    const std::string& baseTitle() const { return baseTitle_; }
+    void setTitle(std::string t) { title_ = std::move(t); baseTitle_ = title_; }
+    void setSubtitle(std::string subtitle) {
+        if (subtitle.empty()) title_ = baseTitle_;
+        else title_ = baseTitle_ + " - " + subtitle;
+    }
 
     const Rect& bounds() const { return bounds_; }
     void moveBy(int dx, int dy);
@@ -78,6 +83,7 @@ public:
 
 private:
     std::string title_;
+    std::string baseTitle_;
     Rect bounds_;
     Rect restoreBounds_{};
     std::unique_ptr<Widget> content_;
