@@ -734,9 +734,9 @@ void Desktop::activateAtCursor() {
         const std::string& name =
             settings::active.desktopName.empty() ? desktopName_ : settings::active.desktopName;
         std::u32string right = text::toUtf32(name) + U" | MODE: " + modeLabel;
-        std::u32string notif = U" Notifications ";
+        std::u32string notif = U" | Notifications ";
         const int notifUnread = notifications::global().unreadCount();
-        if (notifUnread > 0) notif = U" Notifications (" + text::toUtf32(std::to_string(notifUnread)) + U") ";
+        if (notifUnread > 0) notif = U" | Notifications (" + text::toUtf32(std::to_string(notifUnread)) + U") ";
         int notifStart = screenWidth() - static_cast<int>(notif.size()) - 1;
         int notifEnd = notifStart + static_cast<int>(notif.size());
         if (cursor_.x() < static_cast<int>(left.size())) openAppMenu();
@@ -1078,9 +1078,9 @@ void Desktop::drawMenuBar(Screen& screen) {
     const std::string& name =
         settings::active.desktopName.empty() ? desktopName_ : settings::active.desktopName;
     std::u32string right = text::toUtf32(name) + U" | MODE: " + modeLabel;
-    std::u32string notif = U" Notifications ";
+    std::u32string notif = U" | Notifications ";
     const int notifUnread = notifications::global().unreadCount();
-    if (notifUnread > 0) notif = U" Notifications (" + text::toUtf32(std::to_string(notifUnread)) + U") ";
+    if (notifUnread > 0) notif = U" | Notifications (" + text::toUtf32(std::to_string(notifUnread)) + U") ";
     int notifX = screenWidth() - static_cast<int>(notif.size()) - 1;
     if (notifX > static_cast<int>(left.size()))
         screen.putText(notifX, 0, notif, t.menuBarText, t.menuBarBg, StyleBold);
