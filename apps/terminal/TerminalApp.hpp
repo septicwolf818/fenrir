@@ -18,7 +18,6 @@
 #include <deque>
 #include <fcntl.h>
 #include <string>
-#include <string_view>
 #include <sys/ioctl.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -40,37 +39,6 @@
 #include "fenrir/widgets/Widget.hpp"
 
 namespace fenrir::apps {
-
-// Shell prompt hooks commonly set the terminal title to the working directory.
-// Keep the default home-directory prompt from becoming a window subtitle while
-// still allowing applications to publish meaningful OSC titles.
-inline bool isDefaultShellDirectoryTitle(std::string_view title, std::string_view home) {
-    auto trim = [](std::string_view value) {
-        while (!value.empty() && (value.front() == ' ' || value.front() == '\t'))
-            value.remove_prefix(1);
-        while (!value.empty() && (value.back() == ' ' || value.back() == '\t'))
-            value.remove_suffix(1);
-        return value;
-    };
-    auto normalizePath = [&](std::string_view value) {
-        value = trim(value);
-        while (value.size() > 1 && value.back() == '/') value.remove_suffix(1);
-        return value;
-    };
-
-    title = trim(title);
-    home = normalizePath(home);
-    auto isHome = [&](std::string_view value) {
-        value = normalizePath(value);
-        return value == "~" || (!home.empty() && value == home);
-    };
-    if (isHome(title)) return true;
-
-    // Common shell title formats include "user@host:~" and
-    // "user@host: /home/user".
-    const std::size_t separator = title.rfind(':');
-    return separator != std::string_view::npos && isHome(title.substr(separator + 1));
-}
 
 // --- Translate keys to xterm sequences --------------------------------------
 
@@ -167,10 +135,16 @@ public:
         }
         pump();
         if (vt_.hasTitleChanged()) {
+            const bool fromApplication = vt_.titleFromApplication();
             std::string title = vt_.consumeTitle();
-            const char* home = std::getenv("HOME");
-            if (isDefaultShellDirectoryTitle(title, home ? home : "")) title.clear();
-            ctx_.setWindowTitle(std::move(title));
+            if (fromApplication) {
+                applicationTitleActive_ = !title.empty();
+                ctx_.setWindowTitle(std::move(title));
+            }
+        }
+        if (applicationTitleResetPending_) {
+            ctx_.setWindowTitle("");
+            applicationTitleResetPending_ = false;
         }
         for (int y = 0; y < bounds_.h; ++y) {
             for (int x = 0; x < bounds_.w; ++x) {
@@ -235,6 +209,10 @@ private:
 
     void pump() {
         if (pty_.fd() < 0) return;
+        if (applicationTitleActive_ && !pty_.foregroundProcessIsChild()) {
+            applicationTitleActive_ = false;
+            applicationTitleResetPending_ = true;
+        }
         pty_.flushOut();
         char buf[4096];
         bool consumedOutput = false;
@@ -242,7 +220,7 @@ private:
             const long n = pty_.readSome(buf, sizeof(buf));
             if (n > 0) {
                 consumedOutput = true;
-                vt_.feed(buf, static_cast<std::size_t>(n));
+                vt_.feed(buf, static_cast<std::size_t>(n), pty_.foregroundProcessIsChild());
                 continue;
             }
             if (n == 0) {
@@ -276,6 +254,8 @@ private:
     VtScreen vt_;
     bool spawned_ = false;
     bool exited_ = false;
+    bool applicationTitleActive_ = false;
+    bool applicationTitleResetPending_ = false;
     int exitCode_ = 0;
     std::string failMsg_;
 };

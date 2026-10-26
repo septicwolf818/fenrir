@@ -56,6 +56,7 @@ public:
     void finishOutputBatch() { preserveViewOnOutput_ = false; }
 
     bool hasTitleChanged() const { return titleChanged_; }
+    bool titleFromApplication() const { return titleFromApplication_; }
     std::string consumeTitle() {
         titleChanged_ = false;
         return std::move(title_);
@@ -156,7 +157,8 @@ public:
         return b[idx];
     }
 
-    void feed(const char* data, std::size_t n) {
+    void feed(const char* data, std::size_t n, bool fromApplication = false) {
+        feedFromApplication_ = fromApplication;
         const bool keepView = n > 0 && preserveViewOnOutput_ && !altOn_ && view_ > 0;
         LogicalPoint viewAnchor{};
         if (keepView) {
@@ -198,12 +200,14 @@ public:
                 view_ = std::clamp(offset, 0, static_cast<int>(historyRowCount()));
             }
         }
+        feedFromApplication_ = false;
     }
 
 private:
     void finishOsc() {
         if (oscBuf_.size() >= 2 && (oscBuf_[0] == '0' || oscBuf_[0] == '2') && oscBuf_[1] == ';') {
             title_ = oscBuf_.substr(2);
+            titleFromApplication_ = oscFromApplication_;
             titleChanged_ = true;
         }
         oscBuf_.clear();
@@ -719,7 +723,7 @@ private:
         state_ = St::Ground;
         switch (b) {
             case '[': params_.clear(); param_ = 0; hasParam_ = false; priv_ = false; state_ = St::Csi; break;
-            case ']': state_ = St::Osc; break;
+            case ']': oscFromApplication_ = feedFromApplication_; state_ = St::Osc; break;
             case '(': case ')': case '*': case '+': state_ = St::Charset; break;
             case '7': savedX_ = cx_; savedY_ = cy_; break; // DECSC
             case '8':
@@ -1192,6 +1196,9 @@ private:
     std::string oscBuf_;
     std::string title_;
     bool titleChanged_ = false;
+    bool titleFromApplication_ = false;
+    bool feedFromApplication_ = false;
+    bool oscFromApplication_ = false;
     std::vector<int> params_;
     int param_ = 0;
     bool hasParam_ = false;
