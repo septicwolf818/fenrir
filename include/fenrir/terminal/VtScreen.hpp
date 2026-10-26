@@ -862,7 +862,6 @@ private:
                     autoWrap_ = on;
                     if (!on) {
                         auto& grid = buf();
-                        auto& rowWraps = wraps();
                         for (int y = 0; y < h_; ++y) {
                             const std::size_t base = static_cast<std::size_t>(y) *
                                                      static_cast<std::size_t>(w_);
@@ -872,7 +871,6 @@ private:
                                 first, last, [](const VtCell& cell) { return cell.ch != U' '; });
                             if (!hasContent) continue;
                             for (auto cell = first; cell != last; ++cell) cell->fixedRow = true;
-                            rowWraps[static_cast<std::size_t>(y)] = 0;
                         }
                     }
                     break; // DECAWM — automatic right-margin wrap

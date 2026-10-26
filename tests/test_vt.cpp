@@ -506,28 +506,51 @@ void runTerminalTests() {
     {
         VtScreen v;
         v.resize(80, 4);
+        v.feed("top\r\nmiddle\r\n", 13);
         const std::string logoRow = " ,$$P'               `$$$.";
         v.feed(logoRow.data(), logoRow.size());
-        v.feed("\r\n\x1b[?7l\x1b[31C", 12);
+        v.feed("\x1b[1G\x1b[2A", 8); // Return to the first cursor-addressed row.
+        v.feed("\x1b[?7l\x1b[31C", 10);
         const char* diskField =
             "\x1b[m\x1b[1m\x1b[31mDisk (\x1b]8;;file:///\x1b\\/"
             "\x1b]8;;\x1b\\)\x1b[m: \x1b[m29.83 GiB / 58.37 GiB ("
             "\x1b[93m51%\x1b[m) - overlay";
         v.feed(diskField, std::strlen(diskField));
-        v.feed("\r\nNEXT\x1b[?7h", 11);
+        v.feed("\x1b[?7h", 5);
 
-        check(v.at(21, 0).ch == U'`' && v.at(25, 0).ch == U'.',
+        check(v.at(21, 2).ch == U'`' && v.at(25, 2).ch == U'.',
               "cursor-addressed characters remain on the logo row");
-        check(v.at(0, 2).ch == U'N' && v.at(0, 3).ch == U' ',
-              "overlong field does not push the following row down");
+        check(v.at(0, 0).ch == U't' && v.at(0, 1).ch == U'm' &&
+                  v.at(1, 2).ch == U',',
+              "cursor-positioned rows are intact before resize");
 
         v.resize(40, 4);
-        check(v.at(0, 2).ch == U'N' && v.at(0, 3).ch == U' ',
-              "fixed cursor-positioned row stays put after mode reset");
+        check(v.at(0, 0).ch == U't' && v.at(0, 1).ch == U'm' &&
+                  v.at(1, 2).ch == U',',
+              "fixed rows do not reflow after mode reset");
         v.resize(80, 4);
-        check(v.at(21, 0).ch == U'`' && v.at(25, 0).ch == U'.' &&
-                  v.at(0, 2).ch == U'N',
+        check(v.at(21, 2).ch == U'`' && v.at(25, 2).ch == U'.' &&
+                  v.at(0, 0).ch == U't' && v.at(0, 1).ch == U'm' &&
+                  v.at(1, 2).ch == U',',
               "cursor-positioned characters survive horizontal resize");
+    }
+    // Switching autowrap off after a line has already soft-wrapped must not
+    // erase the continuation marker; a later wider resize can then rejoin it.
+    {
+        VtScreen v;
+        v.resize(32, 6);
+        const std::string longRow = "    ,g$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$P.";
+        v.feed(longRow.data(), longRow.size());
+        v.feed("\r\nNEXT", 6);
+        check(v.at(0, 2).ch == U'N', "narrow output wraps the long row before resize");
+
+        v.feed("\x1b[1G\x1b[2A\x1b[?7l", 13);
+        v.resize(64, 6);
+        check(v.at(4, 0).ch == U',' && v.at(5, 0).ch == U'g' &&
+                  v.at(37, 0).ch == U'.',
+              "soft-wrapped row rejoins when the width grows");
+        check(v.at(0, 1).ch == U'N',
+              "following row is not displaced by a lost wrap marker");
     }
     // CSI 3 J removes saved scrollback without erasing the visible screen.
     // The Linux `clear` sequence (CUP home followed by ED 0) clears both.
