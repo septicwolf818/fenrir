@@ -5,6 +5,7 @@
 #include <string>
 #include <utility>
 
+#include "fenrir/core/Notifications.hpp"
 #include "fenrir/widgets/Dialog.hpp"
 
 namespace fenrir {
@@ -42,6 +43,18 @@ public:
     virtual void openAssociatedFile(const std::string& path) = 0;
     // Choose an app for this file and save that choice as the extension default.
     virtual void openFileWith(const std::string& path) = 0;
+
+    // --- Notifications / background work ----------------------------------
+    // Push a notification to the global bus (subject to the Settings toggle).
+    virtual void notify(std::string source, std::string title, std::string body = {}) = 0;
+    virtual notifications::Bus& notifications() = 0;
+
+    // Register a per-app background worker ticked once per frame by the Desktop,
+    // even when the app has no open window. `name` should be stable and unique.
+    using BackgroundTick = std::function<void(AppContext&)>;
+    virtual void registerBackgroundWorker(std::string name, BackgroundTick tick) = 0;
+    virtual void unregisterBackgroundWorker(const std::string& name) = 0;
+    virtual std::vector<std::string> backgroundWorkers() const = 0;
 
     // Opens a dialog window with a Dialog widget (message / confirmation /
     // prompt). The framework sizes the window, closes it once a result

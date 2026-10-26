@@ -53,6 +53,11 @@ std::string base64Encode(const std::string& data) {
 }
 
 void setText(const std::string& utf8) {
+    // Avoid rewriting the clipboard file when the content is unchanged.
+    if (text() == utf8) {
+        if (g_terminalSink) g_terminalSink(utf8);
+        return;
+    }
     std::error_code ec;
     const std::filesystem::path path(clipboardPath());
     std::filesystem::create_directories(path.parent_path(), ec);

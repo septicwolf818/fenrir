@@ -8,6 +8,7 @@
 #include "fenrir/app/AppRegistry.hpp"
 #include "fenrir/app/FileAssociationRegistry.hpp"
 #include "fenrir/core/Clipboard.hpp"
+#include "fenrir/core/Notifications.hpp"
 #include "fenrir/core/Screen.hpp"
 #include "fenrir/cursor/Cursor.hpp"
 #include "fenrir/input/KeyParser.hpp"
@@ -63,6 +64,11 @@ public:
     void openDialog(std::u32string title, std::unique_ptr<Dialog> content,
                     OnDialogResult onResult) override;
     void closeWindow() override;
+    void notify(std::string source, std::string title, std::string body = {}) override;
+    notifications::Bus& notifications() override;
+    void registerBackgroundWorker(std::string name, AppContext::BackgroundTick tick) override;
+    void unregisterBackgroundWorker(const std::string& name) override;
+    std::vector<std::string> backgroundWorkers() const override;
     // Asynchronous sources (e.g. the terminal PTY) — polled in tickOnce.
     void addFdSource(int fd, std::function<void()> onReady,
                      std::function<bool()> wantsWrite = {}) override;
@@ -122,6 +128,14 @@ private:
     // the input polling interval so child output appears smoothly.
     std::vector<FdSource> fdSources_;
 
+    struct BackgroundWorker {
+        std::string name;
+        AppContext::BackgroundTick tick;
+    };
+    std::vector<BackgroundWorker> backgroundWorkers_;
+    bool missedNotificationsShown_ = false;
+    std::chrono::steady_clock::time_point lastSave_{};
+
     void handleKey(const KeyEvent& ev);          // wrapper: dispatch + flush of pending closes
     void handleKeyEvent(const KeyEvent& ev);     // actual key handling
     void flushPendingCloses();
@@ -136,6 +150,9 @@ private:
 
     void openAppMenu();
     void closeAppMenu();
+    void performShutdown();
+    void openNotificationCenter();
+    void openBackgroundTasks();
     // Per-application menu: opens (or switches to) the dropdown for tab
     // `tab` under the window's title bar. Tab = index into content->menuTabs().
     void openWinMenu(Window& w, int tab);

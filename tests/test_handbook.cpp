@@ -32,6 +32,14 @@ public:
     void openAssociatedFile(const std::string&) override {}
     void openFileWith(const std::string&) override {}
     void closeWindow() override {}
+
+    void notify(std::string, std::string, std::string) override {}
+    notifications::Bus& notifications() override { return bus_; }
+    void registerBackgroundWorker(std::string, AppContext::BackgroundTick) override {}
+    void unregisterBackgroundWorker(const std::string&) override {}
+    std::vector<std::string> backgroundWorkers() const override { return {}; }
+
+    notifications::Bus bus_;
     void saveFile(const std::string&, const std::string&, OnPick, OnCancel) override {}
 
     void openDialog(std::u32string title, std::unique_ptr<Dialog> content,

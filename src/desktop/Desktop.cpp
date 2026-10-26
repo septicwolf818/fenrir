@@ -6,6 +6,8 @@
 #include <ctime>
 #include <cstdio>
 #include <poll.h>
+#include <signal.h>
+#include <atomic>
 #include <string>
 
 #include "fenrir/core/FileSystem.hpp"
@@ -13,6 +15,11 @@
 #include "fenrir/core/Text.hpp"
 #include "fenrir/core/Theme.hpp"
 #include "fenrir/window/Window.hpp"
+
+namespace {
+std::atomic<bool> g_shutdownRequested{false};
+extern "C" void fenrirSignalHandler(int) { g_shutdownRequested.store(true); }
+} // namespace
 
 namespace fenrir {
 
@@ -172,8 +179,15 @@ void Desktop::openAppMenu() {
     closeWinMenu(); // the app dropdown and the desktop menu are never open at the same time
     appMenuClosePending_ = false; // clear stale flags from the previous close (e.g. after launching an app)
 
+    // Applications are listed alphabetically by name, not in registration order.
+    std::vector<App*> ordered;
+    for (auto& a : registry_.apps()) ordered.push_back(a.get());
+    std::sort(ordered.begin(), ordered.end(), [](const App* a, const App* b) {
+        return a->name() < b->name();
+    });
+
     std::vector<std::u32string> items;
-    for (auto& a : registry_.apps()) {
+    for (auto* a : ordered) {
         std::string n = a->name();
         items.emplace_back(n.begin(), n.end());
     }
@@ -188,11 +202,10 @@ void Desktop::openAppMenu() {
     raw->setBounds(Rect{appMenuBounds_.x + 1, appMenuBounds_.y + 1, appMenuBounds_.w - 2, appMenuBounds_.h - 2});
     appMenu_ = std::move(menu);
 
-    raw->onSelect = [this](int index) {
-        auto& list = registry_.apps();
-        if (index >= 0 && static_cast<std::size_t>(index) < list.size()) {
-            launchApp(*list[static_cast<std::size_t>(index)]);
-        } else {
+    raw->onSelect = [this, ordered](int index) {
+        if (index >= 0 && static_cast<std::size_t>(index) < ordered.size()) {
+            launchApp(*ordered[static_cast<std::size_t>(index)]);
+        } else if (index == static_cast<int>(ordered.size())) {
             quit();
         }
         // Close AFTER returning from the callback — reset() destroys the Menu, so we
@@ -204,6 +217,49 @@ void Desktop::openAppMenu() {
 void Desktop::closeAppMenu() {
     appMenu_.reset();
     appMenuClosePending_ = false; // a stale flag after closing would close the next menu on the first key press
+}
+
+void Desktop::performShutdown() {
+    settings::save();
+    notifications::global().save();
+    lastSave_ = std::chrono::steady_clock::now();
+}
+
+void Desktop::openNotificationCenter() {
+    auto& bus = notifications::global();
+    std::u32string text;
+    if (bus.items().empty()) {
+        text = U"No notifications.";
+    } else {
+        for (const auto& n : bus.items()) {
+            text += (n.read ? U"  " : U"* ");
+            text += text::toUtf32(n.source.empty() ? std::string("app") : n.source);
+            text += U": ";
+            text += text::toUtf32(n.title);
+            if (!n.body.empty()) {
+                text += U"\n    ";
+                text += text::toUtf32(n.body);
+            }
+            text += U"\n";
+        }
+    }
+    bus.markAllRead();
+    showMessage(std::move(text));
+}
+
+void Desktop::openBackgroundTasks() {
+    std::u32string text;
+    const auto names = backgroundWorkers();
+    if (names.empty()) {
+        text = U"No background tasks running.";
+    } else {
+        for (const auto& n : names) {
+            text += U"* ";
+            text += text::toUtf32(n);
+            text += U"\n";
+        }
+    }
+    showMessage(std::move(text));
 }
 
 // --- Per-application menu (dropdown under the window's title bar) -------------------
@@ -536,6 +592,33 @@ void Desktop::closeWindow() {
     closeWithConfirm(*this, w, [this, w] { closePending_.push_back(w); });
 }
 
+void Desktop::notify(std::string source, std::string title, std::string body) {
+    if (!settings::active.appNotifications) return;
+    notifications::global().push(std::move(source), std::move(title), std::move(body));
+}
+
+notifications::Bus& Desktop::notifications() {
+    return notifications::global();
+}
+
+void Desktop::registerBackgroundWorker(std::string name, AppContext::BackgroundTick tick) {
+    if (!tick) return;
+    for (auto& w : backgroundWorkers_) {
+        if (w.name == name) { w.tick = std::move(tick); return; }
+    }
+    backgroundWorkers_.push_back({std::move(name), std::move(tick)});
+}
+
+void Desktop::unregisterBackgroundWorker(const std::string& name) {
+    std::erase_if(backgroundWorkers_, [&name](const BackgroundWorker& w) { return w.name == name; });
+}
+
+std::vector<std::string> Desktop::backgroundWorkers() const {
+    std::vector<std::string> out;
+    for (const auto& w : backgroundWorkers_) out.push_back(w.name);
+    return out;
+}
+
 void Desktop::openDialog(std::u32string title, std::unique_ptr<Dialog> content, OnDialogResult onResult) {
     Window* requester = wm_.focused();
     Dialog* raw = content.get();
@@ -675,7 +758,12 @@ void Desktop::handleKeyEvent(const KeyEvent& ev) {
     // Ctrl+Q ALWAYS works, regardless of cursor/menu mode — it is the emergency
     // exit. Without it, the user could get stuck in WindowMove mode, for example,
     // with no way to leave the application.
-    if (ev.ctrl && ev.key == Key::Char && ev.character == U'q') { quit(); return; }
+    if (ev.ctrl && ev.key == Key::Char && ev.character == U'q') {
+        confirm(U"Quit Fenrir?", [this](bool ok) {
+            if (ok) { performShutdown(); quit(); }
+        });
+        return;
+    }
 
     // F12 is the non-destructive escape hatch from apps that consume Esc (most
     // importantly a nested Fenrir inside the Terminal). Leave the current mode,
@@ -722,6 +810,8 @@ void Desktop::handleKeyEvent(const KeyEvent& ev) {
     // sequence do not switch windows either).
     if (ev.key == Key::Tab && ev.alt) { wm_.focusNext(); return; }
     if (ev.key == Key::F1) { openAppMenu(); return; }
+    if (ev.key == Key::F9) { openNotificationCenter(); return; }
+    if (ev.key == Key::F10) { openBackgroundTasks(); return; }
     if (ev.ctrl && ev.key == Key::Char && ev.character == U'w') {
         // Guard: a dirty window (Widget::dirty) prompts for confirmation before closing.
         Window* w = wm_.focused();
@@ -953,6 +1043,10 @@ void Desktop::drawMenuBar(Screen& screen) {
     const std::string& name =
         settings::active.desktopName.empty() ? desktopName_ : settings::active.desktopName;
     std::u32string right = modeLabel + U" | " + text::toUtf32(name);
+    const int unread = notifications::global().unreadCount();
+    if (unread > 0) right = text::toUtf32(std::to_string(unread)) + U" notif | " + right;
+    if (!backgroundWorkers().empty())
+        right = text::toUtf32(std::to_string(backgroundWorkers().size())) + U" bg | " + right;
     int rightX = screen.width() - static_cast<int>(right.size()) - 1;
     if (rightX > static_cast<int>(left.size()))
         screen.putText(rightX, 0, right, t.menuBarText, t.menuBarBg, StyleBold);
@@ -1073,10 +1167,30 @@ void Desktop::removeFdSource(int fd) {
 }
 
 void Desktop::tickOnce() {
+    if (g_shutdownRequested.load()) {
+        g_shutdownRequested.store(false);
+        performShutdown();
+        running_ = false;
+        return;
+    }
+
+    const auto saveNow = std::chrono::steady_clock::now();
+    if (lastSave_ == std::chrono::steady_clock::time_point{} ||
+        saveNow - lastSave_ >= std::chrono::seconds(30)) {
+        performShutdown();
+    }
+
     // Asynchronous sources (AppContext::addFdSource, e.g. terminal PTY):
     // poll without blocking. A callback may read data and remove its source,
     // so iterate over a copy of the vector.
     auto sources = fdSources_;
+
+    // Background workers (registered by apps) run every frame, even when the
+    // app has no open window — e.g. calendar event notifications.
+    auto workers = backgroundWorkers_;
+    for (auto& w : workers) {
+        if (w.tick) w.tick(*this);
+    }
     for (const auto& source : sources) {
         short events = POLLIN;
         if (source.wantsWrite && source.wantsWrite()) events |= POLLOUT;
@@ -1166,8 +1280,20 @@ void Desktop::tickOnce() {
 }
 
 int Desktop::run() {
+    ::signal(SIGINT, fenrirSignalHandler);
+    ::signal(SIGTERM, fenrirSignalHandler);
+    ::signal(SIGHUP, fenrirSignalHandler);
+
+    notifications::global().load();
+    for (auto& a : registry_.apps()) a->onStartup(*this);
+    if (notifications::global().unreadCount() > 0) {
+        missedNotificationsShown_ = true;
+        openNotificationCenter();
+    }
+    lastSave_ = std::chrono::steady_clock::now();
     renderer_.forceFullRedraw();
     while (running_) tickOnce();
+    performShutdown();
     return 0;
 }
 

@@ -15,11 +15,14 @@ struct Settings {
     bool taskbarSeconds = false;   // taskbar clock shows seconds
     std::string desktopName = "Fenrir"; // name in the menu bar (right side)
     bool cursorBlink = true;       // blinking GUI cursor
+    bool appNotifications = true;  // allow apps to push notifications
     wallpaper::Wallpaper wallpaper; // desktop background (color or glyph pattern)
 };
 
 // Active settings (loaded once by Desktop at startup).
 inline Settings active{};
+// True when in-memory settings differ from the last saved file.
+inline bool dirty = false;
 
 // Path to the settings file: $HOME/.config/fenrir/settings.ini
 std::string path();
@@ -30,6 +33,10 @@ std::string path();
 void load();
 
 // Saves the current settings to the file (creating parent directories).
+// save() is a no-op when nothing has changed since the last save.
 void save();
+void markDirty();
+bool isDirty();
+void saveIfDirty();
 
 } // namespace fenrir::settings

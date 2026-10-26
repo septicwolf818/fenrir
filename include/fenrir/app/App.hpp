@@ -37,6 +37,10 @@ public:
     // Creates a view for a selected file, or nullptr when this app has no file view.
     virtual std::unique_ptr<Widget> createFileView(AppContext&, const std::string&) { return nullptr; }
 
+    // Called once when Fenrir starts (after settings load). Apps may use this
+    // to emit notifications or register background workers.
+    virtual void onStartup(AppContext& ctx) { (void)ctx; }
+
     // Preferred starting size/position of the window relative to the desktop area.
     virtual Rect preferredBounds(const Rect& desktopArea) const {
         int w = std::min(60, std::max(20, desktopArea.w - 4));
