@@ -14,25 +14,39 @@ using fenrir::test::check;
 
 
 void runTerminalTests() {
-    // Applications running inside the PTY can set the Fenrir window subtitle
-    // using the standard OSC 0/2 title sequences, terminated by BEL or ST.
+    // OSC title strings from the shell are distinguishable from foreground
+    // applications using the PTY process-group attribution.
     {
         VtScreen v;
         v.resize(20, 3);
+        const char* shellTitle = "\x1b]0;/home/alex\x07";
+        v.feed(shellTitle, std::strlen(shellTitle));
+        check(v.hasTitleChanged() && !v.titleFromApplication(),
+              "shell prompt title is attributed to the shell");
+        v.consumeTitle();
+
+        // Applications running inside the PTY can set the Fenrir window
+        // subtitle using OSC 0/2, terminated by BEL or ST.
         const char* iconAndTitle = "\x1b]0;Build output\x07";
-        v.feed(iconAndTitle, std::strlen(iconAndTitle));
-        check(v.hasTitleChanged(), "OSC 0 title is reported");
+        v.feed(iconAndTitle, std::strlen(iconAndTitle), true);
+        check(v.hasTitleChanged() && v.titleFromApplication(), "OSC 0 application title is reported");
         check(v.consumeTitle() == "Build output", "OSC 0 title text is preserved");
 
         const char* windowTitle = "\x1b]2;main.cpp\x1b\\";
-        v.feed(windowTitle, std::strlen(windowTitle));
-        check(v.hasTitleChanged() && v.consumeTitle() == "main.cpp",
+        v.feed(windowTitle, std::strlen(windowTitle), true);
+        check(v.hasTitleChanged() && v.titleFromApplication() &&
+                  v.consumeTitle() == "main.cpp",
               "OSC 2 title with ST is reported");
 
         const char* clearTitle = "\x1b]2;\x07";
-        v.feed(clearTitle, std::strlen(clearTitle));
-        check(v.hasTitleChanged() && v.consumeTitle().empty(),
+        v.feed(clearTitle, std::strlen(clearTitle), true);
+        check(v.hasTitleChanged() && v.titleFromApplication() && v.consumeTitle().empty(),
               "empty OSC title clears the application subtitle");
+
+        v.feed("\x1b]2;", 4, true);
+        v.feed("split app title\x07", 16, false);
+        check(v.hasTitleChanged() && v.titleFromApplication(),
+              "title source remains attributed across PTY read chunks");
     }
     // Basic resize preserves content and cursor.
     {
@@ -623,6 +637,27 @@ void runTerminalTests() {
         check(waitFor("linux\r\n"), "pty advertises the Linux terminal type");
         pty.writeBytes("stty size\n");
         check(waitFor("5 20\r\n"), "initial child PTY size");
+
+        pty.writeBytes("sleep 0.3\n");
+        bool sawForegroundChild = false;
+        for (int i = 0; i < 100 && !sawForegroundChild; ++i) {
+            sawForegroundChild = pty.foregroundProcessIsChild();
+            if (!sawForegroundChild) {
+                const struct timespec ts{0, 5000000};
+                nanosleep(&ts, nullptr);
+            }
+        }
+        check(sawForegroundChild, "foreground child process is distinguishable from shell");
+        bool returnedToShell = false;
+        for (int i = 0; i < 100 && !returnedToShell; ++i) {
+            returnedToShell = !pty.foregroundProcessIsChild();
+            if (!returnedToShell) {
+                const struct timespec ts{0, 10000000};
+                nanosleep(&ts, nullptr);
+            }
+        }
+        check(returnedToShell, "foreground process attribution returns to the shell");
+
         pty.resize(10, 3);
         pty.writeBytes("stty size\n");
         check(waitFor("3 10\r\n"), "resized child PTY size");

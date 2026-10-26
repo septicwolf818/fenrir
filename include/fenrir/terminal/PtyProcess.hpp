@@ -56,6 +56,16 @@ public:
     pid_t pid() const { return pid_; }
     bool hasPendingOutput() const { return !out_.empty(); }
 
+    // Distinguish OSC title changes from the shell prompt versus a foreground
+    // child application. PTY output itself does not identify its writer, but
+    // the terminal's foreground process group does.
+    bool foregroundProcessIsChild() const {
+        if (fd_ < 0 || pid_ <= 0) return false;
+        const pid_t foreground = ::tcgetpgrp(fd_);
+        const pid_t shellGroup = ::getpgid(pid_);
+        return foreground > 0 && shellGroup > 0 && foreground != shellGroup;
+    }
+
     void closeFd() {
         if (fd_ >= 0) {
             ::close(fd_);

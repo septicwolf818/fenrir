@@ -134,7 +134,18 @@ public:
             if (pty_.fd() >= 0) pty_.resize(bounds_.w, bounds_.h);
         }
         pump();
-        if (vt_.hasTitleChanged()) ctx_.setWindowTitle(vt_.consumeTitle());
+        if (vt_.hasTitleChanged()) {
+            const bool fromApplication = vt_.titleFromApplication();
+            std::string title = vt_.consumeTitle();
+            if (fromApplication) {
+                applicationTitleActive_ = !title.empty();
+                ctx_.setWindowTitle(std::move(title));
+            }
+        }
+        if (applicationTitleResetPending_) {
+            ctx_.setWindowTitle("");
+            applicationTitleResetPending_ = false;
+        }
         for (int y = 0; y < bounds_.h; ++y) {
             for (int x = 0; x < bounds_.w; ++x) {
                 const VtCell c = vt_.at(x, y);
@@ -198,6 +209,10 @@ private:
 
     void pump() {
         if (pty_.fd() < 0) return;
+        if (applicationTitleActive_ && !pty_.foregroundProcessIsChild()) {
+            applicationTitleActive_ = false;
+            applicationTitleResetPending_ = true;
+        }
         pty_.flushOut();
         char buf[4096];
         bool consumedOutput = false;
@@ -205,7 +220,7 @@ private:
             const long n = pty_.readSome(buf, sizeof(buf));
             if (n > 0) {
                 consumedOutput = true;
-                vt_.feed(buf, static_cast<std::size_t>(n));
+                vt_.feed(buf, static_cast<std::size_t>(n), pty_.foregroundProcessIsChild());
                 continue;
             }
             if (n == 0) {
@@ -239,6 +254,8 @@ private:
     VtScreen vt_;
     bool spawned_ = false;
     bool exited_ = false;
+    bool applicationTitleActive_ = false;
+    bool applicationTitleResetPending_ = false;
     int exitCode_ = 0;
     std::string failMsg_;
 };

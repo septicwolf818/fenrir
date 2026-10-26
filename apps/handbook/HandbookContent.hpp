@@ -479,8 +479,10 @@ inline Library buildLibrary() {
                       "and forwards the keys to it. The window shows a practical VT100/xterm "
                       "subset: colors, cursor movement, and scrolling.")
                 .text("Programs that send OSC 0 or OSC 2 title sequences can update the Fenrir window "
-                      "subtitle. Fenrir accepts these sequences from the PTY; a program must emit "
-                      "them (TERM=linux does not make every program set a title automatically).")
+                      "subtitle. Fenrir applies title changes from a foreground child application, "
+                      "not shell prompt updates, and returns to the Terminal application name when "
+                      "the child exits. A program must emit the sequence itself (TERM=linux does "
+                      "not make every program set a title automatically).")
                 .section("Keys")
                 .keys({
                     {"PgUp / PgDn", "Scroll the scrollback"},
