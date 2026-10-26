@@ -309,6 +309,29 @@ void runTerminalTests() {
             check(actualRows == expected, "fastfetch-style lines survive repeated reflow");
         }
     }
+    // Minimal Debian fastfetch cursor-positioning repro: CSI 16 A, 1 G, and
+    // 31 C write a title beside the logo. Shrinking and restoring must not
+    // permanently move the original screen boundary into scrollback.
+    {
+        std::string output;
+        for (int i = 0; i < 17; ++i)
+            output += "row" + std::to_string(i) + "\r\n";
+        output += "\x1b[16A\x1b[1G\x1b[31Ctitle";
+
+        VtScreen v;
+        v.resize(72, 18);
+        v.feed(output.data(), output.size());
+        check(v.historyRowCount() == 0, "positioning repro starts within the screen");
+        check(v.at(0, 0).ch == U'r' && v.at(31, 1).ch == U't',
+              "cursor-positioned title starts in its requested column");
+        v.resize(40, 10);
+        check(v.historyRowCount() > 0, "narrowing moves overflow above the live screen");
+        v.resize(30, 6);
+        v.resize(72, 18);
+        check(v.historyRowCount() == 0, "growing restores the original screen boundary");
+        check(v.at(0, 0).ch == U'r' && v.at(31, 1).ch == U't',
+              "positioned title and rows return to their original screen positions");
+    }
     // CSI 3 J removes saved scrollback without erasing the visible screen.
     // The Linux `clear` sequence (CUP home followed by ED 0) clears both.
     {

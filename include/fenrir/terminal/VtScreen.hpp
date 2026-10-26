@@ -241,20 +241,20 @@ private:
         normalCursorOffset_ = std::min(normalCursorOffset_, normalLines_[normalCursorLine_].size());
         normalSavedOffset_ = std::min(normalSavedOffset_, normalLines_[normalSavedLine_].size());
 
-        normalScreenStartLine_ = historyOpen_ && !history_.empty()
+        normalBufferStartLine_ = historyOpen_ && !history_.empty()
                                      ? history_.size() - 1
                                      : history_.size();
-        normalScreenStartOffset_ = historyOpen_ && !history_.empty()
+        normalBufferStartOffset_ = historyOpen_ && !history_.empty()
                                        ? history_.back().size()
                                        : 0;
-        normalScreenStartLine_ = std::min(normalScreenStartLine_, normalLines_.size() - 1);
+        normalBufferStartLine_ = std::min(normalBufferStartLine_, normalLines_.size() - 1);
         std::size_t rowStart = 0;
-        for (std::size_t li = 0; li < normalScreenStartLine_; ++li) {
+        for (std::size_t li = 0; li < normalBufferStartLine_; ++li) {
             const auto& line = normalLines_[li];
             rowStart += line.empty() ? 1 : (line.size() + static_cast<std::size_t>(w_) - 1) /
                                                 static_cast<std::size_t>(w_);
         }
-        normalScreenStartRow_ = rowStart + normalScreenStartOffset_ /
+        normalScreenStartRow_ = rowStart + normalBufferStartOffset_ /
                                                 static_cast<std::size_t>(w_);
         displayRowsDirty_ = true;
     }
@@ -296,10 +296,10 @@ private:
             rows.push_back(BufferRow{0, 0, 0, false});
         }
 
-        const int boundaryRow = normalScreenStartLine_ >= lineStarts.size()
+        const int boundaryRow = normalBufferStartLine_ >= lineStarts.size()
                                     ? static_cast<int>(rows.size())
-                                    : static_cast<int>(lineStarts[normalScreenStartLine_] +
-                                          normalScreenStartOffset_ / width);
+                                    : static_cast<int>(lineStarts[normalBufferStartLine_] +
+                                          normalBufferStartOffset_ / width);
         const int screenStart = std::clamp(
             std::max(boundaryRow, std::max(0, static_cast<int>(rows.size()) - h_)),
             0, static_cast<int>(rows.size()));
@@ -332,15 +332,6 @@ private:
         }
         while (history_.size() > kMaxHistory) history_.pop_front();
         if (history_.empty()) historyOpen_ = false;
-
-        if (screenStart < static_cast<int>(rows.size())) {
-            const auto& firstVisible = rows[static_cast<std::size_t>(screenStart)];
-            normalScreenStartLine_ = firstVisible.line;
-            normalScreenStartOffset_ = firstVisible.offset;
-        } else {
-            normalScreenStartLine_ = normalLines_.size();
-            normalScreenStartOffset_ = 0;
-        }
 
         auto mapPoint = [&](std::size_t line, std::size_t offset, bool pendingWrap,
                             int& x, int& y) {
@@ -1024,7 +1015,7 @@ private:
         normalLines_.clear();
         normalCursorLine_ = normalSavedLine_ = 0;
         normalCursorOffset_ = normalSavedOffset_ = 0;
-        normalScreenStartLine_ = normalScreenStartOffset_ = normalScreenStartRow_ = 0;
+        normalBufferStartLine_ = normalBufferStartOffset_ = normalScreenStartRow_ = 0;
         normalCursorPendingWrap_ = normalSavedPendingWrap_ = false;
         displayRowsDirty_ = true;
         view_ = 0;
@@ -1046,7 +1037,10 @@ private:
     std::vector<std::vector<VtCell>> normalLines_;
     std::size_t normalCursorLine_ = 0, normalCursorOffset_ = 0;
     std::size_t normalSavedLine_ = 0, normalSavedOffset_ = 0;
-    std::size_t normalScreenStartLine_ = 0, normalScreenStartOffset_ = 0;
+    // Stable boundary between old scrollback and the active region. Layouts
+    // may temporarily push more rows above the screen, but shrinking then
+    // growing the grid must not permanently advance this anchor.
+    std::size_t normalBufferStartLine_ = 0, normalBufferStartOffset_ = 0;
     std::size_t normalScreenStartRow_ = 0;
     bool normalCursorPendingWrap_ = false, normalSavedPendingWrap_ = false;
     // Combined history + live-screen rows, joining an open history line to
