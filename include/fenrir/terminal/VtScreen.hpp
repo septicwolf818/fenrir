@@ -408,6 +408,9 @@ private:
             gridWrap_[static_cast<std::size_t>(screenY)] = row.wraps ? 1 : 0;
         }
 
+        // If all content fits in the window, anchor at the bottom (no scroll).
+        if (!altOn_ && rows.size() <= static_cast<std::size_t>(h_)) view_ = 0;
+
         history_.clear();
         historyOpen_ = false;
         for (std::size_t li = 0; li < normalLines_.size(); ++li) {
