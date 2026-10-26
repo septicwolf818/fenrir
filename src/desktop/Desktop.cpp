@@ -1187,6 +1187,9 @@ void Desktop::drawTaskBar(Screen& screen) {
 
             // Build title label with ASCII-only [ ] brackets and ... for truncation
             std::string latin(w->title());
+            // A trailing space keeps the scrolled title from butting against
+            // itself when it wraps around.
+            if (idx == hoveredIdx) latin += " ";
             int maxChars = kTaskHandleW - 4;  // leave room for [ ] and ...
             bool hoverScroll = (idx == hoveredIdx) && static_cast<int>(latin.size()) > maxChars;
             if (hoverScroll) {
