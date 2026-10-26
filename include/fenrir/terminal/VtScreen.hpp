@@ -85,8 +85,7 @@ public:
         if (preserveScrolledView) {
             const std::size_t topRow = normalScreenStartRow_ - static_cast<std::size_t>(view_);
             viewAnchor = logicalPointAtRow(topRow, w_);
-        }
-        const int oldW = w_;
+        }        const int oldW = w_;
         const int oldH = h_;
 
         const int oldCx = cx_, oldCy = cy_;
