@@ -225,6 +225,110 @@ void runTerminalTests() {
         }
         check(nextLineStartsAtColumnZero, "newline after resize starts a new row");
     }
+    // fastfetch-style output combines ANSI color sequences, hard newlines,
+    // soft-wrapped artwork, and a final line without a newline. The logical
+    // line buffer must preserve both its text and hard-line boundaries through
+    // repeated changes in width and height.
+    {
+        const std::vector<std::string> lines = {
+            "       .--.       ",
+            "      |o_o |      ",
+            "      |:_/ |      ",
+            "      /|   |\\      ",
+            "OS: Fenrir Linux",
+            "Kernel: 6.10.0",
+            "Terminal: Fenrir"};
+        std::string output;
+        for (std::size_t i = 0; i < lines.size(); ++i) {
+            output += "\x1b[1;36m" + lines[i] + "\x1b[0m";
+            if (i + 1 < lines.size()) output += "\r\n";
+        }
+
+        VtScreen v;
+        v.resize(13, 3);
+        const std::size_t chunks[] = {1, 4, 9, 2, 13};
+        std::size_t offset = 0, chunk = 0;
+        while (offset < output.size()) {
+            const std::size_t len = std::min(chunks[chunk % 5], output.size() - offset);
+            v.feed(output.data() + offset, len);
+            offset += len;
+            ++chunk;
+        }
+        auto readAllRows = [](VtScreen& screen) {
+            const int above = static_cast<int>(screen.historyRowCount());
+            const int total = above + screen.height();
+            std::vector<std::string> rows(static_cast<std::size_t>(total),
+                                           std::string(static_cast<std::size_t>(screen.width()), ' '));
+            for (int offset = above; offset >= 0; --offset) {
+                screen.follow();
+                screen.scrollView(offset);
+                for (int y = 0; y < screen.height(); ++y) {
+                    const int row = above - offset + y;
+                    if (row < 0 || row >= total) continue;
+                    for (int x = 0; x < screen.width(); ++x)
+                        rows[static_cast<std::size_t>(row)][static_cast<std::size_t>(x)] =
+                            static_cast<char>(screen.at(x, y).ch);
+                }
+            }
+            screen.follow();
+            return rows;
+        };
+        auto expectedRows = [&](int width, int height, std::size_t rowCount) {
+            std::vector<std::string> rows;
+            for (const auto& line : lines) {
+                std::string content = line;
+                while (!content.empty() && content.back() == ' ') content.pop_back();
+                if (content.empty()) {
+                    rows.emplace_back(static_cast<std::size_t>(width), ' ');
+                    continue;
+                }
+                for (std::size_t off = 0; off < content.size(); off += static_cast<std::size_t>(width)) {
+                    std::string row = content.substr(off, static_cast<std::size_t>(width));
+                    row.resize(static_cast<std::size_t>(width), ' ');
+                    rows.push_back(std::move(row));
+                }
+            }
+            const std::size_t required = std::max(rowCount, static_cast<std::size_t>(height));
+            while (rows.size() < required)
+                rows.emplace_back(static_cast<std::size_t>(width), ' ');
+            return rows;
+        };
+
+        bool foundColoredGlyph = false;
+        v.scrollView(static_cast<int>(v.historyRowCount()));
+        for (int y = 0; y < v.height(); ++y)
+            for (int x = 0; x < v.width(); ++x)
+                if (v.at(x, y).ch == U'.' && v.at(x, y).fg == colors::Cyan)
+                    foundColoredGlyph = true;
+        check(foundColoredGlyph, "ANSI color survives capture into logical lines");
+
+        for (const auto& [width, height] : {std::pair{8, 4}, {27, 6}, {10, 2}, {40, 5}, {15, 3}}) {
+            v.resize(width, height);
+            const auto actualRows = readAllRows(v);
+            const auto expected = expectedRows(width, height, actualRows.size());
+            check(actualRows == expected, "fastfetch-style lines survive repeated reflow");
+        }
+    }
+    // CSI 3 J removes saved scrollback without erasing the visible screen.
+    // The Linux `clear` sequence (CUP home followed by ED 0) clears both.
+    {
+        VtScreen v;
+        v.resize(12, 2);
+        const char* output = "old1\r\nold2\r\ncurrent";
+        v.feed(output, std::strlen(output));
+        check(v.historySize() > 0, "clear fixture has saved lines");
+        v.feed("\x1b[3J", 4);
+        check(v.historySize() == 0 && v.historyRowCount() == 0, "CSI 3 J clears saved lines");
+        check(v.at(0, 0).ch == U'o', "CSI 3 J preserves visible content");
+
+        const char* clearSequence = "\x1b[H\x1b[J";
+        v.feed(clearSequence, std::strlen(clearSequence));
+        check(v.historySize() == 0 && v.historyRowCount() == 0,
+              "Linux clear sequence clears old buffer lines");
+        v.feed("fresh", 5);
+        check(v.at(0, 0).ch == U'f' && v.at(0, 0).ch != U'o',
+              "new output starts with a clean buffer");
+    }
     // The scrollback keeps the actual text of a line, so it re-wraps to the
     // new width instead of being truncated or padded with blanks.
     {
@@ -392,6 +496,8 @@ void runTerminalTests() {
         };
         pty.writeBytes("printf 'PTY_OK\\n'\n");
         check(waitFor("PTY_OK\r\n"), "pty child output");
+        pty.writeBytes("printf '%s\\n' \"$TERM\"\n");
+        check(waitFor("linux\r\n"), "pty advertises the Linux terminal type");
         pty.writeBytes("stty size\n");
         check(waitFor("5 20\r\n"), "initial child PTY size");
         pty.resize(10, 3);
