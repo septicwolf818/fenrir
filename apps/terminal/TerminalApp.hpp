@@ -279,9 +279,10 @@ public:
     }
 
     Rect preferredBounds(const Rect& desktopArea) const override {
-        const int w = std::min(72, std::max(24, desktopArea.w - 6));
-        const int h = std::min(22, std::max(6, desktopArea.h - 3));
-        return Rect{desktopArea.x + 3, desktopArea.y + 1, w, h};
+        const int w = std::min(87, std::max(1, desktopArea.w));
+        const int h = std::min(32, std::max(1, desktopArea.h));
+        return Rect{desktopArea.x + (desktopArea.w - w) / 2,
+                    desktopArea.y + (desktopArea.h - h) / 2, w, h};
     }
 };
 

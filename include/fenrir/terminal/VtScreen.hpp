@@ -372,7 +372,12 @@ private:
                                                 ? 0
                                                 : normalBufferStartOffset_ /
                                                       static_cast<std::size_t>(w_));
-        if (topPadding_ > 0) {
+        const bool hasFixedRows = std::any_of(normalLines_.begin(), normalLines_.end(), isFixedRow);
+        if (hasFixedRows) {
+            // Cursor-positioned screens rely on their original row numbers;
+            // do not shift them to fill otherwise-unused rows.
+            topPadding_ = 0;
+        } else if (topPadding_ > 0) {
             std::size_t contentRows = 0;
             for (const auto& line : normalLines_)
                 contentRows += logicalRowCount(line, static_cast<std::size_t>(w_));
@@ -423,7 +428,8 @@ private:
         }
 
         const bool cursorAtBufferEnd = cursorLine + 1 == normalLines_.size();
-        const bool keepBottomAlignment = cursorAtBufferEnd &&
+        const bool hasFixedRows = std::any_of(normalLines_.begin(), normalLines_.end(), isFixedRow);
+        const bool keepBottomAlignment = cursorAtBufferEnd && !hasFixedRows &&
                                          (normalScreenStartRow_ > 0 || topPadding_ > 0);
         int screenStart = 0;
         if (rows.size() <= static_cast<std::size_t>(h_)) {

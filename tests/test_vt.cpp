@@ -1,5 +1,6 @@
 #include "test_harness.hpp"
 
+#include "../apps/terminal/TerminalApp.hpp"
 #include "fenrir/terminal/VtScreen.hpp"
 #include "fenrir/terminal/PtyProcess.hpp"
 
@@ -14,6 +15,18 @@ using fenrir::test::check;
 
 
 void runTerminalTests() {
+    apps::TerminalApp terminalApp;
+    const Rect largeArea{0, 1, 120, 40};
+    const Rect largeTerminal = terminalApp.preferredBounds(largeArea);
+    check(largeTerminal.w == 87 && largeTerminal.h == 32,
+          "terminal default grows by fifteen columns and ten rows");
+    const Rect smallArea{0, 1, 80, 22};
+    const Rect smallTerminal = terminalApp.preferredBounds(smallArea);
+    check(smallTerminal.x >= smallArea.x && smallTerminal.y >= smallArea.y &&
+              smallTerminal.x + smallTerminal.w <= smallArea.x + smallArea.w &&
+              smallTerminal.y + smallTerminal.h <= smallArea.y + smallArea.h,
+          "terminal default remains inside the desktop area");
+
     // OSC title strings from the shell are distinguishable from foreground
     // applications using the PTY process-group attribution.
     {
@@ -551,6 +564,22 @@ void runTerminalTests() {
               "soft-wrapped row rejoins when the width grows");
         check(v.at(0, 1).ch == U'N',
               "following row is not displaced by a lost wrap marker");
+    }
+    // Startup output can scroll a wrapped row into history before the app
+    // disables autowrap. That history fragment must keep the same continuation.
+    {
+        VtScreen v;
+        v.resize(20, 2);
+        const std::string longRow = "    ,g$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$P.";
+        v.feed(longRow.data(), longRow.size());
+        v.feed("\r\nNEXT", 6);
+        check(v.historySize() > 0, "narrow startup output scrolls a wrapped row into history");
+
+        v.feed("\x1b[1G\x1b[2A\x1b[?7l", 13);
+        v.resize(32, 5);
+        check(v.historyRowCount() == 0 && v.at(5, 0).ch == U'g' &&
+                  v.at(0, 1).ch == U'N' && v.at(0, 2).ch == U' ',
+              "history continuation rejoins and keeps the next row in place");
     }
     // CSI 3 J removes saved scrollback without erasing the visible screen.
     // The Linux `clear` sequence (CUP home followed by ED 0) clears both.
