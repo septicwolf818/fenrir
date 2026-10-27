@@ -311,7 +311,11 @@ void runTerminalTests() {
         check(originalBoundary > 0, "fixture begins with real scrollback");
 
         v.resize(12, 10);
+        const char32_t resizedTopDigit = v.at(2, 0).ch;
+        const int resizedCursorRow = v.cursorY();
         v.feed("\x1b[?25l", 6); // shell output after the resize notification
+        check(v.at(2, 0).ch == resizedTopDigit && v.cursorY() == resizedCursorRow,
+              "resize redraw keeps the displayed rows aligned with the live cursor");
         v.resize(12, 24);
         check(v.historyRowCount() == originalBoundary &&
                   v.at(2, 0).ch == originalTopDigit,

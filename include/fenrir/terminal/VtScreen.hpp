@@ -388,16 +388,18 @@ private:
         normalBufferStartLine_ = std::min(normalBufferStartLine_, normalLines_.size() - 1);
         normalBufferStartOffset_ = std::min(normalBufferStartOffset_,
                                             normalLines_[normalBufferStartLine_].size());
-        std::size_t rowStart = 0;
-        for (std::size_t li = 0; li < normalBufferStartLine_; ++li) {
-            const auto& line = normalLines_[li];
-            rowStart += logicalRowCount(line, static_cast<std::size_t>(w_));
+        if (!preserveNormalBufferStart_) {
+            std::size_t rowStart = 0;
+            for (std::size_t li = 0; li < normalBufferStartLine_; ++li) {
+                const auto& line = normalLines_[li];
+                rowStart += logicalRowCount(line, static_cast<std::size_t>(w_));
+            }
+            const auto& boundaryLine = normalLines_[normalBufferStartLine_];
+            normalScreenStartRow_ = rowStart + (isFixedRow(boundaryLine)
+                                                    ? 0
+                                                    : normalBufferStartOffset_ /
+                                                          static_cast<std::size_t>(w_));
         }
-        const auto& boundaryLine = normalLines_[normalBufferStartLine_];
-        normalScreenStartRow_ = rowStart + (isFixedRow(boundaryLine)
-                                                ? 0
-                                                : normalBufferStartOffset_ /
-                                                      static_cast<std::size_t>(w_));
         const bool hasFixedRows = std::any_of(normalLines_.begin(), normalLines_.end(), isFixedRow);
         if (hasFixedRows) {
             // Cursor-positioned screens rely on their original row numbers;
