@@ -47,6 +47,8 @@ public:
     bool wantsGuiCursor() const override;
     std::optional<std::pair<int, int>> cursorPosition() const override;
 
+    const std::vector<std::string>& jsErrors() const;
+
 private:
     friend class BrowserContainer;
     struct Link {
@@ -77,6 +79,8 @@ private:
     bool setPointerPosition(int x, int y);
     void dispatchScriptEvent(const std::string& targetId, const std::string& type);
     void syncTextFieldToScript(int fieldIndex);
+    BrowserScriptContext* scriptContext() const { return scriptContext_.get(); }
+    // removed
     void movePageCursorBy(int dx, int dy);
     void focusControl(std::size_t index);
     void scrollIntoView(const litehtml::position& placement);

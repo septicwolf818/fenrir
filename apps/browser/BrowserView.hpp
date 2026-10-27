@@ -64,6 +64,7 @@ private:
     LineEdit* address_ = nullptr;
     int addressSlot_ = -1;
     bool toolbarActive_ = false;
+    std::size_t shownJsErrorCount_ = 0;
     StatusBar status_;
     bool titleReady_ = false;
 };

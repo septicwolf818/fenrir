@@ -210,6 +210,18 @@ void BrowserView::draw(Screen& screen) {
         if (!toolbarActive_ && !page->url().empty() && address_->value() != text::toUtf32(page->url()))
             address_->setValue(text::toUtf32(page->url()));
         if (!page->title().empty()) context_.setWindowTitle(page->title());
+        // Show JS errors in a popup dialog (once per new error).
+        const auto& errs = page->jsErrors();
+        if (errs.empty()) shownJsErrorCount_ = 0;
+        if (errs.size() > shownJsErrorCount_) {
+            std::string msg;
+            for (std::size_t i = shownJsErrorCount_; i < errs.size(); ++i) {
+                if (!msg.empty()) msg += "\n";
+                msg += errs[i];
+            }
+            shownJsErrorCount_ = errs.size();
+            context_.showMessage(text::toUtf32(msg));
+        }
     }
     syncTabs();
     syncToolbar();
