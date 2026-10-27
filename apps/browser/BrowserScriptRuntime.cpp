@@ -73,6 +73,23 @@ JSModuleDef* loadModule(JSContext* context, const char* moduleName, void* opaque
     return module;
 }
 
+JSValue jsFetchSync(JSContext* context, JSValueConst, int argc, JSValueConst* argv) {
+    if (argc < 1) return JS_ThrowTypeError(context, "fetch requires a URL");
+    const char* url = JS_ToCString(context, argv[0]);
+    if (!url) return JS_EXCEPTION;
+    std::string u(url);
+    JS_FreeCString(context, url);
+    Response response = browser::fetch(u, kMaxScriptBytes, 5000);
+    JSValue obj = JS_NewObject(context);
+    const bool ok = response.error.empty() && response.status >= 200 && response.status < 300;
+    JS_SetPropertyStr(context, obj, "ok", JS_NewBool(context, ok));
+    JS_SetPropertyStr(context, obj, "status", JS_NewInt32(context, static_cast<int>(response.status)));
+    JSValue body = JS_NewStringLen(context, response.body.data(), response.body.size());
+    JS_SetPropertyStr(context, obj, "body", body);
+    JS_SetPropertyStr(context, obj, "error", JS_NewString(context, response.error.c_str()));
+    return obj;
+}
+
 bool runJobs(JSRuntime* runtime, JSContext* context, std::string& error) {
     for (int count = 0; count < kMaxPendingJobs; ++count) {
         JSContext* jobContext = nullptr;
@@ -90,6 +107,18 @@ bool runJobs(JSRuntime* runtime, JSContext* context, std::string& error) {
 const char* kDomShim = R"JS(
 (() => {
   const nodes = Object.create(null);
+  const __taskQueue = [];
+  function __makeStorage() {
+    const data = Object.create(null);
+    return {
+      getItem(k) { k = String(k); return Object.prototype.hasOwnProperty.call(data, k) ? data[k] : null; },
+      setItem(k, v) { data[String(k)] = String(v); },
+      removeItem(k) { delete data[String(k)]; },
+      clear() { for (const k in data) delete data[k]; },
+      key(i) { const ks = Object.keys(data); return i < ks.length ? ks[i] : null; },
+      get length() { return Object.keys(data).length; }
+    };
+  }
   const __allNodes = [];
   const escapeHtml = value => String(value).replace(/&/g, '&amp;')
     .replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -104,6 +133,7 @@ const char* kDomShim = R"JS(
       this._classes = new Set();
       this._dirty = false;
       this._fragment = fragment;
+      if (!fragment) __allNodes.push(this);
       if (!fragment) __allNodes.push(this);
       this.style = Object.create(null);
       Object.defineProperty(this, 'className', {
@@ -160,7 +190,22 @@ const char* kDomShim = R"JS(
       return Object.prototype.hasOwnProperty.call(this._attributes, name) ? this._attributes[name] : null;
     }
     removeAttribute(name) { delete this._attributes[String(name)]; }
-    addEventListener() {}
+    addEventListener(type, cb) {
+      if (typeof cb !== 'function') return;
+      this._listeners = this._listeners || {};
+      this._listeners[type] = this._listeners[type] || [];
+      if (!this._listeners[type].includes(cb)) this._listeners[type].push(cb);
+    }
+    removeEventListener(type, cb) {
+      if (!this._listeners || !this._listeners[type]) return;
+      this._listeners[type] = this._listeners[type].filter(x => x !== cb);
+    }
+    dispatchEvent(evt) {
+      const type = (evt && evt.type) || '';
+      const cbs = (this._listeners && this._listeners[type]) || [];
+      cbs.slice().forEach(cb => { try { cb(evt); } catch (e) { console.error(e); } });
+      return true;
+    }
     querySelectorAll() { return []; }
     getBoundingClientRect() { return {top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0}; }
     focus() {}
@@ -181,7 +226,7 @@ const char* kDomShim = R"JS(
   }
   const document = {
     documentElement: new FenrirNode('html'),
-    readyState: 'complete',
+    readyState: 'loading',
     getElementById(id) {
       id = String(id);
       return nodes[id] || (nodes[id] = new FenrirNode('div', id));
@@ -196,11 +241,44 @@ const char* kDomShim = R"JS(
     querySelectorAll(selector) {
       return __allNodes.filter(node => __matchSelector(node, selector));
     },
-    addEventListener() {}
+    addEventListener(type, cb) {
+      if (typeof cb !== 'function') return;
+      this._listeners = this._listeners || {};
+      this._listeners[type] = this._listeners[type] || [];
+      if (!this._listeners[type].includes(cb)) this._listeners[type].push(cb);
+    },
+    removeEventListener(type, cb) {
+      if (!this._listeners || !this._listeners[type]) return;
+      this._listeners[type] = this._listeners[type].filter(x => x !== cb);
+    },
+    dispatchEvent(evt) {
+      const type = (evt && evt.type) || '';
+      const cbs = (this._listeners && this._listeners[type]) || [];
+      cbs.slice().forEach(cb => { try { cb(evt); } catch (e) { console.error(e); } });
+      return true;
+    }
   };
   globalThis.document = document;
   globalThis.window = {
-    innerHeight: 768, scrollY: 0, addEventListener() {}, scrollTo() {},
+    innerWidth: 1024, innerHeight: 768, scrollX: 0, scrollY: 0,
+    addEventListener(type, cb) {
+      if (typeof cb !== 'function') return;
+      this._listeners = this._listeners || {};
+      this._listeners[type] = this._listeners[type] || [];
+      if (!this._listeners[type].includes(cb)) this._listeners[type].push(cb);
+    },
+    removeEventListener(type, cb) {
+      if (!this._listeners || !this._listeners[type]) return;
+      this._listeners[type] = this._listeners[type].filter(x => x !== cb);
+    },
+    dispatchEvent(evt) {
+      const type = (evt && evt.type) || '';
+      const cbs = (this._listeners && this._listeners[type]) || [];
+      cbs.slice().forEach(cb => { try { cb(evt); } catch (e) { console.error(e); } });
+      return true;
+    },
+    scrollTo(x, y) { this.scrollX = x || 0; this.scrollY = y || 0; },
+    scrollBy(x, y) { this.scrollX += x || 0; this.scrollY += y || 0; },
     matchMedia: () => ({matches: true, addEventListener() {}})
   };
   globalThis.navigator = {
@@ -209,21 +287,82 @@ const char* kDomShim = R"JS(
     onLine: true, cookieEnabled: false, hardwareConcurrency: 4, maxTouchPoints: 0
   };
   globalThis.location = {hash: '', href: ''};
-  globalThis.requestAnimationFrame = () => 0;
   let __timerSeq = 1;
   globalThis.setTimeout = (fn, delay) => {
     const id = __timerSeq++;
-    try { if (typeof fn === 'function') fn(); }
-    catch (e) { console.error(e); }
+    if (typeof fn === 'function') __taskQueue.push(() => { try { fn(); } catch (e) { console.error(e); } });
     return id;
   };
   globalThis.setInterval = (fn, delay) => globalThis.setTimeout(fn, delay);
   globalThis.clearTimeout = (id) => {};
   globalThis.clearInterval = (id) => {};
-  globalThis.IntersectionObserver = class { constructor() {} observe() {} unobserve() {} disconnect() {} };
+  globalThis.requestAnimationFrame = (fn) => {
+    const id = __timerSeq++;
+    if (typeof fn === 'function') __taskQueue.push(() => { try { fn(Date.now()); } catch (e) { console.error(e); } });
+    return id;
+  };
+  globalThis.IntersectionObserver = class {
+    constructor(cb, options) { this._cb = (typeof cb === 'function') ? cb : () => {}; this._options = options || {}; this._targets = []; }
+    observe(target) {
+      if (!target) return;
+      this._targets.push(target);
+      const self = this;
+      __taskQueue.push(() => {
+        try {
+          const entries = self._targets.map(t => ({
+            target: t, isIntersecting: true, intersectionRatio: 1,
+            boundingClientRect: { top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 },
+            intersectionRect: { top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 },
+            rootBounds: null, time: Date.now()
+          }));
+          self._cb(entries, self);
+        } catch (e) { console.error(e); }
+      });
+    }
+    unobserve(target) { this._targets = this._targets.filter(t => t !== target); }
+    disconnect() { this._targets = []; }
+    takeRecords() { return []; }
+  };
   globalThis.MutationObserver = class { constructor(cb) {} observe() {} disconnect() {} takeRecords() { return []; } };
   globalThis.console = {log() {}, info() {}, warn() {}, error() {}};
   globalThis.__fenrirNodes = nodes;
+  globalThis.Event = class Event {
+    constructor(type, init) { this.type = String(type); if (init) Object.assign(this, init); }
+  };
+  globalThis.CustomEvent = globalThis.Event;
+  globalThis.localStorage = __makeStorage();
+  globalThis.sessionStorage = __makeStorage();
+  globalThis.fetch = (url, options) => {
+    return new Promise((resolve, reject) => {
+      try {
+        const r = __fetchSync(String(url));
+        if (r.error) { reject(new Error(r.error)); return; }
+        const response = {
+          ok: r.status >= 200 && r.status < 300,
+          status: r.status, statusText: '', url: String(url),
+          headers: new Map(),
+          text: () => Promise.resolve(r.body),
+          json: () => { try { return Promise.resolve(JSON.parse(r.body)); } catch (e) { return Promise.reject(e); } },
+          clone: function() { return this; }
+        };
+        resolve(response);
+      } catch (e) { reject(e); }
+    });
+  };
+  globalThis.__drainTasks = () => {
+    let guard = 0;
+    while (__taskQueue.length && guard < 1000) {
+      const batch = __taskQueue.splice(0, __taskQueue.length);
+      for (const t of batch) { try { t(); } catch (e) { console.error(e); } }
+      guard++;
+    }
+  };
+  globalThis.__dispatchReady = () => {
+    try { document.readyState = 'complete'; } catch (e) {}
+    const makeEvt = (type) => ({ type, target: document, currentTarget: document, bubbles: false, cancelable: false, defaultPrevented: false });
+    try { document.dispatchEvent(makeEvt('DOMContentLoaded')); } catch (e) { console.error(e); }
+    try { window.dispatchEvent({ type: 'load', target: window, currentTarget: window }); } catch (e) { console.error(e); }
+  };
   globalThis.__fenrirTakePatches = () => Object.values(nodes)
     .filter(node => node._dirty && node.id)
     .map(node => ({id: node.id, html: node.innerHTML}));
@@ -286,6 +425,13 @@ bool BrowserScriptRuntime::execute(const litehtml::document::ptr& document,
         return false;
     }
 
+    // Expose a synchronous fetch bridge used by the JS fetch() polyfill.
+    {
+        JSValue global = JS_GetGlobalObject(context);
+        JSValue fn = JS_NewCFunction(context, jsFetchSync, "__fetchSync", 1);
+        JS_SetPropertyStr(context, global, "__fetchSync", fn);
+        JS_FreeValue(context, global);
+    }
     bool success = evaluate(context, host, kDomShim, "fenrir:dom", false, error);
     std::vector<litehtml::element::ptr> scripts;
     std::function<void(const litehtml::element::ptr&)> collect = [&](const litehtml::element::ptr& element) {
@@ -323,6 +469,13 @@ bool BrowserScriptRuntime::execute(const litehtml::document::ptr& document,
             if (error.empty()) error = std::move(scriptError);
         }
     }
+
+    // Drain deferred tasks (setTimeout, rAF, IO callbacks) and dispatch
+    // DOMContentLoaded/load so scripts that wait for readiness can run.
+    (void)evaluate(context, host, "if(typeof __drainTasks==='function')__drainTasks();",
+                   "fenrir:drain", false, error);
+    (void)evaluate(context, host, "if(typeof __dispatchReady==='function')__dispatchReady();",
+                   "fenrir:ready", false, error);
 
     JSValue global = JS_GetGlobalObject(context);
     JSValue nodes = JS_GetPropertyStr(context, global, "__fenrirNodes");
