@@ -73,6 +73,35 @@ JSModuleDef* loadModule(JSContext* context, const char* moduleName, void* opaque
     return module;
 }
 
+JSValue jsCookieGet(JSContext* context, JSValueConst, int argc, JSValueConst*) {
+    JSValue global = JS_GetGlobalObject(context);
+    JSValue pu = JS_GetPropertyStr(context, global, "__pageUrl");
+    const char* url = JS_ToCString(context, pu);
+    std::string u = url ? url : "";
+    if (url) JS_FreeCString(context, url);
+    JS_FreeValue(context, pu);
+    JS_FreeValue(context, global);
+    std::string cookies = browser::getCookieString(u);
+    return JS_NewString(context, cookies.c_str());
+}
+
+JSValue jsCookieSet(JSContext* context, JSValueConst, int argc, JSValueConst* argv) {
+    if (argc < 1) return JS_UNDEFINED;
+    const char* cookie = JS_ToCString(context, argv[0]);
+    if (!cookie) return JS_EXCEPTION;
+    std::string c(cookie);
+    JS_FreeCString(context, cookie);
+    JSValue global = JS_GetGlobalObject(context);
+    JSValue pu = JS_GetPropertyStr(context, global, "__pageUrl");
+    const char* url = JS_ToCString(context, pu);
+    std::string u = url ? url : "";
+    if (url) JS_FreeCString(context, url);
+    JS_FreeValue(context, pu);
+    JS_FreeValue(context, global);
+    browser::setCookieString(u, c);
+    return JS_UNDEFINED;
+}
+
 JSValue jsFetchSync(JSContext* context, JSValueConst, int argc, JSValueConst* argv) {
     if (argc < 1) return JS_ThrowTypeError(context, "fetch requires a URL");
     const char* url = JS_ToCString(context, argv[0]);
@@ -208,6 +237,7 @@ const char* kDomShim = R"JS(
     }
     querySelectorAll() { return []; }
     getBoundingClientRect() { return {top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0}; }
+    getClientRects() { return []; }
     focus() {}
   }
   function __matchSelector(node, selector) {
@@ -227,6 +257,8 @@ const char* kDomShim = R"JS(
   const document = {
     documentElement: new FenrirNode('html'),
     readyState: 'loading',
+    get cookie() { return __cookieGet(); },
+    set cookie(v) { __cookieSet(v); },
     getElementById(id) {
       id = String(id);
       return nodes[id] || (nodes[id] = new FenrirNode('div', id));
@@ -281,6 +313,75 @@ const char* kDomShim = R"JS(
     scrollBy(x, y) { this.scrollX += x || 0; this.scrollY += y || 0; },
     matchMedia: () => ({matches: true, addEventListener() {}})
   };
+  function __parseUrl(href) {
+    href = String(href || '');
+    let protocol = '', host = '', hostname = '', port = '', pathname = '/', search = '', hash = '';
+    const hashIdx = href.indexOf('#');
+    if (hashIdx >= 0) { hash = href.slice(hashIdx); href = href.slice(0, hashIdx); }
+    const qIdx = href.indexOf('?');
+    if (qIdx >= 0) { search = href.slice(qIdx); href = href.slice(0, qIdx); }
+    const schemeIdx = href.indexOf('://');
+    if (schemeIdx >= 0) {
+      protocol = href.slice(0, schemeIdx + 1) + '//';
+      const rest = href.slice(schemeIdx + 3);
+      const slashIdx = rest.indexOf('/');
+      const authority = slashIdx >= 0 ? rest.slice(0, slashIdx) : rest;
+      const path = slashIdx >= 0 ? rest.slice(slashIdx) : '';
+      const colonIdx = authority.indexOf(':');
+      if (colonIdx >= 0) { hostname = authority.slice(0, colonIdx); port = authority.slice(colonIdx + 1); }
+      else hostname = authority;
+      host = authority;
+      pathname = path || '/';
+      protocol = protocol.replace('//', ':').replace(':', ':') ;
+      // fix protocol to include //
+      protocol = href.slice(0, schemeIdx) + ':';
+    } else {
+      // relative or path-only
+      if (href.startsWith('/')) pathname = href || '/';
+      else if (href) pathname = '/' + href;
+    }
+    if (!protocol) protocol = 'https:';
+    if (!host) host = '';
+    return { href: (typeof __pageUrl === 'string' ? __pageUrl : ''), protocol, host, hostname, port, pathname, search, hash };
+  }
+  const __initialHref = (typeof __pageUrl === 'string' && __pageUrl) ? __pageUrl : '';
+  const __loc = __parseUrl(__initialHref);
+  __loc.href = __initialHref;
+  globalThis.location = __loc;
+  // Make location.href a live-ish property via accessor is complex; provide assign/replace/reload
+  globalThis.location.assign = (u) => { globalThis.location.href = String(u); };
+  globalThis.location.replace = (u) => { globalThis.location.href = String(u); };
+  globalThis.location.reload = () => {};
+  globalThis.location.toString = () => globalThis.location.href;
+
+  // History API (in-memory)
+  const __historyStack = [{url: __initialHref, state: null}];
+  let __historyIndex = 0;
+  globalThis.history = {
+    get length() { return __historyStack.length; },
+    get state() { return __historyStack[__historyIndex] ? __historyStack[__historyIndex].state : null; },
+    pushState(state, title, url) {
+      if (url) {
+        __historyStack.splice(__historyIndex + 1);
+        __historyStack.push({state: state, url: String(url)});
+        __historyIndex = __historyStack.length - 1;
+        globalThis.location.href = String(url);
+        globalThis.location.pathname = String(url);
+      } else {
+        if (__historyStack[__historyIndex]) __historyStack[__historyIndex].state = state;
+      }
+    },
+    replaceState(state, title, url) {
+      if (__historyStack[__historyIndex]) {
+        __historyStack[__historyIndex].state = state;
+        if (url) { __historyStack[__historyIndex].url = String(url); globalThis.location.href = String(url); }
+      }
+    },
+    back() { if (__historyIndex > 0) { __historyIndex--; const e = {type:'popstate', state: this.state, target: window}; window.dispatchEvent(e); } },
+    forward() { if (__historyIndex < __historyStack.length - 1) { __historyIndex++; const e = {type:'popstate', state: this.state, target: window}; window.dispatchEvent(e); } },
+    go(delta) { const ni = __historyIndex + (delta||0); if (ni >= 0 && ni < __historyStack.length) { __historyIndex = ni; const e = {type:'popstate', state: this.state, target: window}; window.dispatchEvent(e); } }
+  };
+
   globalThis.navigator = {
     userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     platform: 'Linux x86_64', language: 'en-US', languages: ['en-US', 'en'],
@@ -363,6 +464,189 @@ const char* kDomShim = R"JS(
     try { document.dispatchEvent(makeEvt('DOMContentLoaded')); } catch (e) { console.error(e); }
     try { window.dispatchEvent({ type: 'load', target: window, currentTarget: window }); } catch (e) { console.error(e); }
   };
+
+  // atob / btoa
+  globalThis.atob = (str) => {
+    str = String(str).replace(/\s+/g, '');
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    let out = '', i = 0;
+    const lookup = Object.create(null);
+    for (let j = 0; j < chars.length; j++) lookup[chars[j]] = j;
+    while (i < str.length) {
+      const a = lookup[str[i++]] || 0;
+      const b = i < str.length ? (lookup[str[i++]] || 0) : 0;
+      const c = i < str.length ? (lookup[str[i++]] || 0) : 0;
+      const d = i < str.length ? (lookup[str[i++]] || 0) : 0;
+      const n = (a << 18) | (b << 12) | (c << 6) | d;
+      out += String.fromCharCode((n >> 16) & 255);
+      if (str[i-2] !== '=') out += String.fromCharCode((n >> 8) & 255);
+      if (str[i-1] !== '=') out += String.fromCharCode(n & 255);
+    }
+    return out;
+  };
+  globalThis.btoa = (str) => {
+    str = String(str);
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    let out = '';
+    for (let i = 0; i < str.length; i += 3) {
+      const a = str.charCodeAt(i);
+      const b = i+1 < str.length ? str.charCodeAt(i+1) : 0;
+      const c = i+2 < str.length ? str.charCodeAt(i+2) : 0;
+      const n = (a << 16) | (b << 8) | c;
+      out += chars[(n >> 18) & 63];
+      out += chars[(n >> 12) & 63];
+      out += i+1 < str.length ? chars[(n >> 6) & 63] : '=';
+      out += i+2 < str.length ? chars[n & 63] : '=';
+    }
+    return out;
+  };
+
+  // URLSearchParams
+  globalThis.URLSearchParams = class URLSearchParams {
+    constructor(init) {
+      this._params = [];
+      if (typeof init === 'string') {
+        const q = init.startsWith('?') ? init.slice(1) : init;
+        q.split('&').forEach(pair => {
+          if (!pair) return;
+          const idx = pair.indexOf('=');
+          const k = decodeURIComponent((idx>=0?pair.slice(0,idx):pair).replace(/\+/g,' '));
+          const v = idx>=0 ? decodeURIComponent(pair.slice(idx+1).replace(/\+/g,' ')) : '';
+          this._params.push([k, v]);
+        });
+      } else if (init && typeof init.forEach === 'function') {
+        init.forEach((v,k) => this._params.push([String(k), String(v)]));
+      }
+    }
+    append(k,v){ this._params.push([String(k), String(v)]); }
+    delete(k){ this._params = this._params.filter(p => p[0] !== String(k)); }
+    get(k){ const p = this._params.find(p => p[0] === String(k)); return p ? p[1] : null; }
+    getAll(k){ return this._params.filter(p => p[0] === String(k)).map(p => p[1]); }
+    has(k){ return this._params.some(p => p[0] === String(k)); }
+    set(k,v){
+      const ks = String(k);
+      let found = false;
+      this._params = this._params.filter(p => { if (p[0] === ks) { if (!found) { found = true; return true; } return false; } return true; });
+      const p = this._params.find(p => p[0] === ks);
+      if (p) p[1] = String(v); else this._params.push([ks, String(v)]);
+    }
+    toString(){ return this._params.map(p => encodeURIComponent(p[0]) + '=' + encodeURIComponent(p[1])).join('&'); }
+    forEach(cb){ this._params.forEach(p => cb(p[1], p[0])); }
+    entries(){ return this._params[Symbol.iterator](); }
+    keys(){ return this._params.map(p => p[0])[Symbol.iterator](); }
+    values(){ return this._params.map(p => p[1])[Symbol.iterator](); }
+  };
+
+  // URL
+  globalThis.URL = class URL {
+    constructor(url, base) {
+      let href = String(url);
+      if (base && !href.match(/^[a-z]+:/i)) {
+        // resolve against base
+        try {
+          const b = (base instanceof URL) ? base : new URL(base);
+          if (href.startsWith('/')) {
+            href = b.protocol + '//' + b.host + href;
+          } else {
+            const path = b.pathname.replace(/\/[^\/]*$/, '/');
+            href = b.protocol + '//' + b.host + path + href;
+          }
+        } catch(e) {}
+      }
+      this.href = href;
+      // parse
+      let protocol='', host='', hostname='', port='', pathname='/', search='', hash='';
+      let h = href;
+      const hi = h.indexOf('#'); if (hi>=0){ hash=h.slice(hi); h=h.slice(0,hi); }
+      const qi = h.indexOf('?'); if (qi>=0){ search=h.slice(qi); h=h.slice(0,qi); }
+      const si = h.indexOf('://');
+      if (si>=0) {
+        protocol = h.slice(0, si+1);
+        const rest = h.slice(si+3);
+        const slash = rest.indexOf('/');
+        const auth = slash>=0 ? rest.slice(0,slash) : rest;
+        const path = slash>=0 ? rest.slice(slash) : '/';
+        const ci = auth.indexOf(':');
+        if (ci>=0){ hostname=auth.slice(0,ci); port=auth.slice(ci+1); } else hostname=auth;
+        host = auth; pathname = path || '/';
+      } else {
+        pathname = h || '/';
+      }
+      this.protocol = protocol || 'https:';
+      this.host = host;
+      this.hostname = hostname || host;
+      this.port = port;
+      this.pathname = pathname;
+      this.search = search;
+      this.hash = hash;
+      this.origin = host ? (this.protocol + '//' + host) : '';
+      this.searchParams = new URLSearchParams(search);
+    }
+    toString(){ return this.href; }
+    toJSON(){ return this.href; }
+  };
+
+  // XMLHttpRequest (basic, synchronous)
+  globalThis.XMLHttpRequest = class XMLHttpRequest {
+    constructor() {
+      this.readyState = 0; this.status = 0; this.statusText = '';
+      this.responseText = ''; this.response = ''; this.responseType = '';
+      this._listeners = {}; this._headers = {};
+      this.onreadystatechange = null; this.onload = null; this.onerror = null;
+    }
+    open(method, url, async) {
+      this._method = method; this._url = url; this._async = (async !== false);
+      this.readyState = 1;
+      this._fire('readystatechange');
+    }
+    setRequestHeader(k,v){ this._headers[k]=v; }
+    send(body) {
+      this.readyState = 2; this._fire('readystatechange');
+      try {
+        const r = __fetchSync(String(this._url));
+        this.status = r.status; this.statusText = '';
+        this.responseText = r.body; this.response = r.body;
+        this.readyState = 4;
+        this._fire('readystatechange');
+        if (this.onload) try { this.onload(); } catch(e){ console.error(e); }
+        this._fire('load');
+      } catch (e) {
+        this.readyState = 4;
+        if (this.onerror) try { this.onerror(e); } catch(err){ console.error(err); }
+        this._fire('error');
+      }
+    }
+    abort(){ this.readyState = 0; }
+    addEventListener(type, cb) {
+      if (typeof cb !== 'function') return;
+      this._listeners[type] = this._listeners[type] || [];
+      if (!this._listeners[type].includes(cb)) this._listeners[type].push(cb);
+    }
+    removeEventListener(type, cb) {
+      if (!this._listeners[type]) return;
+      this._listeners[type] = this._listeners[type].filter(x => x !== cb);
+    }
+    _fire(type) {
+      const cbs = (this._listeners[type] || []).slice();
+      cbs.forEach(cb => { try { cb({type, target: this}); } catch(e){ console.error(e); } });
+      if (type === 'readystatechange' && typeof this.onreadystatechange === 'function') {
+        try { this.onreadystatechange(); } catch(e){ console.error(e); }
+      }
+    }
+    getAllResponseHeaders(){ return ''; }
+    getResponseHeader(){ return null; }
+  };
+
+  globalThis.getComputedStyle = (el) => {
+    const style = (el && el.style) ? el.style : {};
+    return new Proxy(style, {
+      get(target, prop) {
+        if (prop === 'getPropertyValue') return (name) => (target[name] || '');
+        if (typeof prop === 'string') return target[prop] || '';
+        return target[prop];
+      }
+    });
+  };
   globalThis.__fenrirTakePatches = () => Object.values(nodes)
     .filter(node => node._dirty && node.id)
     .map(node => ({id: node.id, html: node.innerHTML}));
@@ -425,11 +709,16 @@ bool BrowserScriptRuntime::execute(const litehtml::document::ptr& document,
         return false;
     }
 
-    // Expose a synchronous fetch bridge used by the JS fetch() polyfill.
+    // Expose bridges used by the JS shim.
     {
         JSValue global = JS_GetGlobalObject(context);
+        JS_SetPropertyStr(context, global, "__pageUrl", JS_NewString(context, pageUrl.c_str()));
         JSValue fn = JS_NewCFunction(context, jsFetchSync, "__fetchSync", 1);
         JS_SetPropertyStr(context, global, "__fetchSync", fn);
+        JSValue cg = JS_NewCFunction(context, jsCookieGet, "__cookieGet", 0);
+        JS_SetPropertyStr(context, global, "__cookieGet", cg);
+        JSValue cs = JS_NewCFunction(context, jsCookieSet, "__cookieSet", 1);
+        JS_SetPropertyStr(context, global, "__cookieSet", cs);
         JS_FreeValue(context, global);
     }
     bool success = evaluate(context, host, kDomShim, "fenrir:dom", false, error);

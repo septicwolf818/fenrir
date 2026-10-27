@@ -4,6 +4,9 @@
 #include <cctype>
 #include <limits>
 #include <stop_token>
+#include <map>
+#include <mutex>
+#include <sstream>
 
 #include <curl/curl.h>
 
@@ -107,6 +110,84 @@ std::string resolveUrl(const std::string& base, const std::string& reference) {
     return allowed(value) && litehtml::url(value).has_authority() ? value : std::string{};
 }
 
+namespace {
+std::mutex& cookieMutex() {
+    static std::mutex m;
+    return m;
+}
+std::map<std::string, std::vector<std::string>>& cookieJar() {
+    static std::map<std::string, std::vector<std::string>> jar;
+    return jar;
+}
+std::string hostOf(const std::string& url) {
+    litehtml::url u(url);
+    std::string host = u.authority();
+    const auto colon = host.find(':');
+    if (colon != std::string::npos) host = host.substr(0, colon);
+    if (host.empty()) {
+        const auto pos = url.find("://");
+        if (pos != std::string::npos) {
+            std::string rest = url.substr(pos + 3);
+            const auto slash = rest.find('/');
+            if (slash != std::string::npos) rest = rest.substr(0, slash);
+            const auto colon = rest.find(':');
+            if (colon != std::string::npos) rest = rest.substr(0, colon);
+            host = rest;
+        }
+    }
+    return host;
+}
+struct HeaderCapture { std::string headers; };
+size_t writeHeader(char* data, size_t size, size_t count, void* context) {
+    auto& cap = *static_cast<HeaderCapture*>(context);
+    cap.headers.append(data, size * count);
+    return size * count;
+}
+} // namespace
+
+std::string getCookieString(const std::string& url) {
+    const std::string host = hostOf(url);
+    std::lock_guard lock(cookieMutex());
+    auto it = cookieJar().find(host);
+    if (it == cookieJar().end()) return {};
+    std::ostringstream oss;
+    bool first = true;
+    for (const auto& c : it->second) {
+        if (!first) oss << "; ";
+        oss << c;
+        first = false;
+    }
+    return oss.str();
+}
+
+void setCookieString(const std::string& url, const std::string& cookie) {
+    const std::string host = hostOf(url);
+    std::string nv = cookie;
+    const auto semi = nv.find(';');
+    if (semi != std::string::npos) nv = nv.substr(0, semi);
+    auto trim = [](std::string& v){
+        const auto a = v.find_first_not_of(" \t");
+        if (a == std::string::npos) { v.clear(); return; }
+        const auto b = v.find_last_not_of(" \t");
+        v = v.substr(a, b - a + 1);
+    };
+    trim(nv);
+    if (nv.empty()) return;
+    const auto eq = nv.find('=');
+    if (eq == std::string::npos) return;
+    std::string name = nv.substr(0, eq);
+    trim(name);
+    std::lock_guard lock(cookieMutex());
+    auto& vec = cookieJar()[host];
+    for (auto it = vec.begin(); it != vec.end();) {
+        if (it->compare(0, name.size(), name) == 0 && (it->size() == name.size() || it->at(name.size()) == '=')) {
+            it = vec.erase(it);
+        } else ++it;
+    }
+    vec.push_back(nv);
+}
+
+
 Response fetch(const std::string& url, std::size_t maxBytes, long timeoutMs,
                std::stop_token stop) {
     Response response;
@@ -139,7 +220,17 @@ Response fetch(const std::string& url, std::size_t maxBytes, long timeoutMs,
     curl_easy_setopt(handle, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(handle, CURLOPT_SSL_VERIFYHOST, 2L);
     curl_easy_setopt(handle, CURLOPT_USERAGENT, "FenrirBrowser/0.1");
+    const std::string cookieHeader = getCookieString(response.requestedUrl);
+    struct curl_slist* headers = nullptr;
+    if (!cookieHeader.empty()) {
+        const std::string h = "Cookie: " + cookieHeader;
+        headers = curl_slist_append(headers, h.c_str());
+        curl_easy_setopt(handle, CURLOPT_HTTPHEADER, headers);
+    }
     curl_easy_setopt(handle, CURLOPT_ACCEPT_ENCODING, "");
+    HeaderCapture headerCapture;
+    curl_easy_setopt(handle, CURLOPT_HEADERFUNCTION, writeHeader);
+    curl_easy_setopt(handle, CURLOPT_HEADERDATA, &headerCapture);
     curl_easy_setopt(handle, CURLOPT_WRITEFUNCTION, writeBody);
     curl_easy_setopt(handle, CURLOPT_WRITEDATA, &download);
     curl_easy_setopt(handle, CURLOPT_NOPROGRESS, 0L);
@@ -154,6 +245,26 @@ Response fetch(const std::string& url, std::size_t maxBytes, long timeoutMs,
     curl_easy_getinfo(handle, CURLINFO_CONTENT_TYPE, &contentType);
     if (effectiveUrl) response.finalUrl = effectiveUrl;
     if (contentType) response.contentType = contentType;
+    // Parse Set-Cookie headers.
+    {
+        std::istringstream iss(headerCapture.headers);
+        std::string line;
+        while (std::getline(iss, line)) {
+            // remove trailing \r
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            const std::string prefix = "set-cookie:";
+            std::string lower = line;
+            std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+            if (lower.compare(0, prefix.size(), prefix) == 0) {
+                std::string value = line.substr(prefix.size());
+                // trim
+                const auto a = value.find_first_not_of(" \t");
+                if (a != std::string::npos) value = value.substr(a);
+                setCookieString(response.requestedUrl, value);
+            }
+        }
+    }
+    if (headers) curl_slist_free_all(headers);
     curl_easy_cleanup(handle);
 
     if (download.tooLarge) {
