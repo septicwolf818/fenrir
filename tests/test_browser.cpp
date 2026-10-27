@@ -188,6 +188,37 @@ void runBrowserTests() {
               "typed text is rendered in the focused input");
     }
 
+    // CSS Grid can leave LiteHTML anchors without element placements. The
+    // browser supplies a virtual card hit area so the pointer can still click
+    // a project link in that layout.
+    {
+        apps::browser::BrowserPage page;
+        page.setBounds(Rect{0, 0, 80, 12});
+        check(page.loadHtml(
+                  "<html><head><style>#projects-container{display:grid;"
+                  "grid-template-columns:repeat(2,minmax(0,1fr));gap:24px}"
+                  ".project-card{display:flex;flex-direction:column;min-height:240px}"
+                  ".project-card>div:last-child{margin-top:auto;padding-top:20px}</style>"
+                  "</head><body><section><h2>Projects</h2><div id='projects-container'></div>"
+                  "<script>document.getElementById('projects-container').innerHTML="
+                  "'<article class=\"project-card\"><h3>GlowSync</h3><div><a "
+                  "href=\"https://example.test/GlowSync\">View project</a></div></article>';</script>"
+                  "</section></body></html>",
+                  "https://example.test/"),
+              "grid project fixture parses");
+        Screen screen(80, 12);
+        page.draw(screen);
+        check(page.focusNextControl(), "grid project link is keyboard-focusable");
+        const auto pointer = page.cursorPosition();
+        check(pointer.has_value(), "grid project focus positions the virtual cursor");
+        if (pointer) {
+            check(page.clickAt(pointer->first, pointer->second),
+                  "virtual cursor hit-testing activates a grid project link");
+            check(page.takePendingNavigation() == "https://example.test/GlowSync",
+                  "virtual cursor follows the link under a grid card");
+        }
+    }
+
     // Fixed decorative layers (like the portfolio's grid/glow backgrounds)
     // must not paint opaque ANSI cells over text after the page scrolls.
     {

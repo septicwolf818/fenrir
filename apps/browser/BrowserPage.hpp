@@ -96,6 +96,7 @@ private:
     int pointerX_ = -1;
     int pointerY_ = -1;
     int scrollRow_ = 0;
+    float virtualContentBottomPx_ = 0;
     int lastLayoutWidth_ = -1;
     int lastLayoutHeight_ = -1;
     bool loading_ = false;
