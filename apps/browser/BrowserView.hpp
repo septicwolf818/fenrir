@@ -23,7 +23,9 @@ public:
     void goBack();
     void goForward();
     void reload();
+    void goHome();
     void openFocusedLinkInNewTab();
+    std::string currentUrl() const;
 
     void draw(Screen& screen) override;
     KeyEventResult handleKey(const KeyEvent& event) override;
@@ -46,6 +48,7 @@ private:
     Tab* activeTab();
     const Tab* activeTab() const;
     BrowserPage* activePage();
+    const BrowserPage* activePage() const;
     void navigateCurrent(const std::string& address, bool addHistory = true);
     void selectTab(int index);
     void syncTabs();
@@ -60,6 +63,7 @@ private:
     Button* backButton_ = nullptr;
     Button* forwardButton_ = nullptr;
     Button* reloadButton_ = nullptr;
+    Button* homeButton_ = nullptr;
     Button* newTabButton_ = nullptr;
     LineEdit* address_ = nullptr;
     int addressSlot_ = -1;

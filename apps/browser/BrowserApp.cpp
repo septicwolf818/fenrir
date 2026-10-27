@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include "fenrir/core/Prefs.hpp"
+
 namespace fenrir::apps {
 
 std::unique_ptr<Widget> BrowserApp::createView(AppContext& context) {
@@ -17,6 +19,12 @@ std::unique_ptr<Widget> BrowserApp::createView(AppContext& context) {
             {U"Back (Ctrl+Left)", [raw] { raw->goBack(); }},
             {U"Forward (Ctrl+Right)", [raw] { raw->goForward(); }},
             {U"Reload (Ctrl+R)", [raw] { raw->reload(); }},
+            {U"Home (Ctrl+H)", [raw] { raw->goHome(); }},
+            {U"Set homepage to current page", [raw] {
+                auto& p = fenrir::prefs::forApp("browser");
+                const std::string url = raw->currentUrl();
+                if (!url.empty()) p.set("homepage", url);
+            }},
         }},
         {U"Page", std::vector<MenuItem>{
             {U"Open focused link in new tab (Ctrl+Enter)",
@@ -29,6 +37,7 @@ std::unique_ptr<Widget> BrowserApp::createView(AppContext& context) {
     view->pushShortcut({true, Key::Char, U't'}, [raw] { raw->newTab(); });
     view->pushShortcut({true, Key::Char, U'w'}, [raw] { raw->closeTab(); });
     view->pushShortcut({true, Key::Char, U'r'}, [raw] { raw->reload(); });
+    view->pushShortcut({true, Key::Char, U'h'}, [raw] { raw->goHome(); });
     return view;
 }
 
