@@ -63,7 +63,7 @@ public:
         ensureFocus();
         for (int i = 0; i < static_cast<int>(slots_.size()); ++i) {
             auto& item = *slots_[static_cast<std::size_t>(i)].widget;
-            const bool active = i == focused_;
+            const bool active = (focused_ || highlighted_) && i == focused_;
             item.setFocused(focused_ && active);
             item.setHighlighted(active);
             item.draw(screen);

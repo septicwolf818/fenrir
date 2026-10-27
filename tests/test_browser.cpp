@@ -77,6 +77,44 @@ void runBrowserTests() {
         BrowserTestContext context;
         apps::browser::BrowserView browser(context);
         check(!browser.editable(), "browser opens in keyboard navigation mode, not text edit mode");
+        browser.setBounds(Rect{0, 0, 64, 16});
+        Screen screen(64, 16);
+        browser.draw(screen);
+        std::u32string toolbarRow;
+        for (int x = 0; x < 64; ++x) toolbarRow.push_back(screen.at(x, 1).character);
+        check(toolbarRow.find(U"<") != std::u32string::npos &&
+                  toolbarRow.find(U"R") != std::u32string::npos &&
+                  toolbarRow.find(U"H") != std::u32string::npos &&
+                  toolbarRow.find(U"URL") != std::u32string::npos,
+              "browser toolbar draws recognizable navigation buttons and a labeled URL field");
+
+        // The address click is intentionally unconsumed after the LineEdit
+        // positions its caret: Desktop uses that result to enter Edit mode.
+        check(!browser.clickAt(30, 1) && browser.editable(),
+              "virtual-cursor click on the URL field enters browser edit mode");
+        const auto addressCursor = browser.cursorPosition();
+        check(addressCursor && addressCursor->second == 1,
+              "URL-field click places the GUI cursor on the toolbar row");
+        check(browser.handleKey(KeyEvent{Key::Char, U'x'}) == KeyEventResult::EnteredEdit,
+              "URL field accepts keyboard input after a virtual-cursor click");
+        check(browser.handleKey(KeyEvent{Key::Escape}) == KeyEventResult::ExitedEdit &&
+                  !browser.editable(),
+              "Escape leaves URL-field edit mode and returns to page navigation");
+
+        (void)browser.handleKey(KeyEvent{Key::Char, U'l', true});
+        (void)browser.handleKey(KeyEvent{Key::Backspace});
+        check(browser.handleKey(KeyEvent{Key::Enter}) == KeyEventResult::ExitedEdit &&
+                  !browser.editable(),
+              "submitting the address field exits edit mode cleanly");
+
+        (void)browser.handleKey(KeyEvent{Key::Char, U'l', true});
+        (void)browser.handleKey(KeyEvent{Key::Tab});
+        check(browser.handleKey(KeyEvent{Key::Enter}) == KeyEventResult::ExitedEdit &&
+                  !browser.editable(),
+              "toolbar button activation returns to page navigation mode");
+
+        check(browser.clickAt(2, 1) && !browser.editable(),
+              "clicking a disabled navigation button does not enter URL edit mode");
     }
 
     // Browser history uses Ctrl+Arrow because Alt+Arrow switches Linux TTYs.

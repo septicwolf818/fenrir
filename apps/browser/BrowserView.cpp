@@ -11,33 +11,36 @@ namespace fenrir::apps::browser {
 BrowserView::BrowserView(AppContext& context) : context_(context) {
     tabBar_.onSwitch = [this](int index) { selectTab(index); };
 
-    auto back = std::make_unique<Button>(U"Back");
+    auto back = std::make_unique<Button>(U"<");
     backButton_ = back.get();
     backButton_->onActivate = [this] { goBack(); };
-    toolbar_.addFixed(std::move(back), 6);
+    toolbar_.addFixed(std::move(back), 5);
 
-    auto forward = std::make_unique<Button>(U"Forward");
+    auto forward = std::make_unique<Button>(U">");
     forwardButton_ = forward.get();
     forwardButton_->onActivate = [this] { goForward(); };
-    toolbar_.addFixed(std::move(forward), 8);
+    toolbar_.addFixed(std::move(forward), 5);
 
-    auto reloadButton = std::make_unique<Button>(U"Reload");
+    auto reloadButton = std::make_unique<Button>(U"R");
     reloadButton_ = reloadButton.get();
     reloadButton_->onActivate = [this] { reload(); };
-    toolbar_.addFixed(std::move(reloadButton), 7);
+    toolbar_.addFixed(std::move(reloadButton), 5);
 
-    auto homeButton = std::make_unique<Button>(U"Home");
+    auto homeButton = std::make_unique<Button>(U"H");
     homeButton_ = homeButton.get();
     homeButton_->onActivate = [this] { goHome(); };
-    toolbar_.addFixed(std::move(homeButton), 6);
+    toolbar_.addFixed(std::move(homeButton), 5);
 
     auto addTabButton = std::make_unique<Button>(U"+");
     newTabButton_ = addTabButton.get();
     newTabButton_->onActivate = [this] { newTab(); };
-    toolbar_.addFixed(std::move(addTabButton), 3);
+    toolbar_.addFixed(std::move(addTabButton), 5);
 
     auto address = std::make_unique<LineEdit>();
     address_ = address.get();
+    // The left edge of the address field occupies its first cell, so begin
+    // the label with padding to keep the full "URL" hint visible.
+    address_->setLabel(U" URL ");
     address_->onSubmit = [this](const std::u32string& value) {
         navigateCurrent(text::toUtf8(value));
         toolbarActive_ = false;
@@ -277,7 +280,7 @@ void BrowserView::draw(Screen& screen) {
     syncToolbar();
 
     status_.setBounds(Rect{bounds_.x, bounds_.y + bounds_.h - statusHeight, bounds_.w, statusHeight});
-    status_.setText(U"Tab: page controls | Enter: open/edit | Ctrl+L: address | Ctrl+Enter: link in new tab",
+    status_.setText(U"Click URL or Ctrl+L to edit | Tab: page controls | Ctrl+Enter: link in new tab",
                     activePage() && activePage()->loading() ? U"Loading" : U"");
     status_.draw(screen);
 }
@@ -297,8 +300,17 @@ KeyEventResult BrowserView::handleKey(const KeyEvent& event) {
     if (event.ctrl && event.key == Key::Right) { goForward(); return KeyEventResult::Consumed; }
     if (event.ctrl && event.key == Key::Enter) { openFocusedLinkInNewTab(); return KeyEventResult::Consumed; }
     if (toolbarActive_) {
-        if (event.key == Key::Escape) { toolbarActive_ = false; return KeyEventResult::Consumed; }
-        return toolbar_.handleKey(event);
+        if (event.key == Key::Escape) {
+            toolbarActive_ = false;
+            return KeyEventResult::ExitedEdit;
+        }
+        const KeyEventResult result = toolbar_.handleKey(event);
+        if (!toolbarActive_ ||
+            (result == KeyEventResult::Activated && toolbar_.focusedIndex() != addressSlot_)) {
+            toolbarActive_ = false;
+            return KeyEventResult::ExitedEdit;
+        }
+        return result;
     }
     if (event.key == Key::Tab) {
         if (auto* page = activePage(); page && page->focusNextControl()) {
@@ -321,7 +333,15 @@ bool BrowserView::clickAt(int x, int y) {
     }
     if (toolbar_.bounds().contains(x, y)) {
         toolbarActive_ = true;
-        return toolbar_.clickAt(x, y);
+        const bool handled = toolbar_.clickAt(x, y);
+        if (toolbar_.focusedIndex() == addressSlot_ && handled) {
+            // Let Desktop enter the window's normal interaction mode. Since
+            // toolbarActive_ is now true, editable() selects Edit mode and the
+            // LineEdit's cursorPosition() becomes the GUI cursor location.
+            return false;
+        }
+        toolbarActive_ = false;
+        return true;
     }
     toolbarActive_ = false;
     if (auto* page = activePage(); page && page->clickAt(x, y)) {
