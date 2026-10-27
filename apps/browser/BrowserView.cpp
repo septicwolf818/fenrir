@@ -14,27 +14,27 @@ BrowserView::BrowserView(AppContext& context) : context_(context) {
     auto back = std::make_unique<Button>(U"Back");
     backButton_ = back.get();
     backButton_->onActivate = [this] { goBack(); };
-    toolbar_.addFixed(std::move(back), 8);
+    toolbar_.addFixed(std::move(back), 6);
 
     auto forward = std::make_unique<Button>(U"Forward");
     forwardButton_ = forward.get();
     forwardButton_->onActivate = [this] { goForward(); };
-    toolbar_.addFixed(std::move(forward), 10);
+    toolbar_.addFixed(std::move(forward), 8);
 
     auto reloadButton = std::make_unique<Button>(U"Reload");
     reloadButton_ = reloadButton.get();
     reloadButton_->onActivate = [this] { reload(); };
-    toolbar_.addFixed(std::move(reloadButton), 9);
+    toolbar_.addFixed(std::move(reloadButton), 7);
 
     auto homeButton = std::make_unique<Button>(U"Home");
     homeButton_ = homeButton.get();
     homeButton_->onActivate = [this] { goHome(); };
-    toolbar_.addFixed(std::move(homeButton), 7);
+    toolbar_.addFixed(std::move(homeButton), 6);
 
     auto addTabButton = std::make_unique<Button>(U"+");
     newTabButton_ = addTabButton.get();
     newTabButton_->onActivate = [this] { newTab(); };
-    toolbar_.addFixed(std::move(addTabButton), 5);
+    toolbar_.addFixed(std::move(addTabButton), 3);
 
     auto address = std::make_unique<LineEdit>();
     address_ = address.get();
