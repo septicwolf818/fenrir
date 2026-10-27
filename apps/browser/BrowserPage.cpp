@@ -531,6 +531,7 @@ bool BrowserPage::loadHtml(std::string html, std::string baseUrl) {
     scrollRow_ = 0;
     lastLayoutWidth_ = lastLayoutHeight_ = -1;
     links_.clear();
+    scriptContext_.reset();
     document_.reset();
     container_ = std::make_unique<BrowserContainer>(*this);
     container_->set_base_url(url_.c_str());
@@ -547,10 +548,10 @@ bool BrowserPage::loadHtml(std::string html, std::string baseUrl) {
         error_ = "Could not parse HTML.";
         return false;
     }
-    BrowserScriptRuntime scripts;
+    scriptContext_ = std::make_unique<BrowserScriptContext>();
     std::vector<BrowserScriptRuntime::DomPatch> patches;
     std::string scriptError;
-    (void)scripts.execute(document_, url_, patches, scriptError);
+    (void)scriptContext_->initialize(document_, url_, patches, scriptError);
     for (const auto& patch : patches) {
         const auto target = document_->root()->select_one("#" + patch.id);
         if (target) {
@@ -876,11 +877,49 @@ bool BrowserPage::inputFocused() const {
 bool BrowserPage::activateFocusedLink() {
     if (!document_ || focusedLink_ < 0 || static_cast<std::size_t>(focusedLink_) >= links_.size())
         return false;
+    const auto& link = links_[static_cast<std::size_t>(focusedLink_)];
+    const char* idAttr = link.element->get_attr("id");
+    std::string targetId = idAttr ? idAttr : "";
+    // Dispatch a click event into the (possibly live) JS context first, so
+    // handlers can mutate the DOM before the default navigation runs.
+    dispatchScriptEvent(targetId, "click");
     // LiteHTML can split an inline anchor into several text render boxes; its
     // mouse hit-test does not always map the box center back to the anchor.
     // Activate the focused semantic element directly instead.
-    links_[static_cast<std::size_t>(focusedLink_)].element->on_click();
+    link.element->on_click();
     return true;
+}
+
+void BrowserPage::dispatchScriptEvent(const std::string& targetId, const std::string& type) {
+    if (!scriptContext_ || !scriptContext_->valid()) return;
+    std::vector<BrowserScriptRuntime::DomPatch> patches;
+    std::string error;
+    (void)scriptContext_->dispatchEvent(targetId, type, patches, error);
+    for (const auto& patch : patches) {
+        const auto target = document_ ? document_->root()->select_one("#" + patch.id) : nullptr;
+        if (target) document_->append_children_from_string(*target, patch.html.c_str(), true);
+    }
+    ensureLayout();
+    rebuildLinks();
+}
+
+void BrowserPage::syncTextFieldToScript(int fieldIndex) {
+    if (!scriptContext_ || !scriptContext_->valid()) return;
+    if (fieldIndex < 0 || static_cast<std::size_t>(fieldIndex) >= textFields_.size()) return;
+    const auto& field = textFields_[static_cast<std::size_t>(fieldIndex)];
+    const char* idAttr = field.element->get_attr("id");
+    if (!idAttr || !*idAttr) return;
+    // Escape value for JS string.
+    std::string value;
+    for (char32_t cp : field.value) {
+        if (cp == U'\\') value += "\\\\";
+        else if (cp == U'\'') value += "\\'";
+        else if (cp >= 0x20 && cp < 0x7f) value += static_cast<char>(cp);
+        else value += "?";
+    }
+    std::string code = "var __n = (typeof __fenrirNodes!=='undefined') ? __fenrirNodes['" + std::string(idAttr) + "'] : null; if (__n) { __n.value = '" + value + "'; __n.textContent = '" + value + "'; }";
+    std::string error;
+    (void)scriptContext_->evaluateSnippet(code, error);
 }
 
 void BrowserPage::draw(Screen& screen) {
@@ -974,16 +1013,23 @@ KeyEventResult BrowserPage::handleKey(const KeyEvent& event) {
             case Key::Backspace:
                 if (field.caret > 0) {
                     field.value.erase(static_cast<std::size_t>(--field.caret), 1);
+                    syncTextFieldToScript(focusedTextField_);
+                    dispatchScriptEvent(field.element->get_attr("id") ? field.element->get_attr("id") : "", "input");
                 }
                 return KeyEventResult::Consumed;
             case Key::Delete:
-                if (field.caret < static_cast<int>(field.value.size()))
+                if (field.caret < static_cast<int>(field.value.size())) {
                     field.value.erase(static_cast<std::size_t>(field.caret), 1);
+                    syncTextFieldToScript(focusedTextField_);
+                    dispatchScriptEvent(field.element->get_attr("id") ? field.element->get_attr("id") : "", "input");
+                }
                 return KeyEventResult::Consumed;
             case Key::Char:
                 if (event.character >= U' ' && event.character != 0x7f) {
                     field.value.insert(field.value.begin() + field.caret, event.character);
                     ++field.caret;
+                    syncTextFieldToScript(focusedTextField_);
+                    dispatchScriptEvent(field.element->get_attr("id") ? field.element->get_attr("id") : "", "input");
                 }
                 return KeyEventResult::Consumed;
             case Key::Escape: return KeyEventResult::Ignored;
