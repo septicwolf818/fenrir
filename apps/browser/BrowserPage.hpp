@@ -35,11 +35,15 @@ public:
     std::string takePendingNavigation();
 
     bool focusLink(int direction = 1);
+    bool focusNextControl(int direction = 1);
     bool activateFocusedLink();
+    bool inputFocused() const;
 
     void draw(Screen& screen) override;
     KeyEventResult handleKey(const KeyEvent& event) override;
     bool clickAt(int x, int y) override;
+    bool movePointer(int fromX, int fromY, int& toX, int& toY) override;
+    void pointerMovedAt(int x, int y, int dx, int dy) override;
     bool editable() const override { return true; }
     bool wantsGuiCursor() const override;
     std::optional<std::pair<int, int>> cursorPosition() const override;
@@ -51,6 +55,18 @@ private:
         litehtml::position placement;
         std::string url;
     };
+    struct TextField {
+        litehtml::element::ptr element;
+        litehtml::position placement;
+        std::u32string value;
+        std::u32string placeholder;
+        int caret = 0;
+        bool password = false;
+    };
+    struct FocusTarget {
+        bool isTextField = false;
+        std::size_t index = 0;
+    };
     struct FetchState {
         std::mutex mutex;
         std::optional<Response> response;
@@ -58,6 +74,11 @@ private:
 
     void ensureLayout();
     void rebuildLinks();
+    void updateHoveredControl();
+    bool setPointerPosition(int x, int y);
+    void focusControl(std::size_t index);
+    void scrollIntoView(const litehtml::position& placement);
+    void drawTextFields(Screen& screen);
     void setTitle(std::string title);
     void setPendingNavigation(std::string url);
     int maxScrollRow() const;
@@ -67,7 +88,13 @@ private:
     std::shared_ptr<FetchState> fetchState_;
     std::jthread fetchWorker_;
     std::vector<Link> links_;
+    std::vector<TextField> textFields_;
+    std::vector<FocusTarget> focusOrder_;
     int focusedLink_ = -1;
+    int focusedTextField_ = -1;
+    int focusedControl_ = -1;
+    int pointerX_ = -1;
+    int pointerY_ = -1;
     int scrollRow_ = 0;
     int lastLayoutWidth_ = -1;
     int lastLayoutHeight_ = -1;

@@ -215,7 +215,7 @@ void BrowserView::draw(Screen& screen) {
     syncToolbar();
 
     status_.setBounds(Rect{bounds_.x, bounds_.y + bounds_.h - statusHeight, bounds_.w, statusHeight});
-    status_.setText(U"Tab: links | Enter: open | Ctrl+L: address | Ctrl+Enter: link in new tab",
+    status_.setText(U"Tab: page controls | Enter: open/edit | Ctrl+L: address | Ctrl+Enter: link in new tab",
                     activePage() && activePage()->loading() ? U"Loading" : U"");
     status_.draw(screen);
 }
@@ -238,7 +238,9 @@ KeyEventResult BrowserView::handleKey(const KeyEvent& event) {
         return toolbar_.handleKey(event);
     }
     if (event.key == Key::Tab) {
-        if (auto* page = activePage(); page && page->focusLink()) return KeyEventResult::Consumed;
+        if (auto* page = activePage(); page && page->focusNextControl()) {
+            return page->inputFocused() ? KeyEventResult::EnteredEdit : KeyEventResult::ExitedEdit;
+        }
         toolbarActive_ = true;
         toolbar_.focus(addressSlot_);
         return KeyEventResult::EnteredEdit;
@@ -266,6 +268,15 @@ bool BrowserView::clickAt(int x, int y) {
     return false;
 }
 
+bool BrowserView::movePointer(int fromX, int fromY, int& toX, int& toY) {
+    auto* page = activePage();
+    return page && page->movePointer(fromX, fromY, toX, toY);
+}
+
+void BrowserView::pointerMovedAt(int x, int y, int dx, int dy) {
+    if (auto* page = activePage()) page->pointerMovedAt(x, y, dx, dy);
+}
+
 std::optional<std::pair<int, int>> BrowserView::cursorPosition() const {
     if (toolbarActive_) return toolbar_.cursorPosition();
     const Tab* tab = activeTab();
@@ -273,5 +284,11 @@ std::optional<std::pair<int, int>> BrowserView::cursorPosition() const {
 }
 
 bool BrowserView::wantsGuiCursor() const { return cursorPosition().has_value(); }
+
+bool BrowserView::editable() const {
+    if (toolbarActive_) return true;
+    const auto* tab = activeTab();
+    return tab && tab->page->inputFocused();
+}
 
 } // namespace fenrir::apps::browser
