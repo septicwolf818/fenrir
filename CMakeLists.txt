@@ -49,6 +49,7 @@ add_library(fenrir STATIC
     src/window/Window.cpp
     src/window/WindowManager.cpp
     src/desktop/Desktop.cpp
+    apps/photoviewer/ImageDecoder.cpp
 )
 
 target_include_directories(fenrir PUBLIC
@@ -67,7 +68,6 @@ endif()
 # it connects Desktop to the registered apps (see apps/shell/main.cpp).
 add_executable(fenrir_desktop
     apps/shell/main.cpp
-    apps/photoviewer/ImageDecoder.cpp
 )
 
 add_library(fenrir_browser STATIC
@@ -79,6 +79,7 @@ add_library(fenrir_browser STATIC
 )
 target_include_directories(fenrir_browser PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/apps/browser
+    ${CMAKE_CURRENT_SOURCE_DIR}/apps/photoviewer
 )
 target_link_libraries(fenrir_browser PUBLIC fenrir litehtml qjs CURL::libcurl Threads::Threads)
 target_link_libraries(fenrir_desktop PRIVATE fenrir_browser)

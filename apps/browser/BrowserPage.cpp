@@ -6,10 +6,12 @@
 #include <limits>
 #include <map>
 #include <set>
+#include <vector>
 #include <utility>
 
 #include "BrowserNetwork.hpp"
 #include "BrowserScriptRuntime.hpp"
+#include "Image.hpp"
 #include "fenrir/core/Screen.hpp"
 #include "fenrir/core/Text.hpp"
 #include "fenrir/core/Theme.hpp"
@@ -132,18 +134,54 @@ public:
         putPageText(x, y, glyph, ansiColor(marker.color), StyleNone);
     }
 
-    void load_image(const char*, const char*, bool) override {}
+    void load_image(const char* src, const char* baseUrl, bool) override {
+        if (!src || !*src) return;
+        (void)imageFor(src, baseUrl ? baseUrl : "");
+    }
 
-    void get_image_size(const char*, const char*, litehtml::size& size) override {
-        size = litehtml::size(8 * kCellWidthPx, 2 * kCellHeightPx);
+    void get_image_size(const char* src, const char* baseUrl, litehtml::size& size) override {
+        if (!src || !*src) {
+            size = litehtml::size(8 * kCellWidthPx, 2 * kCellHeightPx);
+            return;
+        }
+        const fenrir::apps::Image* image = nullptr;
+        if (auto it = images_.find(resolveKey(src, baseUrl ? baseUrl : "")); it != images_.end() && it->second.loaded)
+            image = &it->second.image;
+        else {
+            auto& cached = imageFor(src, baseUrl ? baseUrl : "");
+            if (cached.loaded) image = &cached.image;
+        }
+        if (image && image->width() > 0 && image->height() > 0) {
+            size = litehtml::size(static_cast<float>(image->width()),
+                                  static_cast<float>(image->height()));
+        } else {
+            size = litehtml::size(8 * kCellWidthPx, 2 * kCellHeightPx);
+        }
     }
 
     void draw_image(litehtml::uint_ptr, const litehtml::background_layer& layer,
-                    const std::string&, const std::string&) override {
+                    const std::string& url, const std::string& baseUrl) override {
         if (!screen_) return;
-        const int x = page_.bounds().x + static_cast<int>(std::floor(layer.border_box.x / kCellWidthPx));
-        const int y = page_.bounds().y + static_cast<int>(std::floor(layer.border_box.y / kCellHeightPx));
-        putPageText(x, y, U"[image]", colors::Gray, StyleDim);
+        const std::string key = resolveKey(url.c_str(), baseUrl);
+        auto it = images_.find(key);
+        if (it == images_.end() || !it->second.loaded) {
+            // Trigger a load attempt (handles direct draw without prior layout).
+            auto& cached = imageFor(url.c_str(), baseUrl);
+            if (!cached.loaded) {
+                const int x = page_.bounds().x + static_cast<int>(std::floor(layer.border_box.x / kCellWidthPx));
+                const int y = page_.bounds().y + static_cast<int>(std::floor(layer.border_box.y / kCellHeightPx));
+                putPageText(x, y, U"[image]", colors::Gray, StyleDim);
+                return;
+            }
+            it = images_.find(key);
+        }
+        if (it == images_.end() || !it->second.loaded) {
+            const int x = page_.bounds().x + static_cast<int>(std::floor(layer.border_box.x / kCellWidthPx));
+            const int y = page_.bounds().y + static_cast<int>(std::floor(layer.border_box.y / kCellHeightPx));
+            putPageText(x, y, U"[image]", colors::Gray, StyleDim);
+            return;
+        }
+        drawTerminalImage(it->second.image, layer.border_box);
     }
 
     void draw_solid_fill(litehtml::uint_ptr, const litehtml::background_layer& layer,
@@ -263,7 +301,117 @@ public:
     }
 
 private:
+    struct CachedImage { fenrir::apps::Image image; bool loaded = false; std::string error; };
     struct Font { float size; int weight; int decoration; };
+
+    std::string resolveKey(const char* src, const std::string& baseUrl) const {
+        const std::string resolved = browser::resolveUrl(baseUrl.empty() ? baseUrl_ : baseUrl, src ? src : "");
+        return resolved.empty() ? (src ? src : "") : resolved;
+    }
+
+    CachedImage& imageFor(const char* src, const std::string& baseUrl) {
+        const std::string key = resolveKey(src, baseUrl);
+        auto it = images_.find(key);
+        if (it != images_.end()) return it->second;
+        CachedImage cached;
+        const std::string url = key.empty() ? (src ? src : "") : key;
+        Response response = browser::fetch(url, 4 * 1024 * 1024, 5000);
+        if (response.error.empty()) {
+            std::vector<uint8_t> bytes(response.body.begin(), response.body.end());
+            std::string err;
+            if (cached.image.loadFromBytes(bytes, err)) cached.loaded = true;
+            else { cached.error = err; }
+        } else {
+            cached.error = response.error;
+        }
+        return images_.emplace(key, std::move(cached)).first->second;
+    }
+
+    // Image cache.
+    std::map<std::string, CachedImage> images_;
+
+    void drawTerminalImage(const fenrir::apps::Image& image, const litehtml::position& box) {
+        if (!screen_ || image.width() <= 0 || image.height() <= 0) return;
+        const Rect page = page_.bounds();
+        const int boxX = page.x + static_cast<int>(std::floor(box.x / kCellWidthPx));
+        const int boxY = page.y + static_cast<int>(std::floor(box.y / kCellHeightPx));
+        const int boxW = std::max(1, static_cast<int>(std::ceil(box.width / kCellWidthPx)));
+        const int boxH = std::max(1, static_cast<int>(std::ceil(box.height / kCellHeightPx)));
+        const int x0 = std::max(boxX, page.x);
+        const int y0 = std::max(boxY, page.y);
+        const int x1 = std::min(boxX + boxW, page.x + page.w);
+        const int y1 = std::min(boxY + boxH, page.y + page.h);
+        if (x1 <= x0 || y1 <= y0) return;
+
+        const int cols = std::max(1, x1 - x0);
+        const int rows = std::max(1, y1 - y0);
+        const double sourceW = static_cast<double>(image.width()) / cols;
+        const double sourceH = static_cast<double>(image.height()) / (rows * 2);
+
+        auto average = [&](double ax0, double ay0, double ax1, double ay1) {
+            int left = std::clamp(static_cast<int>(std::floor(ax0)), 0, image.width() - 1);
+            int top = std::clamp(static_cast<int>(std::floor(ay0)), 0, image.height() - 1);
+            int right = std::clamp(std::max(left + 1, static_cast<int>(std::ceil(ax1))), left + 1, image.width());
+            int bottom = std::clamp(std::max(top + 1, static_cast<int>(std::ceil(ay1))), top + 1, image.height());
+            uint64_t r = 0, g = 0, b = 0, count = 0;
+            int step = 1;
+            const long long area = static_cast<long long>(right - left) * (bottom - top);
+            if (area > 256) step = std::max(1, static_cast<int>(std::sqrt(static_cast<double>(area) / 64.0)));
+            for (int y = top; y < bottom; y += step)
+                for (int x = left; x < right; x += step) {
+                    const auto& p = image.at(x, y);
+                    r += p.r; g += p.g; b += p.b; ++count;
+                }
+            if (count == 0) return fenrir::apps::RgbPixel{};
+            return fenrir::apps::RgbPixel{static_cast<uint8_t>(r / count),
+                                          static_cast<uint8_t>(g / count),
+                                          static_cast<uint8_t>(b / count)};
+        };
+
+        // Simple nearest-ANSI rendering with half-block vertical detail.
+        const auto nearest = [&](const fenrir::apps::RgbPixel& p) {
+            // reuse fenrir color mapping via ansiColor? ansiColor takes web_color.
+            // Use PhotoViewer palette? Just use nearest among 16 by RGB distance.
+            int best = 0; long dist = std::numeric_limits<long>::max();
+            static const int pal[16][3] = {
+                {0,0,0},{170,0,0},{0,170,0},{170,85,0},{0,0,170},{170,0,170},
+                {0,170,170},{170,170,170},{85,85,85},{255,85,85},{85,255,85},
+                {255,255,85},{85,85,255},{255,85,255},{85,255,255},{255,255,255}};
+            for (int i = 0; i < 16; ++i) {
+                long dr = p.r - pal[i][0], dg = p.g - pal[i][1], db = p.b - pal[i][2];
+                long d = dr*dr + dg*dg + db*db;
+                if (d < dist) { dist = d; best = i; }
+            }
+            return Color{static_cast<uint8_t>(best)};
+        };
+
+        for (int cy = 0; cy < rows; ++cy) {
+            const int screenY = y0 + cy;
+            if (screenY < page.y || screenY >= page.y + page.h) continue;
+            for (int cx = 0; cx < cols; ++cx) {
+                const int screenX = x0 + cx;
+                if (screenX < page.x || screenX >= page.x + page.w) continue;
+                const double x0s = cx * sourceW;
+                const double yTop = (cy * 2) * sourceH;
+                const double yBot = (cy * 2 + 1) * sourceH;
+                const auto top = average(x0s, yTop, x0s + sourceW, yTop + sourceH);
+                const auto bot = average(x0s, yBot, x0s + sourceW, yBot + sourceH);
+                const int topLuma = (2126*top.r + 7152*top.g + 722*top.b) / 10000;
+                const int botLuma = (2126*bot.r + 7152*bot.g + 722*bot.b) / 10000;
+                char32_t glyph;
+                Color fg, bg;
+                if (std::abs(topLuma - botLuma) > 24) {
+                    if (botLuma > topLuma) { glyph = U'▄'; fg = nearest(bot); bg = nearest(top); }
+                    else { glyph = U'▀'; fg = nearest(top); bg = nearest(bot); }
+                } else {
+                    glyph = U'█';
+                    fg = nearest(top);
+                    bg = nearest(top);
+                }
+                screen_->set(screenX, screenY, Cell{glyph, fg, bg, StyleNone});
+            }
+        }
+    }
 
     void fill(const litehtml::position& box, litehtml::web_color color) {
         const Rect page = page_.bounds();

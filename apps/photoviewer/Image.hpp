@@ -42,7 +42,12 @@ public:
         }
         if (!bytes.empty()) file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
         if (!file && !bytes.empty()) { error = "Could not read the complete file."; return false; }
+        return loadFromBytes(bytes, error);
+    }
 
+    bool loadFromBytes(const std::vector<uint8_t>& bytes, std::string& error) {
+        width_ = height_ = 0;
+        pixels_.clear();
         bool decoded = false;
         try {
             if (bytes.size() >= 2 && bytes[0] == 'B' && bytes[1] == 'M')
