@@ -537,6 +537,7 @@ bool BrowserPage::loadHtml(std::string html, std::string baseUrl) {
     document_ = litehtml::document::createFromString(
         html, container_.get(), litehtml::master_css,
         ".reveal{opacity:1!important;visibility:visible!important;transform:none!important}"
+        "noscript{display:none!important}"
         "input:not([type]),input[type=\"text\"],input[type=\"search\"],input[type=\"email\"],"
         "input[type=\"url\"],input[type=\"tel\"],input[type=\"password\"],"
         "input[type=\"number\"],textarea{box-sizing:border-box;width:240px;height:48px;padding:4px 8px;"
@@ -552,8 +553,9 @@ bool BrowserPage::loadHtml(std::string html, std::string baseUrl) {
     (void)scripts.execute(document_, url_, patches, scriptError);
     for (const auto& patch : patches) {
         const auto target = document_->root()->select_one("#" + patch.id);
-        if (target)
+        if (target) {
             document_->append_children_from_string(*target, patch.html.c_str(), true);
+        }
     }
     ensureLayout();
     rebuildLinks();
