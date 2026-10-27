@@ -184,7 +184,8 @@ public:
         const auto put = [&](int x, int y, char32_t glyph, const litehtml::border& border) {
             const Rect page = page_.bounds();
             if (border.width <= 0 || !page.contains(x, y)) return;
-            screen_->set(x, y, Cell{glyph, ansiColor(border.color), colors::Black, StyleNone});
+            const Color bg = screen_->at(x, y).bg;
+            screen_->set(x, y, Cell{glyph, ansiColor(border.color), bg, StyleNone});
         };
         for (int x = left; x <= right; ++x) {
             put(x, top, U'─', borders.top);
@@ -329,6 +330,9 @@ void BrowserPage::navigate(std::string url) {
     error_.clear();
     pendingNavigation_.clear();
     focusedLink_ = -1;
+    focusedTextField_ = -1;
+    focusedControl_ = -1;
+    pointerX_ = pointerY_ = -1;
     scrollRow_ = 0;
     lastLayoutWidth_ = lastLayoutHeight_ = -1;
     url = browser::normalizeUrl(url);
@@ -344,6 +348,9 @@ void BrowserPage::navigate(std::string url) {
     error_.clear();
     pendingNavigation_.clear();
     focusedLink_ = -1;
+    focusedTextField_ = -1;
+    focusedControl_ = -1;
+    pointerX_ = pointerY_ = -1;
     scrollRow_ = 0;
     lastLayoutWidth_ = lastLayoutHeight_ = -1;
     document_.reset();
@@ -378,7 +385,12 @@ bool BrowserPage::loadHtml(std::string html, std::string baseUrl) {
     container_->set_base_url(url_.c_str());
     document_ = litehtml::document::createFromString(
         html, container_.get(), litehtml::master_css,
-        ".reveal{opacity:1!important;visibility:visible!important;transform:none!important}");
+        ".reveal{opacity:1!important;visibility:visible!important;transform:none!important}"
+        "input:not([type]),input[type=\"text\"],input[type=\"search\"],input[type=\"email\"],"
+        "input[type=\"url\"],input[type=\"tel\"],input[type=\"password\"],"
+        "input[type=\"number\"],textarea{box-sizing:border-box;width:240px;height:48px;padding:4px 8px;"
+        "border:2px solid #718096;background-color:#1e293b;color:#f8fafc}"
+        "textarea{height:80px}");
     if (!document_) {
         error_ = "Could not parse HTML.";
         return false;
@@ -436,8 +448,20 @@ void BrowserPage::ensureLayout() {
 }
 
 void BrowserPage::rebuildLinks() {
+    litehtml::element::ptr preservedFocus;
+    if (focusedTextField_ >= 0 && static_cast<std::size_t>(focusedTextField_) < textFields_.size())
+        preservedFocus = textFields_[static_cast<std::size_t>(focusedTextField_)].element;
+    else if (focusedLink_ >= 0 && static_cast<std::size_t>(focusedLink_) < links_.size())
+        preservedFocus = links_[static_cast<std::size_t>(focusedLink_)].element;
+
+    auto previousFields = std::move(textFields_);
     links_.clear();
-    if (!document_ || !document_->root()) { focusedLink_ = -1; return; }
+    textFields_.clear();
+    focusOrder_.clear();
+    focusedLink_ = -1;
+    focusedTextField_ = -1;
+    focusedControl_ = -1;
+    if (!document_ || !document_->root()) return;
     auto include = [](litehtml::position& bounds, const litehtml::position& item, bool& hasBounds) {
         if (item.width <= 0 || item.height <= 0) return;
         if (!hasBounds) { bounds = item; hasBounds = true; return; }
@@ -449,7 +473,8 @@ void BrowserPage::rebuildLinks() {
         bounds.height = bottom - bounds.y;
     };
     std::function<void(const litehtml::element::ptr&)> visit = [&](const litehtml::element::ptr& element) {
-        if (std::string(element->get_tagName()) == "a") {
+        const std::string tag = element->get_tagName();
+        if (tag == "a") {
             const char* href = element->get_attr("href");
             if (href && *href) {
                 litehtml::position placement;
@@ -462,16 +487,96 @@ void BrowserPage::rebuildLinks() {
                     };
                 for (const auto& child : element->children()) includeText(child);
                 include(placement, element->get_placement(), hasPlacement);
-                if (hasPlacement)
+                if (hasPlacement) {
                     links_.push_back(Link{element, placement, browser::resolveUrl(url_, href)});
+                    focusOrder_.push_back(FocusTarget{false, links_.size() - 1});
+                }
+            }
+        }
+        const char* typeAttr = element->get_attr("type");
+        const std::string type = typeAttr ? typeAttr : "text";
+        const bool textInput = tag == "input" &&
+            (type.empty() || type == "text" || type == "search" || type == "email" ||
+             type == "url" || type == "tel" || type == "password" || type == "number");
+        if (tag == "textarea" || textInput) {
+            auto existing = std::find_if(previousFields.begin(), previousFields.end(),
+                [&](const TextField& field) { return field.element == element; });
+            TextField field;
+            if (existing != previousFields.end()) {
+                field = std::move(*existing);
+            } else {
+                field.element = element;
+                field.password = type == "password";
+                const char* value = element->get_attr("value");
+                if (value) field.value = text::toUtf32(value);
+                else if (tag == "textarea") {
+                    std::string valueText;
+                    element->get_text(valueText);
+                    field.value = text::toUtf32(valueText);
+                }
+                const char* placeholder = element->get_attr("placeholder");
+                if (placeholder) field.placeholder = text::toUtf32(placeholder);
+                field.caret = static_cast<int>(field.value.size());
+            }
+            field.placement = element->get_placement();
+            if (field.placement.width > 0 && field.placement.height > 0) {
+                textFields_.push_back(std::move(field));
+                focusOrder_.push_back(FocusTarget{true, textFields_.size() - 1});
             }
         }
         for (const auto& child : element->children()) visit(child);
     };
     visit(document_->root());
-    if (links_.empty()) focusedLink_ = -1;
-    else if (focusedLink_ >= static_cast<int>(links_.size()))
-        focusedLink_ = static_cast<int>(links_.size()) - 1;
+    if (preservedFocus) {
+        for (std::size_t i = 0; i < focusOrder_.size(); ++i) {
+            const auto target = focusOrder_[i];
+            const auto& element = target.isTextField
+                ? textFields_[target.index].element : links_[target.index].element;
+            if (element == preservedFocus) {
+                focusedControl_ = static_cast<int>(i);
+                focusedTextField_ = target.isTextField ? static_cast<int>(target.index) : -1;
+                focusedLink_ = target.isTextField ? -1 : static_cast<int>(target.index);
+                break;
+            }
+        }
+    }
+    if (pointerX_ >= 0 && pointerY_ >= 0) updateHoveredControl();
+}
+
+void BrowserPage::updateHoveredControl() {
+    focusedLink_ = -1;
+    focusedTextField_ = -1;
+    focusedControl_ = -1;
+    if (!document_ || pointerX_ < bounds_.x || pointerX_ >= bounds_.x + bounds_.w ||
+        pointerY_ < bounds_.y || pointerY_ >= bounds_.y + bounds_.h)
+        return;
+
+    const float px = static_cast<float>((pointerX_ - bounds_.x) * kCellWidthPx);
+    const float py = static_cast<float>((pointerY_ - bounds_.y + scrollRow_) * kCellHeightPx);
+    for (std::size_t i = 0; i < focusOrder_.size(); ++i) {
+        const auto target = focusOrder_[i];
+        const auto& area = target.isTextField
+            ? textFields_[target.index].placement : links_[target.index].placement;
+        if (px >= area.x && px < area.right() && py >= area.y && py < area.bottom()) {
+            focusedControl_ = static_cast<int>(i);
+            if (target.isTextField) focusedTextField_ = static_cast<int>(target.index);
+            else focusedLink_ = static_cast<int>(target.index);
+            return;
+        }
+    }
+}
+
+bool BrowserPage::setPointerPosition(int x, int y) {
+    if (!bounds_.contains(x, y)) return false;
+    pointerX_ = x;
+    pointerY_ = y;
+    updateHoveredControl();
+    if (inputFocused()) {
+        auto& field = textFields_[static_cast<std::size_t>(focusedTextField_)];
+        const int fieldX = bounds_.x + static_cast<int>(std::floor(field.placement.x / kCellWidthPx));
+        field.caret = std::clamp(x - fieldX - 1, 0, static_cast<int>(field.value.size()));
+    }
+    return true;
 }
 
 void BrowserPage::setTitle(std::string title) {
@@ -505,20 +610,75 @@ bool BrowserPage::focusLink(int direction) {
     if (focusedLink_ < 0) focusedLink_ = direction >= 0 ? 0 : static_cast<int>(links_.size()) - 1;
     else focusedLink_ = (focusedLink_ + direction + static_cast<int>(links_.size())) %
                         static_cast<int>(links_.size());
-    const auto& placement = links_[static_cast<std::size_t>(focusedLink_)].placement;
+    const int selectedLink = focusedLink_;
+    const auto& placement = links_[static_cast<std::size_t>(selectedLink)].placement;
+    scrollIntoView(placement);
+    pointerX_ = bounds_.x + static_cast<int>((placement.x + placement.width / 2) / kCellWidthPx);
+    pointerY_ = bounds_.y + static_cast<int>((placement.y + placement.height / 2) / kCellHeightPx) - scrollRow_;
+    pointerX_ = std::clamp(pointerX_, bounds_.x, bounds_.x + std::max(0, bounds_.w - 1));
+    pointerY_ = std::clamp(pointerY_, bounds_.y, bounds_.y + std::max(0, bounds_.h - 1));
+    focusedControl_ = -1;
+    for (std::size_t i = 0; i < focusOrder_.size(); ++i) {
+        if (!focusOrder_[i].isTextField && focusOrder_[i].index == static_cast<std::size_t>(selectedLink)) {
+            focusedControl_ = static_cast<int>(i);
+            break;
+        }
+    }
+    updateHoveredControl();
+    focusedTextField_ = -1;
+    focusedLink_ = selectedLink;
+    if (document_) {
+        litehtml::position::vector redraw;
+        const auto x = placement.x + placement.width / 2;
+        const auto y = placement.y + placement.height / 2;
+        (void)document_->on_mouse_over(x, y, x, y, redraw);
+    }
+    return true;
+}
+
+void BrowserPage::scrollIntoView(const litehtml::position& placement) {
     const int top = static_cast<int>(std::floor(placement.y / kCellHeightPx));
     const int bottom = static_cast<int>(std::ceil(placement.bottom() / kCellHeightPx));
     if (top < scrollRow_) scrollRow_ = top;
     else if (bottom > scrollRow_ + bounds_.h) scrollRow_ = bottom - bounds_.h;
     scrollRow_ = std::clamp(scrollRow_, 0, maxScrollRow());
-    if (document_) {
-        litehtml::position::vector redraw;
-        const auto& p = links_[static_cast<std::size_t>(focusedLink_)].placement;
-        const auto x = p.x + p.width / 2;
-        const auto y = p.y + p.height / 2;
-        (void)document_->on_mouse_over(x, y, x, y, redraw);
+}
+
+void BrowserPage::focusControl(std::size_t index) {
+    if (index >= focusOrder_.size()) return;
+    focusedControl_ = static_cast<int>(index);
+    const auto target = focusOrder_[index];
+    focusedTextField_ = target.isTextField ? static_cast<int>(target.index) : -1;
+    focusedLink_ = target.isTextField ? -1 : static_cast<int>(target.index);
+    const auto& placement = target.isTextField
+        ? textFields_[target.index].placement : links_[target.index].placement;
+    scrollIntoView(placement);
+    pointerX_ = bounds_.x + static_cast<int>((placement.x + placement.width / 2) / kCellWidthPx);
+    pointerY_ = bounds_.y + static_cast<int>((placement.y + placement.height / 2) / kCellHeightPx) - scrollRow_;
+    pointerX_ = std::clamp(pointerX_, bounds_.x, bounds_.x + std::max(0, bounds_.w - 1));
+    pointerY_ = std::clamp(pointerY_, bounds_.y, bounds_.y + std::max(0, bounds_.h - 1));
+    updateHoveredControl();
+    focusedControl_ = static_cast<int>(index);
+    focusedTextField_ = target.isTextField ? static_cast<int>(target.index) : -1;
+    focusedLink_ = target.isTextField ? -1 : static_cast<int>(target.index);
+}
+
+bool BrowserPage::focusNextControl(int direction) {
+    ensureLayout();
+    if (focusOrder_.empty()) return false;
+    if (focusedControl_ < 0) {
+        focusControl(direction >= 0 ? 0 : focusOrder_.size() - 1);
+        return true;
     }
+    const int count = static_cast<int>(focusOrder_.size());
+    const int next = (focusedControl_ + direction + count) % count;
+    focusControl(static_cast<std::size_t>(next));
     return true;
+}
+
+bool BrowserPage::inputFocused() const {
+    return focusedTextField_ >= 0 &&
+           static_cast<std::size_t>(focusedTextField_) < textFields_.size();
 }
 
 bool BrowserPage::activateFocusedLink() {
@@ -559,13 +719,90 @@ void BrowserPage::draw(Screen& screen) {
     // canvas in page-local coordinates and translate callbacks by bounds_.
     document_->draw(0, 0, -scrollPx, &clip);
     container_->endDraw();
+    drawTextFields(screen);
+}
+
+void BrowserPage::drawTextFields(Screen& screen) {
+    const Color fieldBackground{8};
+    for (std::size_t i = 0; i < textFields_.size(); ++i) {
+        const auto& field = textFields_[i];
+        const int x = bounds_.x + static_cast<int>(std::floor(field.placement.x / kCellWidthPx));
+        const int y = bounds_.y + static_cast<int>(std::floor(field.placement.y / kCellHeightPx)) - scrollRow_;
+        const int width = std::max(5, static_cast<int>(std::ceil(field.placement.width / kCellWidthPx)));
+        const int height = std::max(3, static_cast<int>(std::ceil(field.placement.height / kCellHeightPx)));
+        const Rect box{x, y, width, height};
+        const int left = std::max(box.x, bounds_.x);
+        const int top = std::max(box.y, bounds_.y);
+        const int right = std::min(box.x + box.w, bounds_.x + bounds_.w);
+        const int bottom = std::min(box.y + box.h, bounds_.y + bounds_.h);
+        if (right <= left || bottom <= top) continue;
+        screen.fillRect(Rect{left, top, right - left, bottom - top},
+                        Cell{U' ', colors::White, fieldBackground, StyleNone});
+
+        const bool focused = static_cast<int>(i) == focusedTextField_;
+        const Color borderColor = focused ? colors::BrightCyan : colors::Gray;
+        if (box.x >= bounds_.x && box.y >= bounds_.y &&
+            box.x + box.w <= bounds_.x + bounds_.w &&
+            box.y + box.h <= bounds_.y + bounds_.h) {
+            screen.drawBorder(box, U'┌', U'─', U'│', borderColor, fieldBackground);
+        }
+
+        const int innerWidth = std::max(1, width - 2);
+        const std::u32string& source = field.value.empty() ? field.placeholder : field.value;
+        const int visibleStart = source.size() > static_cast<std::size_t>(innerWidth)
+            ? std::max(0, field.caret - innerWidth + 1) : 0;
+        std::u32string visible;
+        if (field.password && !field.value.empty()) {
+            visible.assign(std::min<std::size_t>(innerWidth, field.value.size()), U'*');
+        } else if (visibleStart < static_cast<int>(source.size())) {
+            visible = source.substr(static_cast<std::size_t>(visibleStart),
+                                   static_cast<std::size_t>(innerWidth));
+        }
+        const int textY = box.y + std::clamp(height / 2, 1, std::max(1, height - 2));
+        screen.putText(box.x + 1, textY, visible,
+                       field.value.empty() ? colors::Gray : colors::BrightWhite,
+                       fieldBackground);
+    }
 }
 
 KeyEventResult BrowserPage::handleKey(const KeyEvent& event) {
     if (event.ctrl || event.alt) return KeyEventResult::Ignored;
+    if (inputFocused()) {
+        auto& field = textFields_[static_cast<std::size_t>(focusedTextField_)];
+        switch (event.key) {
+            case Key::Enter: return KeyEventResult::EnteredEdit;
+            case Key::Left: field.caret = std::max(0, field.caret - 1); return KeyEventResult::Consumed;
+            case Key::Right:
+                field.caret = std::min(static_cast<int>(field.value.size()), field.caret + 1);
+                return KeyEventResult::Consumed;
+            case Key::Home: field.caret = 0; return KeyEventResult::Consumed;
+            case Key::End:
+                field.caret = static_cast<int>(field.value.size());
+                return KeyEventResult::Consumed;
+            case Key::Backspace:
+                if (field.caret > 0) {
+                    field.value.erase(static_cast<std::size_t>(--field.caret), 1);
+                }
+                return KeyEventResult::Consumed;
+            case Key::Delete:
+                if (field.caret < static_cast<int>(field.value.size()))
+                    field.value.erase(static_cast<std::size_t>(field.caret), 1);
+                return KeyEventResult::Consumed;
+            case Key::Char:
+                if (event.character >= U' ' && event.character != 0x7f) {
+                    field.value.insert(field.value.begin() + field.caret, event.character);
+                    ++field.caret;
+                }
+                return KeyEventResult::Consumed;
+            case Key::Escape: return KeyEventResult::Ignored;
+            default: return KeyEventResult::Consumed;
+        }
+    }
     switch (event.key) {
         case Key::Tab: return focusLink(1) ? KeyEventResult::Consumed : KeyEventResult::Ignored;
-        case Key::Enter: return activateFocusedLink() ? KeyEventResult::Activated : KeyEventResult::Ignored;
+        case Key::Enter:
+            if (inputFocused()) return KeyEventResult::EnteredEdit;
+            return activateFocusedLink() ? KeyEventResult::Activated : KeyEventResult::Ignored;
         case Key::Up: scrollRow_ = std::max(0, scrollRow_ - 1); return KeyEventResult::Consumed;
         case Key::Down: scrollRow_ = std::min(maxScrollRow(), scrollRow_ + 1); return KeyEventResult::Consumed;
         case Key::PageUp: scrollRow_ = std::max(0, scrollRow_ - std::max(1, bounds_.h - 1)); return KeyEventResult::Consumed;
@@ -578,26 +815,72 @@ KeyEventResult BrowserPage::handleKey(const KeyEvent& event) {
 
 bool BrowserPage::clickAt(int x, int y) {
     if (!document_ || !bounds_.contains(x, y)) return false;
+    (void)setPointerPosition(x, y);
     const float px = static_cast<float>((x - bounds_.x) * kCellWidthPx);
     const float py = static_cast<float>((y - bounds_.y + scrollRow_) * kCellHeightPx);
     litehtml::position::vector redraw;
     (void)document_->on_mouse_over(px, py, px, py, redraw);
-    for (const auto& link : links_) {
-        const auto& area = link.placement;
-        if (px >= area.x && px < area.right() && py >= area.y && py < area.bottom()) {
-            link.element->on_click();
-            return true;
-        }
+    if (focusedLink_ >= 0 && static_cast<std::size_t>(focusedLink_) < links_.size()) {
+        links_[static_cast<std::size_t>(focusedLink_)].element->on_click();
+        return true;
     }
     (void)document_->on_lbutton_down(px, py, px, py, redraw);
     (void)document_->on_lbutton_up(px, py, px, py, redraw);
-    return true;
+    return false;
 }
 
-bool BrowserPage::wantsGuiCursor() const { return focusedLink_ >= 0; }
+bool BrowserPage::movePointer(int fromX, int fromY, int& toX, int& toY) {
+    if (!document_ || !bounds_.contains(fromX, fromY) ||
+        toX < bounds_.x || toX >= bounds_.x + bounds_.w)
+        return false;
+    const int lastRow = bounds_.y + bounds_.h - 1;
+    if (toY < bounds_.y && scrollRow_ > 0) {
+        const int rows = bounds_.y - toY;
+        scrollRow_ = std::max(0, scrollRow_ - rows);
+        toY = bounds_.y;
+        return true;
+    }
+    if (toY > lastRow && scrollRow_ < maxScrollRow()) {
+        const int rows = toY - lastRow;
+        scrollRow_ = std::min(maxScrollRow(), scrollRow_ + rows);
+        toY = lastRow;
+        return true;
+    }
+    return false;
+}
+
+void BrowserPage::pointerMovedAt(int x, int y, int, int) {
+    if (!setPointerPosition(x, y)) {
+        pointerX_ = pointerY_ = -1;
+        focusedLink_ = -1;
+    }
+}
+
+bool BrowserPage::wantsGuiCursor() const {
+    return pointerX_ >= 0 || focusedLink_ >= 0 ||
+           (document_ && bounds_.w > 0 && bounds_.h > 0);
+}
 
 std::optional<std::pair<int, int>> BrowserPage::cursorPosition() const {
-    if (focusedLink_ < 0 || static_cast<std::size_t>(focusedLink_) >= links_.size()) return std::nullopt;
+    if (inputFocused()) {
+        const auto& field = textFields_[static_cast<std::size_t>(focusedTextField_)];
+        const int boxX = bounds_.x + static_cast<int>(std::floor(field.placement.x / kCellWidthPx));
+        const int boxY = bounds_.y + static_cast<int>(std::floor(field.placement.y / kCellHeightPx)) - scrollRow_;
+        const int boxWidth = std::max(5, static_cast<int>(std::ceil(field.placement.width / kCellWidthPx)));
+        const int innerWidth = std::max(1, boxWidth - 2);
+        const int start = std::max(0, field.caret - innerWidth + 1);
+        const int x = boxX + 1 + std::clamp(field.caret - start, 0, innerWidth);
+        const int height = std::max(3, static_cast<int>(std::ceil(field.placement.height / kCellHeightPx)));
+        const int y = boxY + std::clamp(height / 2, 1, std::max(1, height - 2));
+        return std::make_pair(std::clamp(x, bounds_.x, bounds_.x + std::max(0, bounds_.w - 1)),
+                              std::clamp(y, bounds_.y, bounds_.y + std::max(0, bounds_.h - 1)));
+    }
+    if (pointerX_ >= 0 && pointerY_ >= 0) return std::make_pair(pointerX_, pointerY_);
+    if (focusedLink_ < 0 || static_cast<std::size_t>(focusedLink_) >= links_.size()) {
+        if (document_ && bounds_.w > 0 && bounds_.h > 0)
+            return std::make_pair(bounds_.x, bounds_.y);
+        return std::nullopt;
+    }
     const auto& p = links_[static_cast<std::size_t>(focusedLink_)].placement;
     const int x = bounds_.x + static_cast<int>((p.x + p.width / 2) / kCellWidthPx);
     const int y = bounds_.y + static_cast<int>((p.y + p.height / 2) / kCellHeightPx) - scrollRow_;

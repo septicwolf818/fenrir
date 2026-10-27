@@ -34,6 +34,7 @@ enum class KeyEventResult {
     Ignored,      // No child handled this key.
     Consumed,     // Handled without a mode change (e.g. container navigation).
     EnteredEdit,  // Editing started — enter Edit mode for this widget.
+    ExitedEdit,   // Editing ended — return to Keyboard mode for this widget.
     Activated,    // A child was activated (e.g. a button via Enter/Space).
 };
 
@@ -81,6 +82,13 @@ public:
     // by default, false means Desktop performs the standard window activation
     // (entering Keyboard mode).
     virtual bool clickAt(int /*x*/, int /*y*/) { return false; }
+
+    // Desktop's virtual pointer movement. Widgets may constrain a pointer move
+    // and consume it (for example, to scroll content at a viewport edge).
+    virtual bool movePointer(int /*fromX*/, int /*fromY*/, int& /*toX*/, int& /*toY*/) {
+        return false;
+    }
+    virtual void pointerMovedAt(int /*x*/, int /*y*/, int /*dx*/, int /*dy*/) {}
 
     // --- Menu / shortcuts API (used by Desktop for rendering and shortcuts) ---
 

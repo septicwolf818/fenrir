@@ -1,5 +1,6 @@
 #include "../apps/browser/BrowserNetwork.hpp"
 #include "../apps/browser/BrowserPage.hpp"
+#include "../apps/browser/BrowserView.hpp"
 
 #include "fenrir/core/Screen.hpp"
 #include "fenrir/widgets/Button.hpp"
@@ -10,6 +11,29 @@
 
 using namespace fenrir;
 using fenrir::test::check;
+
+namespace {
+class BrowserTestContext final : public AppContext {
+public:
+    void openFile(const std::string&, OnPick, OnCancel) override {}
+    void openFolder(const std::string&, OnPick, OnCancel) override {}
+    void saveFile(const std::string&, const std::string&, OnPick, OnCancel) override {}
+    void openAssociatedFile(const std::string&) override {}
+    void openFileWith(const std::string&) override {}
+    void notify(std::string, std::string, std::string) override {}
+    notifications::Bus& notifications() override { return bus_; }
+    void registerBackgroundWorker(std::string, BackgroundTick) override {}
+    void unregisterBackgroundWorker(const std::string&) override {}
+    std::vector<std::string> backgroundWorkers() const override { return {}; }
+    void openDialog(std::u32string, std::unique_ptr<Dialog>, OnDialogResult) override {}
+    void closeWindow() override {}
+    void addFdSource(int, std::function<void()>, std::function<bool()>) override {}
+    void removeFdSource(int) override {}
+
+private:
+    notifications::Bus bus_;
+};
+} // namespace
 
 void runBrowserTests() {
     check(apps::browser::normalizeUrl("example.com") == "https://example.com",
@@ -43,7 +67,13 @@ void runBrowserTests() {
         row.handleKey(KeyEvent{Key::Tab});
         check(row.focusedIndex() == 0, "horizontal layout tabs between controls");
         check(row.handleKey(KeyEvent{Key::Enter}) == KeyEventResult::Activated && activated == 1,
-              "horizontal layout activates the focused control");
+               "horizontal layout activates the focused control");
+    }
+
+    {
+        BrowserTestContext context;
+        apps::browser::BrowserView browser(context);
+        check(!browser.editable(), "browser opens in keyboard navigation mode, not text edit mode");
     }
 
     // Parse HTML, apply inline CSS, paint the page through Fenrir's Screen, and
@@ -81,6 +111,22 @@ void runBrowserTests() {
         (void)page.activateFocusedLink();
         check(page.takePendingNavigation() == "https://example.test/next",
               "Enter activation produces a resolved navigation URL");
+
+        const auto hovered = page.cursorPosition();
+        check(hovered.has_value(), "focused link positions the in-page cursor");
+        if (hovered) {
+            check(page.loadHtml(html, "https://example.test/start"),
+                  "fixture reloads before pointer-hover activation");
+            page.pointerMovedAt(hovered->first, hovered->second, 0, 0);
+            check(page.handleKey(KeyEvent{Key::Enter}) == KeyEventResult::Activated,
+                  "Enter activates the link under the in-page pointer");
+            check(page.takePendingNavigation() == "https://example.test/next",
+                  "hovered-link activation requests navigation");
+        }
+
+        check(!page.clickAt(47, 10), "clicking page background enters browser interaction mode");
+        check(page.cursorPosition() == std::make_pair(47, 10),
+              "background click leaves the in-page cursor at the pointer location");
     }
 
     // QuickJS executes both classic scripts and ES modules through the
@@ -96,6 +142,8 @@ void runBrowserTests() {
         check(page.loadHtml(html, "https://example.test/scripts"), "script fixture parses");
         Screen screen(48, 10);
         page.draw(screen);
+        check(page.cursorPosition() == std::make_pair(0, 0),
+              "page keyboard cursor starts inside the browser viewport");
         std::string rendered;
         for (const Cell& cell : screen.cells())
             if (cell.character < 128) rendered.push_back(static_cast<char>(cell.character));
@@ -103,6 +151,41 @@ void runBrowserTests() {
               "classic JavaScript DOM mutation renders");
         check(rendered.find("MODULE-RAN") != std::string::npos,
               "module JavaScript DOM mutation renders");
+    }
+
+    // Browser forms have a visible terminal-cell treatment and enter text-edit
+    // mode only after a field is selected.
+    {
+        apps::browser::BrowserPage page;
+        page.setBounds(Rect{0, 0, 48, 10});
+        check(page.loadHtml(
+                  "<html><body><input type='text' value='hello' placeholder='Type here'></body></html>",
+                  "https://example.test/form"),
+              "text input fixture parses");
+        Screen screen(48, 10);
+        page.draw(screen);
+        std::string rendered;
+        bool sawInputFrame = false;
+        for (const Cell& cell : screen.cells()) {
+            if (cell.character < 128) rendered.push_back(static_cast<char>(cell.character));
+            sawInputFrame = sawInputFrame || cell.character == U'┌';
+        }
+        check(sawInputFrame, "text fields render with a visible frame");
+        check(rendered.find("hello") != std::string::npos,
+              "text field value is visible inside its frame");
+        check(page.focusNextControl(), "Tab traversal reaches a text field");
+        check(page.inputFocused(), "focused text field is exposed for edit-mode routing");
+        check(page.handleKey(KeyEvent{Key::Enter}) == KeyEventResult::EnteredEdit,
+              "Enter requests edit mode for a focused text field");
+        check(page.handleKey(KeyEvent{Key::Char, U'!'} ) == KeyEventResult::Consumed,
+              "text input consumes typed characters");
+        screen.clear();
+        page.draw(screen);
+        rendered.clear();
+        for (const Cell& cell : screen.cells())
+            if (cell.character < 128) rendered.push_back(static_cast<char>(cell.character));
+        check(rendered.find("hello!") != std::string::npos,
+              "typed text is rendered in the focused input");
     }
 
     // Fixed decorative layers (like the portfolio's grid/glow backgrounds)
@@ -142,5 +225,20 @@ void runBrowserTests() {
         }
         check(documentText.find("SCROLL-LINE-29") != std::string::npos,
               "scrolling reaches text beyond the initial viewport");
+
+        page.handleKey(KeyEvent{Key::Home});
+        page.pointerMovedAt(24, 9, 0, 0);
+        int edgeX = 24;
+        int edgeY = 10;
+        check(page.movePointer(24, 9, edgeX, edgeY) && edgeY == 9 && page.scrollRow() == 1,
+              "moving the pointer past the bottom edge scrolls while keeping it in the page");
+        page.handleKey(KeyEvent{Key::End});
+        page.pointerMovedAt(24, 0, 0, 0);
+        edgeX = 24;
+        edgeY = -1;
+        const int beforeTopScroll = page.scrollRow();
+        check(page.movePointer(24, 0, edgeX, edgeY) && edgeY == 0 &&
+                  page.scrollRow() == beforeTopScroll - 1,
+              "moving the pointer past the top edge scrolls back up");
     }
 }
