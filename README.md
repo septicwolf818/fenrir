@@ -14,23 +14,28 @@ features rather than system administration.
 - Full-screen terminal UI with windowed, keyboard, and text-editing modes.
 - Window movement, resizing, minimization, and maximize/restore.
 - Built-in apps: Handbook, Text Editor, File Manager, Calculator, Settings,
-  Calendar, Paint, Terminal, and Photo Viewer.
+  Calendar, Paint, Terminal, Photo Viewer, and Browser.
 - File associations that open files in the selected app and persist globally.
 - Photo Viewer for common raster formats, rendered with ANSI colors and a
   brightness-to-character ramp.
+- A lightweight HTML/CSS browser with tabs, history, keyboard-focused links,
+  and 16-color terminal rendering. JavaScript is disabled and images are
+  placeholders in this first version.
 - Reusable widgets for menus, dialogs, lists, text input, file selection,
   directory trees, tabs, and status bars.
 - A terminal window that starts the user's shell in a pseudoterminal and
   supports a practical VT100/xterm subset.
-- No external libraries are required; the small image decoder is vendored.
-  The build uses C++20 and the platform's POSIX terminal/PTY interfaces.
+- litehtml, its Gumbo parser, and stb_image are vendored. libcurl is used for
+  HTTP/HTTPS and must be available as a development package. The build uses
+  C++20 and the platform's POSIX terminal/PTY interfaces.
 - Persistent desktop settings and per-app preferences under
   `~/.config/fenrir/`.
 
 ## Build and run
 
-Requirements: CMake 3.16 or newer, a C++20 compiler, a POSIX environment,
-and a UTF-8 locale for box-drawing and other non-ASCII text.
+Requirements: CMake 3.16 or newer, a C++20 compiler, libcurl development
+headers, a POSIX environment, and a UTF-8 locale for box-drawing and other
+non-ASCII text.
 On Linux, `forkpty` is linked from `libutil`; macOS provides it through the
 system libraries.
 

@@ -18,6 +18,7 @@ void runEditorTests();
 void runClipboardTests();
 void runHandbookTests();
 void runWindowTests();
+void runBrowserTests();
 
 namespace {
 
@@ -48,6 +49,7 @@ int main() {
         {"clipboard", runClipboardTests},
         {"handbook", runHandbookTests},
         {"window focus", runWindowTests},
+        {"browser", runBrowserTests},
     };
 
     int failed = 0;

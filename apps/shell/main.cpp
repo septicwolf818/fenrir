@@ -16,6 +16,7 @@
 #include "../terminal/TerminalApp.hpp"
 #include "../photoviewer/PhotoViewerApp.hpp"
 #include "../handbook/HandbookApp.hpp"
+#include "../browser/BrowserApp.hpp"
 
 int main() {
     try {
@@ -35,6 +36,7 @@ int main() {
         desktop.apps().registerApp(std::make_unique<fenrir::apps::PhotoViewerApp>());
         // The Handbook is the built-in documentation (available in F1).
         desktop.apps().registerApp(std::make_unique<fenrir::apps::HandbookApp>());
+        desktop.apps().registerApp(std::make_unique<fenrir::apps::BrowserApp>());
         // Add more apps here.
 
         return desktop.run();
