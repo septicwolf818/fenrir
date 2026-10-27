@@ -696,6 +696,7 @@ bool BrowserPage::loadHtml(std::string html, std::string baseUrl) {
     std::vector<BrowserScriptRuntime::DomPatch> patches;
     std::string scriptError;
     (void)scriptContext_->initialize(document_, url_, patches, scriptError);
+    if (!scriptError.empty() && scriptContext_) scriptContext_->recordError(scriptError);
     for (const auto& patch : patches) {
         const auto target = document_->root()->select_one("#" + patch.id);
         if (target) {
@@ -1132,6 +1133,7 @@ void BrowserPage::dispatchScriptEvent(const std::string& targetId, const std::st
     std::vector<BrowserScriptRuntime::DomPatch> patches;
     std::string error;
     (void)scriptContext_->dispatchEvent(targetId, type, patches, error);
+    if (!error.empty() && scriptContext_) scriptContext_->recordError(error);
     if (patches.empty()) return;
     for (const auto& patch : patches) {
         const auto target = document_ ? document_->root()->select_one("#" + patch.id) : nullptr;
@@ -1350,6 +1352,12 @@ std::optional<std::pair<int, int>> BrowserPage::cursorPosition() const {
     const int y = bounds_.y + static_cast<int>(p.y / kCellHeightPx) - scrollRow_;
     return std::make_pair(std::clamp(x, bounds_.x, bounds_.x + std::max(0, bounds_.w - 1)),
                           std::clamp(y, bounds_.y, bounds_.y + std::max(0, bounds_.h - 1)));
+}
+
+const std::vector<std::string>& BrowserPage::jsErrors() const {
+    static const std::vector<std::string> empty;
+    if (scriptContext_) return scriptContext_->jsErrors();
+    return empty;
 }
 
 } // namespace fenrir::apps::browser

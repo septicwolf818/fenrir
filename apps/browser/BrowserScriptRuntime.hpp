@@ -46,6 +46,10 @@ public:
     bool evaluateSnippet(const std::string& code, std::string& error);
     std::string evalString(const std::string& code, std::string& error);
 
+    void recordError(const std::string& msg) { jsErrors_.push_back(msg); }
+    const std::vector<std::string>& jsErrors() const { return jsErrors_; }
+    void clearErrors() { jsErrors_.clear(); }
+
     bool valid() const { return context_ != nullptr; }
     litehtml::document::ptr document() const { return document_; }
 
@@ -55,6 +59,7 @@ private:
     void* host_ = nullptr; // RuntimeHost*
     std::string pageUrl_;
     litehtml::document::ptr document_;
+    std::vector<std::string> jsErrors_;
     bool setupRuntime(const std::string& pageUrl, std::string& error);
     void teardown();
     bool collectPatches(std::vector<BrowserScriptRuntime::DomPatch>& patches, std::string& error);

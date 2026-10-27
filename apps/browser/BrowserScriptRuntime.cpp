@@ -5,7 +5,6 @@
 #include <functional>
 #include <string>
 #include <utility>
-#include <cstdio>
 #include <atomic>
 
 #include "BrowserNetwork.hpp"
@@ -901,7 +900,14 @@ bool BrowserScriptContext::setupRuntime(const std::string& pageUrl, std::string&
         JSValue qsa = JS_NewCFunction(context_, jsQuerySelectorAll, "__querySelectorAll", 1);
         JS_SetPropertyStr(context_, global, "__querySelectorAll", qsa);
         JSValue el = JS_NewCFunction(context_, [](JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)->JSValue {
-            if (argc>0) { const char* m = JS_ToCString(ctx, argv[0]); if (m){ fprintf(stderr, "JSERR: %s\\n", m); JS_FreeCString(ctx, m); } }
+            if (argc>0) {
+                const char* m = JS_ToCString(ctx, argv[0]);
+                if (m) {
+                    auto* c = static_cast<BrowserScriptContext*>(JS_GetContextOpaque(ctx));
+                    if (c) c->recordError(m);
+                    JS_FreeCString(ctx, m);
+                }
+            }
             return JS_UNDEFINED;
         }, "__errLog", 1);
         JS_SetPropertyStr(context_, global, "__errLog", el);
