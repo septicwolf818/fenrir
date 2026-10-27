@@ -230,8 +230,8 @@ KeyEventResult BrowserView::handleKey(const KeyEvent& event) {
             default: break;
         }
     }
-    if (event.alt && event.key == Key::Left) { goBack(); return KeyEventResult::Consumed; }
-    if (event.alt && event.key == Key::Right) { goForward(); return KeyEventResult::Consumed; }
+    if (event.ctrl && event.key == Key::Left) { goBack(); return KeyEventResult::Consumed; }
+    if (event.ctrl && event.key == Key::Right) { goForward(); return KeyEventResult::Consumed; }
     if (event.ctrl && event.key == Key::Enter) { openFocusedLinkInNewTab(); return KeyEventResult::Consumed; }
     if (toolbarActive_) {
         if (event.key == Key::Escape) { toolbarActive_ = false; return KeyEventResult::Consumed; }

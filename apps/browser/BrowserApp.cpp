@@ -14,8 +14,8 @@ std::unique_ptr<Widget> BrowserApp::createView(AppContext& context) {
             {U"Exit", [&context] { context.closeWindow(); }},
         }},
         {U"Navigate", std::vector<MenuItem>{
-            {U"Back (Alt+Left)", [raw] { raw->goBack(); }},
-            {U"Forward (Alt+Right)", [raw] { raw->goForward(); }},
+            {U"Back (Ctrl+Left)", [raw] { raw->goBack(); }},
+            {U"Forward (Ctrl+Right)", [raw] { raw->goForward(); }},
             {U"Reload (Ctrl+R)", [raw] { raw->reload(); }},
         }},
         {U"Page", std::vector<MenuItem>{
