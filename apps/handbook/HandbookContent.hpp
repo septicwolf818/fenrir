@@ -380,7 +380,7 @@ inline Library buildLibrary() {
                 .section("Navigation")
                 .keys({
                     {"Ctrl+L", "Focus the address field"},
-                    {"Ctrl+T / Ctrl+W", "Open / close a tab"},
+                    {"Ctrl+T / Ctrl+F4", "Open / close a tab"},
                     {"Ctrl+Left / Ctrl+Right", "Back / forward"},
                     {"Ctrl+R", "Reload the page"},
                     {"Tab / Enter", "Focus the next link / open it"},

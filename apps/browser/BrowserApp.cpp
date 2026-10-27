@@ -12,7 +12,7 @@ std::unique_ptr<Widget> BrowserApp::createView(AppContext& context) {
     view->setMenuTabs({
         {U"File", std::vector<MenuItem>{
             {U"New tab (Ctrl+T)", [raw] { raw->newTab(); }},
-            {U"Close tab (Ctrl+W)", [raw] { raw->closeTab(); }},
+            {U"Close tab (Ctrl+F4)", [raw] { raw->closeTab(); }},
             {U"Exit", [&context] { context.closeWindow(); }},
         }},
         {U"Navigate", std::vector<MenuItem>{
@@ -35,7 +35,7 @@ std::unique_ptr<Widget> BrowserApp::createView(AppContext& context) {
                       U"A lightweight HTML/CSS browser rendered with Fenrir's 16-color terminal cells.");
     view->pushShortcut({true, Key::Char, U'l'}, [raw] { (void)raw->handleKey(KeyEvent{Key::Char, U'l', true}); });
     view->pushShortcut({true, Key::Char, U't'}, [raw] { raw->newTab(); });
-    view->pushShortcut({true, Key::Char, U'w'}, [raw] { raw->closeTab(); });
+    view->pushShortcut({true, Key::F4}, [raw] { raw->closeTab(); });
     view->pushShortcut({true, Key::Char, U'r'}, [raw] { raw->reload(); });
     view->pushShortcut({true, Key::Char, U'h'}, [raw] { raw->goHome(); });
     return view;
