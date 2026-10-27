@@ -651,6 +651,7 @@ void BrowserPage::navigate(std::string url) {
         }
         const std::string finalUrl = response.finalUrl.empty() ? response.requestedUrl : response.finalUrl;
         (void)loadHtml(std::move(response.body), finalUrl);
+        needsRefresh_ = true;
         loading_ = false;
     });
 }
@@ -730,6 +731,7 @@ bool BrowserPage::loadHtml(std::string html, std::string baseUrl) {
     }
     ensureLayout();
     rebuildLinks();
+    needsRefresh_ = true;
     return true;
 }
 
@@ -1152,6 +1154,10 @@ void BrowserPage::draw(Screen& screen) {
     if (loading_) {
         screen.putText(bounds_.x, bounds_.y, U"Loading page...", themeColors.windowText, colors::Black);
         return;
+    }
+    if (needsRefresh_.exchange(false)) {
+        lastLayoutWidth_ = -1;
+        lastLayoutHeight_ = -1;
     }
     if (!error_.empty()) {
         screen.putText(bounds_.x, bounds_.y, text::clip(text::toUtf32(error_), bounds_.w),
