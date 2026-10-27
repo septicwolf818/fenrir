@@ -202,6 +202,37 @@ void runBrowserTests() {
               "module JavaScript DOM mutation renders");
     }
 
+    // Parsed LiteHTML elements are represented by lazy native handles rather
+    // than an eager duplicate JS tree. ID lookup and scoped selectors must
+    // still resolve attributes and honor Element.querySelector semantics.
+    {
+        apps::browser::BrowserPage page;
+        page.setBounds(Rect{0, 0, 64, 8});
+        const std::string html =
+            "<html><body><main id='scope'><span class='primary' data-label='native'>one</span>"
+            "<span>two</span></main><span id='outside'>outside</span>"
+            "<output id='result'></output><script>"
+            "const scope=document.getElementById('scope');"
+            "const first=scope.querySelector('span.primary');"
+            "const count=scope.querySelectorAll('span').length;"
+            "const selfMatches=scope.querySelectorAll('main').length;"
+            "const byId=document.getElementById('outside');"
+            "document.getElementById('result').textContent ="
+            "(first && first.getAttribute('data-label'))+':'+count+':'+selfMatches+':'+"
+            "(byId && byId.tagName.toLowerCase());"
+            "</script></body></html>";
+        check(page.loadHtml(html, "https://example.test/native-dom"),
+              "native DOM handle fixture parses");
+        Screen screen(64, 8);
+        page.draw(screen);
+        std::string rendered;
+        for (const Cell& cell : screen.cells())
+            if (cell.character < 128) rendered.push_back(static_cast<char>(cell.character));
+        check(rendered.find("native:2:0:span") != std::string::npos,
+              "native ID lookup and scoped selectors return correct DOM elements");
+        check(page.jsErrors().empty(), "native DOM handle operations report no JavaScript errors");
+    }
+
     // Browser forms have a visible terminal-cell treatment and enter text-edit
     // mode only after a field is selected.
     {
