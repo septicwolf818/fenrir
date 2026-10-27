@@ -112,13 +112,18 @@ JSValue jsQuerySelector(JSContext* context, JSValueConst, int argc, JSValueConst
     if (id && *id) {
         idStr = id;
     } else {
-        // assign synthetic id
         idStr = "__el_" + std::to_string(++sSynthIdCounter);
         el->set_attr("id", idStr.c_str());
     }
     JSValue obj = JS_NewObject(context);
     JS_SetPropertyStr(context, obj, "id", JS_NewString(context, idStr.c_str()));
     JS_SetPropertyStr(context, obj, "tag", JS_NewString(context, el->get_tagName()));
+    // Copy common attributes so JS can read element.href etc.
+    const char* commonAttrs[] = {"href","src","class","title","name","type","value","action","method","alt","placeholder","checked","disabled","target","rel"};
+    for (const char* a : commonAttrs) {
+        const char* v = el->get_attr(a);
+        if (v) JS_SetPropertyStr(context, obj, a, JS_NewString(context, v));
+    }
     return obj;
 }
 
@@ -144,6 +149,11 @@ JSValue jsQuerySelectorAll(JSContext* context, JSValueConst, int argc, JSValueCo
         JSValue o = JS_NewObject(context);
         JS_SetPropertyStr(context, o, "id", JS_NewString(context, idStr.c_str()));
         JS_SetPropertyStr(context, o, "tag", JS_NewString(context, el->get_tagName()));
+        const char* commonAttrs[] = {"href","src","class","title","name","type","value","action","method","alt","placeholder","checked","disabled","target","rel"};
+        for (const char* a : commonAttrs) {
+            const char* v = el->get_attr(a);
+            if (v) JS_SetPropertyStr(context, o, a, JS_NewString(context, v));
+        }
         JS_SetPropertyUint32(context, arr, idx++, o);
     }
     return arr;
@@ -230,6 +240,34 @@ const char* kDomShim = R"JS(
       this.parentElement = null;
       if (!fragment) __allNodes.push(this);
       this.style = Object.create(null);
+      // dataset: proxy for data-* attributes
+      Object.defineProperty(this, 'dataset', {
+        get() {
+          const self = this;
+          return new Proxy({}, {
+            get(target, prop) {
+              if (typeof prop === 'symbol') return target[prop];
+              // convert camelCase to kebab-case
+              const attr = 'data-' + String(prop).replace(/[A-Z]/g, m => '-' + m.toLowerCase());
+              return self.getAttribute(attr);
+            },
+            set(target, prop, value) {
+              const attr = 'data-' + String(prop).replace(/[A-Z]/g, m => '-' + m.toLowerCase());
+              self.setAttribute(attr, String(value));
+              return true;
+            }
+          });
+        },
+        configurable: true, enumerable: false
+      });
+      // Expose common attributes as properties (like real DOM).
+      ['href','src','value','title','name','type','action','method','alt','placeholder'].forEach(a => {
+        Object.defineProperty(this, a, {
+          get() { return this.getAttribute(a); },
+          set(v) { this.setAttribute(a, v); },
+          configurable: true, enumerable: true
+        });
+      });
       Object.defineProperty(this, 'className', {
         get: () => Array.from(this._classes).join(' '),
         set: value => { this._classes = new Set(String(value).split(/\s+/).filter(Boolean)); }
@@ -247,7 +285,63 @@ const char* kDomShim = R"JS(
       };
     }
     get innerHTML() { return this._html + this._children.map(node => node.outerHTML).join(''); }
-    set innerHTML(value) { this._html = String(value); this._children = []; this._dirty = true; }
+    set innerHTML(value) {
+      value = String(value);
+      this._html = '';
+      this._children = [];
+      // Parse the HTML string into child nodes so DOM queries work.
+      this._parseHtml(value);
+      this._dirty = true;
+    }
+    _parseHtml(html) {
+      // Minimal HTML parser: handles tags, attributes, and text.
+      const tagRe = /<\/?([a-zA-Z][a-zA-Z0-9]*)\b([^>]*)>|([^<]+)/g;
+      const stack = [this];
+      let m;
+      while ((m = tagRe.exec(html)) !== null) {
+        if (m[3]) {
+          // text node
+          const text = m[3];
+          if (text.trim()) {
+            const tn = new FenrirNode('#text');
+            tn.textContent = text;
+            stack[stack.length-1].appendChild(tn);
+          }
+          continue;
+        }
+        const closing = html[m.index+1] === '/';
+        const tagName = m[1];
+        const attrStr = m[2] || '';
+        if (closing) {
+          // pop stack until matching tag
+          for (let i = stack.length-1; i > 0; i--) {
+            if (stack[i].tagName.toLowerCase() === tagName.toLowerCase()) {
+              stack.length = i;
+              break;
+            }
+          }
+          continue;
+        }
+        // void elements
+        const voids = new Set(['area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr']);
+        const node = new FenrirNode(tagName);
+        // parse attributes
+        const attrRe = /([a-zA-Z_:][a-zA-Z0-9_.:-]*)\s*(?:=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g;
+        let am;
+        while ((am = attrRe.exec(attrStr)) !== null) {
+          const name = am[1];
+          const val = am[2] !== undefined ? am[2] : (am[3] !== undefined ? am[3] : (am[4] !== undefined ? am[4] : ''));
+          node.setAttribute(name, val);
+        }
+        stack[stack.length-1].appendChild(node);
+        if (!voids.has(tagName.toLowerCase()) && !html.slice(m.index).startsWith('</')) {
+          // check if self-closing
+          if (!attrStr.trim().endsWith('/')) {
+            stack.push(node);
+          }
+        }
+      }
+    }
     get textContent() { return this._text; }
     set textContent(value) {
       this._text = String(value);
@@ -319,6 +413,24 @@ const char* kDomShim = R"JS(
       this._dirty = true;
       return child;
     }
+    append(...children) {
+      children.forEach(c => this.appendChild(c));
+      return this;
+    }
+    prepend(...children) {
+      children.reverse().forEach(c => {
+        if (this._children.length) this.insertBefore(c, this._children[0]);
+        else this.appendChild(c);
+      });
+      return this;
+    }
+    add(child) {
+      // for <select>: add option
+      this.appendChild(child);
+      return this;
+    }
+    get text() { return this.textContent; }
+    set text(v) { this.textContent = v; }
     setAttribute(name, value) {
       name = String(name); value = String(value);
       if (name === 'id') this.id = value;
@@ -348,12 +460,53 @@ const char* kDomShim = R"JS(
       return true;
     }
     querySelector(sel) {
-      const scoped = this.id ? ('#' + this.id + ' ' + sel) : sel;
-      return document.querySelector(scoped);
+      const __match = (node, s) => {
+        s = String(s).trim();
+        if (!s) return false;
+        if (s.startsWith('#')) return node.id === s.slice(1);
+        if (s.startsWith('.')) return !!(node._classes && node._classes.has(s.slice(1)));
+        // tag
+        if (s.indexOf(' ') < 0 && s.indexOf('.') < 0 && s.indexOf('#') < 0) {
+          return node.tagName.toLowerCase() === s.toLowerCase();
+        }
+        return false;
+      };
+      const walk = (node, s) => {
+        for (const c of (node._children || [])) {
+          if (__match(c, s)) return c;
+          const r = walk(c, s);
+          if (r) return r;
+        }
+        return null;
+      };
+      return walk(this, sel);
     }
     querySelectorAll(sel) {
-      const scoped = this.id ? ('#' + this.id + ' ' + sel) : sel;
-      return document.querySelectorAll(scoped);
+      const __match = (node, s) => {
+        s = String(s).trim();
+        if (!s) return false;
+        if (s.startsWith('#')) return node.id === s.slice(1);
+        if (s.startsWith('.')) return !!(node._classes && node._classes.has(s.slice(1)));
+        if (s.indexOf(' ') < 0 && s.indexOf('.') < 0 && s.indexOf('#') < 0) {
+          return node.tagName.toLowerCase() === s.toLowerCase();
+        }
+        return false;
+      };
+      const out = [];
+      const walk = (node, s) => {
+        for (const c of (node._children || [])) {
+          if (__match(c, s)) out.push(c);
+          walk(c, s);
+        }
+      };
+      walk(this, sel);
+      return out;
+    }
+    getElementsByTagName(tag) {
+      return this.querySelectorAll(String(tag));
+    }
+    getElementsByClassName(cls) {
+      return this.querySelectorAll('.' + String(cls));
     }
     getBoundingClientRect() { return {top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0}; }
     getClientRects() { return []; }
@@ -375,7 +528,7 @@ const char* kDomShim = R"JS(
   }
   const document = {
     documentElement: new FenrirNode('html'),
-    body: null,
+    body: new FenrirNode('body'),
     head: new FenrirNode('head'),
     readyState: 'loading',
     get cookie() { return __cookieGet(); },
@@ -389,9 +542,23 @@ const char* kDomShim = R"JS(
     createDocumentFragment() { return new FenrirNode('#fragment', '', true); },
     querySelector(selector) {
       const r = __querySelector(String(selector));
-      if (!r) return null;
-      if (!nodes[r.id]) nodes[r.id] = new FenrirNode(r.tag, r.id);
-      return nodes[r.id];
+      if (r) {
+        if (!nodes[r.id]) {
+          const n = new FenrirNode(r.tag, r.id);
+          ['href','src','class','title','name','type','value','action','method','alt','placeholder','checked','disabled','target','rel'].forEach(a => {
+            if (r[a] !== undefined) n.setAttribute(a, r[a]);
+          });
+          if (r.class) n.className = r.class;
+          nodes[r.id] = n;
+        }
+        return nodes[r.id];
+      }
+      // Fallback: search JS-created (detached) nodes.
+      for (const n of __allNodes) {
+        const res = n.querySelector ? n.querySelector(selector) : null;
+        if (res) return res;
+      }
+      return null;
     },
     querySelectorAll(selector) {
       const res = __querySelectorAll(String(selector));
@@ -399,25 +566,27 @@ const char* kDomShim = R"JS(
       for (let i = 0; i < res.length; i++) {
         const r = res[i];
         if (!r) continue;
-        if (!nodes[r.id]) nodes[r.id] = new FenrirNode(r.tag, r.id);
+        if (!nodes[r.id]) {
+          const n = new FenrirNode(r.tag, r.id);
+          ['href','src','class','title','name','type','value','action','method','alt','placeholder','checked','disabled','target','rel'].forEach(a => {
+            if (r[a] !== undefined) n.setAttribute(a, r[a]);
+          });
+          if (r.class) n.className = r.class;
+          nodes[r.id] = n;
+        }
         out.push(nodes[r.id]);
       }
       return out;
     },
     getElementsByTagName(tag) {
-      return this.querySelectorAll(String(tag));
-    },
-    getElementsByClassName(cls) {
-      return this.querySelectorAll('.' + String(cls));
-    },
-    getElementsByTagName(tag) {
-      tag = String(tag).toLowerCase();
-      const res = __allNodes.filter(n => n.tagName.toLowerCase() === tag);
-      if (res.length === 0 && tag === 'script') return [document.documentElement || this.documentElement];
+      const res = this.querySelectorAll(String(tag));
+      if (res.length === 0 && String(tag).toLowerCase() === 'script') {
+        return [document.documentElement || this.documentElement];
+      }
       return res;
     },
     getElementsByClassName(cls) {
-      return __allNodes.filter(n => n._classes && n._classes.has(String(cls)));
+      return this.querySelectorAll('.' + String(cls));
     },
     defaultView: null,
     addEventListener(type, cb) {
