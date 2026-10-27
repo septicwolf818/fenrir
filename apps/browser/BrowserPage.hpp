@@ -98,6 +98,8 @@ private:
     int focusedControl_ = -1;
     int pointerX_ = -1;
     int pointerY_ = -1;
+    std::string lastHoveredTargetId_;
+    int lastFocusedControl_ = -1;
     int scrollRow_ = 0;
     int lastLayoutWidth_ = -1;
     int lastLayoutHeight_ = -1;

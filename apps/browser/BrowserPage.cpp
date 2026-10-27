@@ -879,12 +879,20 @@ void BrowserPage::rebuildLinks() {
 }
 
 void BrowserPage::updateHoveredControl() {
+    std::string oldId = lastHoveredTargetId_;
     focusedLink_ = -1;
     focusedTextField_ = -1;
     focusedControl_ = -1;
     if (!document_ || pointerX_ < bounds_.x || pointerX_ >= bounds_.x + bounds_.w ||
-        pointerY_ < bounds_.y || pointerY_ >= bounds_.y + bounds_.h)
+        pointerY_ < bounds_.y || pointerY_ >= bounds_.y + bounds_.h) {
+        // pointer left the page: fire leave events
+        if (!oldId.empty()) {
+            dispatchScriptEvent(oldId, "mouseleave");
+            dispatchScriptEvent(oldId, "mouseout");
+        }
+        lastHoveredTargetId_.clear();
         return;
+    }
 
     // Compare in terminal-cell coordinates so hit testing matches the cells
     // that LiteHTML actually paints. LiteHTML's placement origin is the text
@@ -914,11 +922,31 @@ void BrowserPage::updateHoveredControl() {
             }
         }
     }
+    std::string newId;
     if (bestIndex >= 0) {
         const auto target = focusOrder_[static_cast<std::size_t>(bestIndex)];
         focusedControl_ = bestIndex;
-        if (target.isTextField) focusedTextField_ = static_cast<int>(target.index);
-        else focusedLink_ = static_cast<int>(target.index);
+        if (target.isTextField) {
+            focusedTextField_ = static_cast<int>(target.index);
+            const char* id = textFields_[target.index].element->get_attr("id");
+            if (id) newId = id;
+        } else {
+            focusedLink_ = static_cast<int>(target.index);
+            const char* id = links_[target.index].element->get_attr("id");
+            if (id) newId = id;
+        }
+    }
+    // Fire hover events if the hovered control changed.
+    if (newId != lastHoveredTargetId_) {
+        if (!lastHoveredTargetId_.empty() && lastHoveredTargetId_ != newId) {
+            dispatchScriptEvent(lastHoveredTargetId_, "mouseleave");
+            dispatchScriptEvent(lastHoveredTargetId_, "mouseout");
+        }
+        if (!newId.empty()) {
+            dispatchScriptEvent(newId, "mouseenter");
+            dispatchScriptEvent(newId, "mouseover");
+        }
+        lastHoveredTargetId_ = newId;
     }
 }
 
@@ -927,6 +955,13 @@ bool BrowserPage::setPointerPosition(int x, int y) {
     pointerX_ = x;
     pointerY_ = y;
     updateHoveredControl();
+    if (focusedLink_ >= 0 && static_cast<std::size_t>(focusedLink_) < links_.size()) {
+        const char* id = links_[static_cast<std::size_t>(focusedLink_)].element->get_attr("id");
+        if (id && *id) dispatchScriptEvent(id, "mousemove");
+    } else if (focusedTextField_ >= 0 && static_cast<std::size_t>(focusedTextField_) < textFields_.size()) {
+        const char* id = textFields_[static_cast<std::size_t>(focusedTextField_)].element->get_attr("id");
+        if (id && *id) dispatchScriptEvent(id, "mousemove");
+    }
     if (inputFocused()) {
         auto& field = textFields_[static_cast<std::size_t>(focusedTextField_)];
         const int fieldX = bounds_.x + static_cast<int>(std::floor(field.placement.x / kCellWidthPx));
@@ -978,6 +1013,14 @@ void BrowserPage::movePageCursorBy(int dx, int dy) {
         pointerY_ = std::clamp(pointerY_ + dy, bounds_.y, lastRow);
     }
     updateHoveredControl();
+    // Notify JS of cursor movement for hover-reactive UI.
+    if (focusedLink_ >= 0 && static_cast<std::size_t>(focusedLink_) < links_.size()) {
+        const char* id = links_[static_cast<std::size_t>(focusedLink_)].element->get_attr("id");
+        if (id && *id) dispatchScriptEvent(id, "mousemove");
+    } else if (focusedTextField_ >= 0 && static_cast<std::size_t>(focusedTextField_) < textFields_.size()) {
+        const char* id = textFields_[static_cast<std::size_t>(focusedTextField_)].element->get_attr("id");
+        if (id && *id) dispatchScriptEvent(id, "mousemove");
+    }
 }
 
 bool BrowserPage::focusLink(int direction) {
@@ -1022,6 +1065,14 @@ void BrowserPage::scrollIntoView(const litehtml::position& placement) {
 
 void BrowserPage::focusControl(std::size_t index) {
     if (index >= focusOrder_.size()) return;
+    // blur previous
+    if (lastFocusedControl_ >= 0 && lastFocusedControl_ != static_cast<int>(index) &&
+        static_cast<std::size_t>(lastFocusedControl_) < focusOrder_.size()) {
+        const auto prev = focusOrder_[static_cast<std::size_t>(lastFocusedControl_)];
+        const auto& prevArea = prev.isTextField ? textFields_[prev.index].placement : links_[prev.index].placement;
+        const char* prevId = prev.isTextField ? textFields_[prev.index].element->get_attr("id") : links_[prev.index].element->get_attr("id");
+        if (prevId && *prevId) dispatchScriptEvent(prevId, "blur");
+    }
     focusedControl_ = static_cast<int>(index);
     const auto target = focusOrder_[index];
     focusedTextField_ = target.isTextField ? static_cast<int>(target.index) : -1;
@@ -1037,6 +1088,9 @@ void BrowserPage::focusControl(std::size_t index) {
     focusedControl_ = static_cast<int>(index);
     focusedTextField_ = target.isTextField ? static_cast<int>(target.index) : -1;
     focusedLink_ = target.isTextField ? -1 : static_cast<int>(target.index);
+    const char* newId = target.isTextField ? textFields_[target.index].element->get_attr("id") : links_[target.index].element->get_attr("id");
+    if (newId && *newId) dispatchScriptEvent(newId, "focus");
+    lastFocusedControl_ = static_cast<int>(index);
 }
 
 bool BrowserPage::focusNextControl(int direction) {
