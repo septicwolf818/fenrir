@@ -565,15 +565,21 @@ void BrowserPage::updateHoveredControl() {
         pointerY_ < bounds_.y || pointerY_ >= bounds_.y + bounds_.h)
         return;
 
-    const float px = static_cast<float>((pointerX_ - bounds_.x) * kCellWidthPx) +
-                     static_cast<float>(kCellWidthPx) / 2.0f;
-    const float py = static_cast<float>((pointerY_ - bounds_.y + scrollRow_) * kCellHeightPx) +
-                     static_cast<float>(kCellHeightPx) / 2.0f;
+    // Compare in terminal-cell coordinates so hit testing matches the cells
+    // that LiteHTML actually paints. LiteHTML's placement origin is the text
+    // baseline, so a pixel-center test lands one row below the visible text.
+    const int cellX = pointerX_ - bounds_.x;
+    const int cellY = pointerY_ - bounds_.y + scrollRow_;
     for (std::size_t i = 0; i < focusOrder_.size(); ++i) {
         const auto target = focusOrder_[i];
         const auto& area = target.isTextField
             ? textFields_[target.index].placement : links_[target.index].placement;
-        if (px >= area.x && px < area.right() && py >= area.y && py < area.bottom()) {
+        if (area.width <= 0 || area.height <= 0) continue;
+        const int leftCell = static_cast<int>(std::floor(area.x / kCellWidthPx));
+        const int rightCell = leftCell + std::max(1, static_cast<int>(std::ceil(area.width / kCellWidthPx)));
+        const int topCell = static_cast<int>(std::floor(area.y / kCellHeightPx));
+        const int bottomCell = topCell + std::max(1, static_cast<int>(std::ceil(area.height / kCellHeightPx)));
+        if (cellX >= leftCell && cellX < rightCell && cellY >= topCell && cellY < bottomCell) {
             focusedControl_ = static_cast<int>(i);
             if (target.isTextField) focusedTextField_ = static_cast<int>(target.index);
             else focusedLink_ = static_cast<int>(target.index);
@@ -650,7 +656,7 @@ bool BrowserPage::focusLink(int direction) {
     const auto& placement = links_[static_cast<std::size_t>(selectedLink)].placement;
     scrollIntoView(placement);
     pointerX_ = bounds_.x + static_cast<int>((placement.x + placement.width / 2) / kCellWidthPx);
-    pointerY_ = bounds_.y + static_cast<int>((placement.y + placement.height / 2) / kCellHeightPx) - scrollRow_;
+    pointerY_ = bounds_.y + static_cast<int>(placement.y / kCellHeightPx) - scrollRow_;
     pointerX_ = std::clamp(pointerX_, bounds_.x, bounds_.x + std::max(0, bounds_.w - 1));
     pointerY_ = std::clamp(pointerY_, bounds_.y, bounds_.y + std::max(0, bounds_.h - 1));
     focusedControl_ = -1;
@@ -690,7 +696,7 @@ void BrowserPage::focusControl(std::size_t index) {
         ? textFields_[target.index].placement : links_[target.index].placement;
     scrollIntoView(placement);
     pointerX_ = bounds_.x + static_cast<int>((placement.x + placement.width / 2) / kCellWidthPx);
-    pointerY_ = bounds_.y + static_cast<int>((placement.y + placement.height / 2) / kCellHeightPx) - scrollRow_;
+    pointerY_ = bounds_.y + static_cast<int>(placement.y / kCellHeightPx) - scrollRow_;
     pointerX_ = std::clamp(pointerX_, bounds_.x, bounds_.x + std::max(0, bounds_.w - 1));
     pointerY_ = std::clamp(pointerY_, bounds_.y, bounds_.y + std::max(0, bounds_.h - 1));
     updateHoveredControl();
@@ -906,7 +912,7 @@ std::optional<std::pair<int, int>> BrowserPage::cursorPosition() const {
     }
     const auto& p = links_[static_cast<std::size_t>(focusedLink_)].placement;
     const int x = bounds_.x + static_cast<int>((p.x + p.width / 2) / kCellWidthPx);
-    const int y = bounds_.y + static_cast<int>((p.y + p.height / 2) / kCellHeightPx) - scrollRow_;
+    const int y = bounds_.y + static_cast<int>(p.y / kCellHeightPx) - scrollRow_;
     return std::make_pair(std::clamp(x, bounds_.x, bounds_.x + std::max(0, bounds_.w - 1)),
                           std::clamp(y, bounds_.y, bounds_.y + std::max(0, bounds_.h - 1)));
 }
