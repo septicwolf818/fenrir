@@ -70,6 +70,149 @@ int cellWidth(std::u32string_view text) {
     return width;
 }
 
+// Approximate CSS Grid with flexbox for LiteHTML, which has no grid support.
+// General transform: converts display:grid/inline-grid to flex + wrap and
+// derives per-child widths from grid-template-columns: repeat(N, ...).
+std::string transformGridCss(std::string css) {
+    std::string out;
+    std::size_t i = 0;
+    while (i < css.size()) {
+        // find next rule
+        std::size_t brace = css.find('{', i);
+        if (brace == std::string::npos) { out += css.substr(i); break; }
+        // selector is [i, brace)
+        std::string selector = css.substr(i, brace - i);
+        // find matching close brace
+        int depth = 0;
+        std::size_t j = brace;
+        for (; j < css.size(); ++j) {
+            if (css[j] == '{') ++depth;
+            else if (css[j] == '}') { --depth; if (depth == 0) break; }
+        }
+        if (j >= css.size()) { out += css.substr(i); break; }
+        std::string body = css.substr(brace + 1, j - brace - 1);
+        // transform
+        std::string lowerBody = body;
+        std::transform(lowerBody.begin(), lowerBody.end(), lowerBody.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+        bool isGrid = lowerBody.find("display") != std::string::npos &&
+            (lowerBody.find("grid") != std::string::npos);
+        // detect repeat(N, ...) in grid-template-columns
+        int cols = 0;
+        auto rtcPos = lowerBody.find("grid-template-columns");
+        if (rtcPos != std::string::npos) {
+            auto rp = lowerBody.find("repeat(", rtcPos);
+            if (rp != std::string::npos) {
+                std::size_t p = rp + 7;
+                std::string num;
+                while (p < lowerBody.size() && std::isdigit(static_cast<unsigned char>(lowerBody[p]))) { num += lowerBody[p]; ++p; }
+                if (!num.empty()) cols = std::stoi(num);
+            }
+        }
+        // detect gap
+        double gap = 0;
+        auto gapPos = lowerBody.find("gap");
+        if (gapPos != std::string::npos) {
+            // find number
+            std::size_t p = gapPos;
+            while (p < lowerBody.size() && !std::isdigit(static_cast<unsigned char>(lowerBody[p]))) ++p;
+            std::string num;
+            while (p < lowerBody.size() && (std::isdigit(static_cast<unsigned char>(lowerBody[p])) || lowerBody[p] == '.')) { num += lowerBody[p]; ++p; }
+            if (!num.empty()) gap = std::stod(num);
+        }
+        if (isGrid) {
+            // replace display: grid/inline-grid
+            // simple string replace within body
+            std::string newBody = body;
+            // replace 'grid' display values
+            // We'll do targeted replacements of "display:grid" / "display: grid"
+            auto replaceAll = [&](std::string& s, const std::string& from, const std::string& to) {
+                std::size_t pos = 0;
+                std::string lower = s;
+                std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+                // case-insensitive replace
+                std::size_t search = 0;
+                while (true) {
+                    std::size_t found = lower.find(from, search);
+                    if (found == std::string::npos) break;
+                    s.replace(found, from.size(), to);
+                    lower.replace(found, from.size(), to);
+                    search = found + to.size();
+                }
+            };
+            // Only convert display values, not "grid" inside property names
+            // like grid-template-columns.
+            replaceAll(newBody, "inline-grid", "inline-flex");
+            // Replace "display: grid" / "display:grid" (and inline variants already handled)
+            {
+                std::string lower = newBody;
+                std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+                // find "display" followed by optional spaces/colon then "grid"
+                std::size_t search = 0;
+                while (true) {
+                    std::size_t disp = lower.find("display", search);
+                    if (disp == std::string::npos) break;
+                    // find colon
+                    std::size_t colon = lower.find(':', disp);
+                    if (colon == std::string::npos || colon - disp > 20) { search = disp + 7; continue; }
+                    // skip spaces after colon
+                    std::size_t val = colon + 1;
+                    while (val < lower.size() && std::isspace(static_cast<unsigned char>(lower[val]))) ++val;
+                    if (lower.compare(val, 4, "grid") == 0 && (val + 4 == lower.size() || !std::isalnum(static_cast<unsigned char>(lower[val+4])))) {
+                        // replace "grid" with "flex" at that position
+                        newBody.replace(val, 4, "flex");
+                        lower.replace(val, 4, "flex");
+                        search = val + 4;
+                    } else {
+                        search = disp + 7;
+                    }
+                }
+            }
+            // ensure flex-wrap
+            if (newBody.find("flex-wrap") == std::string::npos) {
+                newBody += "; flex-wrap: wrap";
+            }
+            body = newBody;
+            // inject child width rule if cols known
+            if (cols > 1) {
+                std::string childRule = "\n" + selector + " > * { box-sizing: border-box; flex: 0 0 calc((100% - " +
+                    std::to_string(static_cast<int>((cols - 1) * gap)) + "px) / " + std::to_string(cols) +
+                    "); max-width: calc((100% - " + std::to_string(static_cast<int>((cols - 1) * gap)) + "px) / " +
+                    std::to_string(cols) + ");";
+                if (gap > 0) {
+                    childRule += " margin: " + std::to_string(static_cast<int>(gap / 2)) + "px;";
+                }
+                childRule += " }";
+                out += css.substr(i, brace - i) + "{" + body + "}" + childRule;
+                i = j + 1;
+                continue;
+            }
+        }
+        out += css.substr(i, j - i + 1);
+        i = j + 1;
+    }
+    return out;
+}
+
+std::string transformGridInHtml(std::string html) {
+    std::size_t pos = 0;
+    while (true) {
+        auto begin = html.find("<style", pos);
+        if (begin == std::string::npos) break;
+        auto tagEnd = html.find('>', begin);
+        if (tagEnd == std::string::npos) break;
+        auto end = html.find("</style", tagEnd);
+        if (end == std::string::npos) break;
+        std::size_t closeEnd = html.find('>', end);
+        if (closeEnd == std::string::npos) break;
+        std::string css = html.substr(tagEnd + 1, end - tagEnd - 1);
+        std::string transformed = transformGridCss(css);
+        html.replace(tagEnd + 1, end - tagEnd - 1, transformed);
+        // adjust pos
+        pos = tagEnd + 1 + transformed.size() + 7;
+    }
+    return html;
+}
+
 } // namespace
 
 class BrowserContainer final : public litehtml::document_container {
@@ -535,6 +678,7 @@ bool BrowserPage::loadHtml(std::string html, std::string baseUrl) {
     document_.reset();
     container_ = std::make_unique<BrowserContainer>(*this);
     container_->set_base_url(url_.c_str());
+    html = transformGridInHtml(std::move(html));
     document_ = litehtml::document::createFromString(
         html, container_.get(), litehtml::master_css,
         ".reveal{opacity:1!important;visibility:visible!important;transform:none!important}"
@@ -557,6 +701,32 @@ bool BrowserPage::loadHtml(std::string html, std::string baseUrl) {
         if (target) {
             document_->append_children_from_string(*target, patch.html.c_str(), true);
         }
+    }
+    // Sync JS-driven attribute changes (e.g. modernizr adding 'js' class to <html>)
+    // from the live shim DOM into LiteHTML so class-based CSS rules apply.
+    if (scriptContext_ && scriptContext_->valid() && document_ && document_->root()) {
+        std::string err;
+        std::string htmlClass = scriptContext_->evalString(
+            "document.documentElement ? (document.documentElement.className || '') : ''", err);
+        if (!htmlClass.empty()) document_->root()->set_attr("class", htmlClass.c_str());
+        // find body element
+        // LiteHTML root's children include body; search
+        std::function<void(const litehtml::element::ptr&)> findBody = [&](const litehtml::element::ptr& el) {
+            if (std::string(el->get_tagName()) == "body") {
+                std::string bc = scriptContext_->evalString(
+                    "document.body ? (document.body.className || '') : ''", err);
+                if (!bc.empty()) el->set_attr("class", bc.c_str());
+                return;
+            }
+            for (const auto& c : el->children()) findBody(c);
+        };
+        findBody(document_->root());
+    }
+    // Recompute styles so class/attribute changes made by JS (e.g. modernizr
+    // adding 'js' to <html>) take effect, then rebuild the render tree.
+    if (document_) {
+        document_->recompute_styles();
+        document_->rebuild_render_tree();
     }
     ensureLayout();
     rebuildLinks();
@@ -895,10 +1065,12 @@ void BrowserPage::dispatchScriptEvent(const std::string& targetId, const std::st
     std::vector<BrowserScriptRuntime::DomPatch> patches;
     std::string error;
     (void)scriptContext_->dispatchEvent(targetId, type, patches, error);
+    if (patches.empty()) return;
     for (const auto& patch : patches) {
         const auto target = document_ ? document_->root()->select_one("#" + patch.id) : nullptr;
         if (target) document_->append_children_from_string(*target, patch.html.c_str(), true);
     }
+    if (document_) document_->rebuild_render_tree();
     ensureLayout();
     rebuildLinks();
 }
