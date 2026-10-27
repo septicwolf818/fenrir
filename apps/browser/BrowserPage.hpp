@@ -42,8 +42,6 @@ public:
     void draw(Screen& screen) override;
     KeyEventResult handleKey(const KeyEvent& event) override;
     bool clickAt(int x, int y) override;
-    bool movePointer(int fromX, int fromY, int& toX, int& toY) override;
-    void pointerMovedAt(int x, int y, int dx, int dy) override;
     bool editable() const override { return true; }
     bool wantsGuiCursor() const override;
     std::optional<std::pair<int, int>> cursorPosition() const override;
@@ -67,6 +65,19 @@ private:
         bool isTextField = false;
         std::size_t index = 0;
     };
+    struct FallbackRun {
+        std::u32string text;
+        int linkIndex = -1;
+        bool bold = false;
+    };
+    struct FallbackLine {
+        std::vector<FallbackRun> runs;
+        int cells = 0;
+    };
+    struct FallbackFlow {
+        litehtml::position placement;
+        std::vector<FallbackLine> lines;
+    };
     struct FetchState {
         std::mutex mutex;
         std::optional<Response> response;
@@ -76,9 +87,12 @@ private:
     void rebuildLinks();
     void updateHoveredControl();
     bool setPointerPosition(int x, int y);
+    void movePageCursorBy(int dx, int dy);
+    void rebuildFallbackFlows();
     void focusControl(std::size_t index);
     void scrollIntoView(const litehtml::position& placement);
     void drawTextFields(Screen& screen);
+    void drawFallbackFlows(Screen& screen);
     void setTitle(std::string title);
     void setPendingNavigation(std::string url);
     int maxScrollRow() const;
@@ -90,13 +104,14 @@ private:
     std::vector<Link> links_;
     std::vector<TextField> textFields_;
     std::vector<FocusTarget> focusOrder_;
+    std::vector<FallbackFlow> fallbackFlows_;
     int focusedLink_ = -1;
     int focusedTextField_ = -1;
     int focusedControl_ = -1;
     int pointerX_ = -1;
     int pointerY_ = -1;
     int scrollRow_ = 0;
-    float virtualContentBottomPx_ = 0;
+    float fallbackContentBottomPx_ = 0;
     int lastLayoutWidth_ = -1;
     int lastLayoutHeight_ = -1;
     bool loading_ = false;

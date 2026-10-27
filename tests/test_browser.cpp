@@ -99,10 +99,14 @@ void runBrowserTests() {
         const auto linkCursor = page.cursorPosition();
         check(linkCursor.has_value(), "focused page link exposes a Fenrir cursor position");
         if (linkCursor) {
-            check(page.clickAt(linkCursor->first, linkCursor->second),
-                  "virtual cursor click is routed to the focused link");
+            check(!page.clickAt(linkCursor->first, linkCursor->second),
+                  "desktop cursor activation enters browser keyboard mode");
+            check(page.takePendingNavigation().empty(),
+                  "desktop mode does not activate a page link");
+            check(page.handleKey(KeyEvent{Key::Enter}) == KeyEventResult::Activated,
+                  "browser keyboard cursor activates the focused link with Enter");
             check(page.takePendingNavigation() == "https://example.test/next",
-                  "clicking the focused link requests navigation");
+                  "keyboard-mode Enter requests navigation");
         }
 
         check(page.loadHtml(html, "https://example.test/start"),
@@ -116,12 +120,13 @@ void runBrowserTests() {
         check(hovered.has_value(), "focused link positions the in-page cursor");
         if (hovered) {
             check(page.loadHtml(html, "https://example.test/start"),
-                  "fixture reloads before pointer-hover activation");
-            page.pointerMovedAt(hovered->first, hovered->second, 0, 0);
+                  "fixture reloads before virtual-cursor activation");
+            check(!page.clickAt(hovered->first, hovered->second),
+                  "desktop cursor enters the page without clicking its link");
             check(page.handleKey(KeyEvent{Key::Enter}) == KeyEventResult::Activated,
-                  "Enter activates the link under the in-page pointer");
+                  "Enter activates the link under the browser's own cursor");
             check(page.takePendingNavigation() == "https://example.test/next",
-                  "hovered-link activation requests navigation");
+                  "virtual-cursor activation requests navigation");
         }
 
         check(!page.clickAt(47, 10), "clicking page background enters browser interaction mode");
@@ -188,34 +193,64 @@ void runBrowserTests() {
               "typed text is rendered in the focused input");
     }
 
-    // CSS Grid can leave LiteHTML anchors without element placements. The
-    // browser supplies a virtual card hit area so the pointer can still click
-    // a project link in that layout.
+    // Reparse JS-generated children before layout and normalize CSS Grid into
+    // block flow so links remain visible and hittable in a narrow viewport.
     {
         apps::browser::BrowserPage page;
-        page.setBounds(Rect{0, 0, 80, 12});
+        page.setBounds(Rect{0, 0, 60, 12});
         check(page.loadHtml(
-                  "<html><head><style>#projects-container{display:grid;"
+                  "<html><head><style>#cards{display:grid;"
                   "grid-template-columns:repeat(2,minmax(0,1fr));gap:24px}"
-                  ".project-card{display:flex;flex-direction:column;min-height:240px}"
-                  ".project-card>div:last-child{margin-top:auto;padding-top:20px}</style>"
-                  "</head><body><section><h2>Projects</h2><div id='projects-container'></div>"
-                  "<script>document.getElementById('projects-container').innerHTML="
-                  "'<article class=\"project-card\"><h3>GlowSync</h3><div><a "
-                  "href=\"https://example.test/GlowSync\">View project</a></div></article>';</script>"
+                  ".card{display:flex;flex-direction:column;min-height:240px}</style>"
+                  "</head><body><section><h2>Items</h2><div id='cards'></div>"
+                  "<script>document.getElementById('cards').innerHTML="
+                  "'<article class=\"card\"><h3>Alpha</h3><div><a "
+                  "href=\"https://example.test/alpha\">Open alpha</a></div></article>' +"
+                  "'<article class=\"card\"><h3>Beta</h3><div><a "
+                  "href=\"https://example.test/beta\">Open beta</a></div></article>';</script>"
                   "</section></body></html>",
                   "https://example.test/"),
-              "grid project fixture parses");
-        Screen screen(80, 12);
+              "dynamic grid fixture parses");
+        Screen screen(60, 12);
         page.draw(screen);
-        check(page.focusNextControl(), "grid project link is keyboard-focusable");
-        const auto pointer = page.cursorPosition();
-        check(pointer.has_value(), "grid project focus positions the virtual cursor");
+        check(page.focusNextControl(), "first grid link is keyboard-focusable");
+        check(page.focusedLinkUrl() == "https://example.test/alpha",
+              "first link stays attached to its dynamically rendered card");
+        screen.clear();
+        page.draw(screen);
+        std::string visible;
+        for (const Cell& cell : screen.cells())
+            if (cell.character < 128) visible.push_back(static_cast<char>(cell.character));
+        check(visible.find("Alpha") != std::string::npos,
+              "small viewport renders the first dynamic card in readable flow");
+        auto pointer = page.cursorPosition();
+        check(pointer.has_value(), "link focus positions the browser's own cursor");
         if (pointer) {
-            check(page.clickAt(pointer->first, pointer->second),
-                  "virtual cursor hit-testing activates a grid project link");
-            check(page.takePendingNavigation() == "https://example.test/GlowSync",
-                  "virtual cursor follows the link under a grid card");
+            check(!page.clickAt(pointer->first, pointer->second),
+                  "desktop activation enters the page without following the link");
+            check(page.handleKey(KeyEvent{Key::Enter}) == KeyEventResult::Activated,
+                  "browser Keyboard-mode Enter activates the grid link");
+            check(page.takePendingNavigation() == "https://example.test/alpha",
+                  "Enter follows the first grid link");
+        }
+        check(page.focusNextControl(), "next grid link is keyboard-focusable");
+        check(page.focusedLinkUrl() == "https://example.test/beta",
+              "narrow layout keeps the next card in reading order");
+        screen.clear();
+        page.draw(screen);
+        visible.clear();
+        for (const Cell& cell : screen.cells())
+            if (cell.character < 128) visible.push_back(static_cast<char>(cell.character));
+        check(visible.find("Beta") != std::string::npos,
+              "small viewport renders the next dynamic card below the first");
+        pointer = page.cursorPosition();
+        if (pointer) {
+            check(!page.clickAt(pointer->first, pointer->second),
+                  "desktop activation enters the next card without following it");
+            check(page.handleKey(KeyEvent{Key::Enter}) == KeyEventResult::Activated,
+                  "browser cursor activates the next card with Enter");
+            check(page.takePendingNavigation() == "https://example.test/beta",
+                  "Enter follows the next grid link");
         }
     }
 
@@ -258,18 +293,16 @@ void runBrowserTests() {
               "scrolling reaches text beyond the initial viewport");
 
         page.handleKey(KeyEvent{Key::Home});
-        page.pointerMovedAt(24, 9, 0, 0);
-        int edgeX = 24;
-        int edgeY = 10;
-        check(page.movePointer(24, 9, edgeX, edgeY) && edgeY == 9 && page.scrollRow() == 1,
-              "moving the pointer past the bottom edge scrolls while keeping it in the page");
+        check(!page.clickAt(24, 9), "desktop cursor enters the page at its bottom edge");
+        page.handleKey(KeyEvent{Key::Down});
+        check(page.scrollRow() == 1 && page.cursorPosition() == std::make_pair(24, 9),
+              "browser cursor scrolls the page at its bottom edge in Keyboard mode");
         page.handleKey(KeyEvent{Key::End});
-        page.pointerMovedAt(24, 0, 0, 0);
-        edgeX = 24;
-        edgeY = -1;
+        check(!page.clickAt(24, 0), "desktop cursor enters the page at its top edge");
         const int beforeTopScroll = page.scrollRow();
-        check(page.movePointer(24, 0, edgeX, edgeY) && edgeY == 0 &&
+        page.handleKey(KeyEvent{Key::Up});
+        check(page.cursorPosition() == std::make_pair(24, 0) &&
                   page.scrollRow() == beforeTopScroll - 1,
-              "moving the pointer past the top edge scrolls back up");
+              "browser cursor scrolls back at the top edge in Keyboard mode");
     }
 }

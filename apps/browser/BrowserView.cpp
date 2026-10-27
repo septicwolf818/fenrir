@@ -268,15 +268,6 @@ bool BrowserView::clickAt(int x, int y) {
     return false;
 }
 
-bool BrowserView::movePointer(int fromX, int fromY, int& toX, int& toY) {
-    auto* page = activePage();
-    return page && page->movePointer(fromX, fromY, toX, toY);
-}
-
-void BrowserView::pointerMovedAt(int x, int y, int dx, int dy) {
-    if (auto* page = activePage()) page->pointerMovedAt(x, y, dx, dy);
-}
-
 std::optional<std::pair<int, int>> BrowserView::cursorPosition() const {
     if (toolbarActive_) return toolbar_.cursorPosition();
     const Tab* tab = activeTab();

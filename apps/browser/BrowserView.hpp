@@ -28,8 +28,6 @@ public:
     void draw(Screen& screen) override;
     KeyEventResult handleKey(const KeyEvent& event) override;
     bool clickAt(int x, int y) override;
-    bool movePointer(int fromX, int fromY, int& toX, int& toY) override;
-    void pointerMovedAt(int x, int y, int dx, int dy) override;
     bool editable() const override;
     bool dirty() const override { return false; }
     int minWidth() const override { return 32; }
