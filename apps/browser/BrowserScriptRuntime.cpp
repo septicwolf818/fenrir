@@ -348,7 +348,14 @@ const char* kDomShim = R"JS(
       cbs.slice().forEach(cb => { try { cb(evt); } catch (e) { console.error(e); } });
       return true;
     }
-    querySelectorAll() { return []; }
+    querySelector(sel) {
+      const scoped = this.id ? ('#' + this.id + ' ' + sel) : sel;
+      return document.querySelector(scoped);
+    }
+    querySelectorAll(sel) {
+      const scoped = this.id ? ('#' + this.id + ' ' + sel) : sel;
+      return document.querySelectorAll(scoped);
+    }
     getBoundingClientRect() { return {top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0}; }
     getClientRects() { return []; }
     focus() {}
@@ -579,7 +586,7 @@ const char* kDomShim = R"JS(
     takeRecords() { return []; }
   };
   globalThis.MutationObserver = class { constructor(cb) {} observe() {} disconnect() {} takeRecords() { return []; } };
-  globalThis.console = {log(){}, info(){}, warn(){}, error(...a){ if (typeof __errLog === 'function') __errLog(a.map(String).join(' ')); }};
+  globalThis.console = {log(){}, info(){}, warn(){}, error(...a){ let msg = a.map(x => (x && x.stack) ? (x.message + '\\n' + x.stack) : String(x)).join(' '); if (typeof __errLog === 'function') __errLog(msg); }};
   globalThis.__fenrirNodes = nodes;
   globalThis.Event = class Event {
     constructor(type, init) { this.type = String(type); if (init) Object.assign(this, init); }
