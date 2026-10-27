@@ -333,6 +333,7 @@ void BrowserPage::navigate(std::string url) {
     focusedTextField_ = -1;
     focusedControl_ = -1;
     pointerX_ = pointerY_ = -1;
+    virtualContentBottomPx_ = 0;
     scrollRow_ = 0;
     lastLayoutWidth_ = lastLayoutHeight_ = -1;
     url = browser::normalizeUrl(url);
@@ -351,6 +352,7 @@ void BrowserPage::navigate(std::string url) {
     focusedTextField_ = -1;
     focusedControl_ = -1;
     pointerX_ = pointerY_ = -1;
+    virtualContentBottomPx_ = 0;
     scrollRow_ = 0;
     lastLayoutWidth_ = lastLayoutHeight_ = -1;
     document_.reset();
@@ -458,6 +460,7 @@ void BrowserPage::rebuildLinks() {
     links_.clear();
     textFields_.clear();
     focusOrder_.clear();
+    virtualContentBottomPx_ = 0;
     focusedLink_ = -1;
     focusedTextField_ = -1;
     focusedControl_ = -1;
@@ -471,6 +474,46 @@ void BrowserPage::rebuildLinks() {
         bounds.y = std::min(bounds.y, item.y);
         bounds.width = right - bounds.x;
         bounds.height = bottom - bounds.y;
+    };
+    auto projectCardHitArea = [&](const litehtml::element::ptr& anchor,
+                                  litehtml::position& hitArea) {
+        auto card = anchor;
+        litehtml::element::ptr grid;
+        for (auto parent = anchor->parent(); parent; parent = parent->parent()) {
+            if (std::string(parent->get_attr("id", "")) == "projects-container") {
+                grid = parent;
+                break;
+            }
+            card = parent;
+        }
+        if (!grid) return false;
+
+        const auto gridPlacement = grid->get_placement();
+        std::size_t cardIndex = 0;
+        bool foundCard = false;
+        for (const auto& child : grid->children()) {
+            if (std::string(child->get_tagName()) != "article") continue;
+            if (child == card) { foundCard = true; break; }
+            ++cardIndex;
+        }
+        if (!foundCard) return false;
+
+        constexpr float kGridGapPx = 24.0f;
+        constexpr float kCardRowPitchPx = 300.0f;
+        constexpr float kCardHitHeightPx = 280.0f;
+        const int columns = bounds_.w * kCellWidthPx <= 640 ? 1 : 2;
+        const float gridWidth = gridPlacement.width > 0
+            ? gridPlacement.width : static_cast<float>(bounds_.w * kCellWidthPx);
+        const float cardWidth = std::max(1.0f,
+            (gridWidth - kGridGapPx * static_cast<float>(columns - 1)) / columns);
+        const std::size_t row = cardIndex / static_cast<std::size_t>(columns);
+        const std::size_t column = cardIndex % static_cast<std::size_t>(columns);
+        hitArea = litehtml::position(
+            gridPlacement.x + static_cast<float>(column) * (cardWidth + kGridGapPx),
+            gridPlacement.y + static_cast<float>(row) * kCardRowPitchPx,
+            cardWidth, kCardHitHeightPx);
+        virtualContentBottomPx_ = std::max(virtualContentBottomPx_, hitArea.bottom());
+        return true;
     };
     std::function<void(const litehtml::element::ptr&)> visit = [&](const litehtml::element::ptr& element) {
         const std::string tag = element->get_tagName();
@@ -487,7 +530,8 @@ void BrowserPage::rebuildLinks() {
                     };
                 for (const auto& child : element->children()) includeText(child);
                 include(placement, element->get_placement(), hasPlacement);
-                if (hasPlacement) {
+                if (!hasPlacement) hasPlacement = projectCardHitArea(element, placement);
+                if (hasPlacement || href) {
                     links_.push_back(Link{element, placement, browser::resolveUrl(url_, href)});
                     focusOrder_.push_back(FocusTarget{false, links_.size() - 1});
                 }
@@ -541,6 +585,7 @@ void BrowserPage::rebuildLinks() {
         }
     }
     if (pointerX_ >= 0 && pointerY_ >= 0) updateHoveredControl();
+    scrollRow_ = std::clamp(scrollRow_, 0, maxScrollRow());
 }
 
 void BrowserPage::updateHoveredControl() {
@@ -600,7 +645,8 @@ std::string BrowserPage::takePendingNavigation() {
 
 int BrowserPage::maxScrollRow() const {
     if (!document_) return 0;
-    const int rows = static_cast<int>(std::ceil(document_->height() / kCellHeightPx));
+    const float contentHeight = std::max(document_->height(), virtualContentBottomPx_);
+    const int rows = static_cast<int>(std::ceil(contentHeight / kCellHeightPx));
     return std::max(0, rows - bounds_.h);
 }
 
