@@ -27,11 +27,7 @@ const PaletteColor kPalette[] = {
     {85, 85, 85}, {255, 85, 85}, {85, 255, 85}, {255, 255, 85},
     {85, 85, 255}, {255, 85, 255}, {85, 255, 255}, {255, 255, 255}};
 
-Color ansiColor(litehtml::web_color color) {
-    const double alpha = color.alpha / 255.0;
-    const int r = static_cast<int>(color.red * alpha);
-    const int g = static_cast<int>(color.green * alpha);
-    const int b = static_cast<int>(color.blue * alpha);
+Color nearestAnsi(int r, int g, int b) {
     int best = 0;
     long distance = std::numeric_limits<long>::max();
     for (int i = 0; i < 16; ++i) {
@@ -42,6 +38,20 @@ Color ansiColor(litehtml::web_color color) {
         if (candidate < distance) { distance = candidate; best = i; }
     }
     return Color{static_cast<uint8_t>(best)};
+}
+
+Color ansiColor(litehtml::web_color color) {
+    return nearestAnsi(color.red, color.green, color.blue);
+}
+
+Color compositeColor(litehtml::web_color color, Color under) {
+    const auto& background = kPalette[std::min<int>(under.index, 15)];
+    const int alpha = color.alpha;
+    const int inverse = 255 - alpha;
+    const int r = (color.red * alpha + background.r * inverse + 127) / 255;
+    const int g = (color.green * alpha + background.g * inverse + 127) / 255;
+    const int b = (color.blue * alpha + background.b * inverse + 127) / 255;
+    return nearestAnsi(r, g, b);
 }
 
 bool wideGlyph(char32_t cp) {
@@ -74,11 +84,11 @@ public:
         fonts_[id] = Font{size, description.weight, description.decoration_line};
         if (metrics) {
             metrics->font_size = size;
-            metrics->height = size;
-            metrics->ascent = size * 0.8f;
-            metrics->descent = size * 0.2f;
-            metrics->x_height = size * 0.5f;
-            metrics->ch_width = size * 0.5f;
+            metrics->height = static_cast<float>(kCellHeightPx);
+            metrics->ascent = static_cast<float>(kCellHeightPx * 3 / 4);
+            metrics->descent = static_cast<float>(kCellHeightPx / 4);
+            metrics->x_height = static_cast<float>(kCellHeightPx / 2);
+            metrics->ch_width = static_cast<float>(kCellWidthPx);
             metrics->draw_spaces = true;
         }
         return id;
@@ -87,10 +97,10 @@ public:
     void delete_font(litehtml::uint_ptr id) override { fonts_.erase(id); }
 
     litehtml::pixel_t text_width(const char* text, litehtml::uint_ptr id) override {
-        const auto found = fonts_.find(id);
-        const float size = found == fonts_.end() ? 16.0f : found->second.size;
-        return static_cast<float>(cellWidth(text::toUtf32(text ? text : ""))) *
-               size * 0.5f;
+        (void)id;
+        // Layout must use the same whole-cell widths that draw_text paints;
+        // fractional CSS font metrics otherwise make adjacent glyphs collide.
+        return static_cast<float>(cellWidth(text::toUtf32(text ? text : "")) * kCellWidthPx);
     }
 
     void draw_text(litehtml::uint_ptr, const char* value, litehtml::uint_ptr id,
@@ -101,8 +111,8 @@ public:
         if (font != fonts_.end() &&
             (font->second.decoration & litehtml::text_decoration_line_underline))
             style |= StyleUnderline;
-        const int x = static_cast<int>(std::floor(pos.x / kCellWidthPx));
-        const int y = static_cast<int>(std::floor(pos.y / kCellHeightPx));
+        const int x = page_.bounds().x + static_cast<int>(std::floor(pos.x / kCellWidthPx));
+        const int y = page_.bounds().y + static_cast<int>(std::floor(pos.y / kCellHeightPx));
         putPageText(x, y, text::toUtf32(value), ansiColor(color), style);
     }
 
@@ -112,8 +122,8 @@ public:
 
     void draw_list_marker(litehtml::uint_ptr, const litehtml::list_marker& marker) override {
         if (!screen_) return;
-        const int x = static_cast<int>(std::floor(marker.pos.x / kCellWidthPx));
-        const int y = static_cast<int>(std::floor(marker.pos.y / kCellHeightPx));
+        const int x = page_.bounds().x + static_cast<int>(std::floor(marker.pos.x / kCellWidthPx));
+        const int y = page_.bounds().y + static_cast<int>(std::floor(marker.pos.y / kCellHeightPx));
         std::u32string glyph = U"•";
         if (marker.marker_type == litehtml::list_style_type_decimal)
             glyph = text::toUtf32(std::to_string(marker.index) + ".");
@@ -130,8 +140,8 @@ public:
     void draw_image(litehtml::uint_ptr, const litehtml::background_layer& layer,
                     const std::string&, const std::string&) override {
         if (!screen_) return;
-        const int x = static_cast<int>(std::floor(layer.border_box.x / kCellWidthPx));
-        const int y = static_cast<int>(std::floor(layer.border_box.y / kCellHeightPx));
+        const int x = page_.bounds().x + static_cast<int>(std::floor(layer.border_box.x / kCellWidthPx));
+        const int y = page_.bounds().y + static_cast<int>(std::floor(layer.border_box.y / kCellHeightPx));
         putPageText(x, y, U"[image]", colors::Gray, StyleDim);
     }
 
@@ -140,12 +150,12 @@ public:
         if (!screen_ || color.alpha == 0) return;
         auto box = layer.border_box;
         if (layer.is_root) {
-            box.x = static_cast<float>(page_.bounds().x * kCellWidthPx);
-            box.y = static_cast<float>(page_.bounds().y * kCellHeightPx);
+            box.x = 0;
+            box.y = 0;
             box.width = static_cast<float>(page_.bounds().w * kCellWidthPx);
             box.height = static_cast<float>(page_.bounds().h * kCellHeightPx);
         }
-        fill(box, ansiColor(color));
+        fill(box, color);
     }
 
     void draw_linear_gradient(litehtml::uint_ptr, const litehtml::background_layer& layer,
@@ -166,10 +176,10 @@ public:
     void draw_borders(litehtml::uint_ptr, const litehtml::borders& borders,
                       const litehtml::position& rect, bool) override {
         if (!screen_ || !borders.is_visible()) return;
-        const int left = static_cast<int>(std::floor(rect.x / kCellWidthPx));
-        const int top = static_cast<int>(std::floor(rect.y / kCellHeightPx));
-        const int right = static_cast<int>(std::ceil(rect.right() / kCellWidthPx)) - 1;
-        const int bottom = static_cast<int>(std::ceil(rect.bottom() / kCellHeightPx)) - 1;
+        const int left = page_.bounds().x + static_cast<int>(std::floor(rect.x / kCellWidthPx));
+        const int top = page_.bounds().y + static_cast<int>(std::floor(rect.y / kCellHeightPx));
+        const int right = page_.bounds().x + static_cast<int>(std::ceil(rect.right() / kCellWidthPx)) - 1;
+        const int bottom = page_.bounds().y + static_cast<int>(std::ceil(rect.bottom() / kCellHeightPx)) - 1;
         const auto put = [&](int x, int y, char32_t glyph, const litehtml::border& border) {
             const Rect page = page_.bounds();
             if (border.width <= 0 || !page.contains(x, y)) return;
@@ -253,18 +263,26 @@ public:
 private:
     struct Font { float size; int weight; int decoration; };
 
-    void fill(const litehtml::position& box, Color bg) {
-        const int left = static_cast<int>(std::floor(box.x / kCellWidthPx));
-        const int top = static_cast<int>(std::floor(box.y / kCellHeightPx));
-        const int right = static_cast<int>(std::ceil(box.right() / kCellWidthPx));
-        const int bottom = static_cast<int>(std::ceil(box.bottom() / kCellHeightPx));
+    void fill(const litehtml::position& box, litehtml::web_color color) {
         const Rect page = page_.bounds();
+        const int left = page.x + static_cast<int>(std::floor(box.x / kCellWidthPx));
+        const int top = page.y + static_cast<int>(std::floor(box.y / kCellHeightPx));
+        const int right = page.x + static_cast<int>(std::ceil(box.right() / kCellWidthPx));
+        const int bottom = page.y + static_cast<int>(std::ceil(box.bottom() / kCellHeightPx));
         const int x0 = std::max(left, page.x);
         const int y0 = std::max(top, page.y);
         const int x1 = std::min(right, page.x + page.w);
         const int y1 = std::min(bottom, page.y + page.h);
-        if (x1 > x0 && y1 > y0)
-            screen_->fillRect(Rect{x0, y0, x1 - x0, y1 - y0}, Cell{U' ', colors::White, bg, 0});
+        for (int y = y0; y < y1; ++y) {
+            for (int x = x0; x < x1; ++x) {
+                Cell cell = screen_->at(x, y);
+                // Background layers can be repainted during scroll/fixed-layer
+                // passes. Update only the cell background so they never erase
+                // text that was already painted into the back buffer.
+                cell.bg = compositeColor(color, cell.bg);
+                screen_->set(x, y, cell);
+            }
+        }
     }
 
     void putPageText(int x, int y, std::u32string_view value, Color fg, uint8_t style) {
@@ -527,10 +545,11 @@ void BrowserPage::draw(Screen& screen) {
     ensureLayout();
     container_->beginDraw(screen);
     const float scrollPx = static_cast<float>(scrollRow_ * kCellHeightPx);
-    const litehtml::position clip{0, scrollPx, static_cast<float>(bounds_.w * kCellWidthPx),
+    const litehtml::position clip{0, 0, static_cast<float>(bounds_.w * kCellWidthPx),
                                   static_cast<float>(bounds_.h * kCellHeightPx)};
-    document_->draw(0, static_cast<float>(bounds_.x * kCellWidthPx),
-                    static_cast<float>(bounds_.y * kCellHeightPx) - scrollPx, &clip);
+    // LiteHTML draws fixed-position elements relative to (0, 0), so keep its
+    // canvas in page-local coordinates and translate callbacks by bounds_.
+    document_->draw(0, 0, -scrollPx, &clip);
     container_->endDraw();
 }
 

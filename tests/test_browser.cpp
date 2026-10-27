@@ -71,4 +71,43 @@ void runBrowserTests() {
         check(page.takePendingNavigation() == "https://example.test/next",
               "activating a link produces a resolved navigation URL");
     }
+
+    // Fixed decorative layers (like the portfolio's grid/glow backgrounds)
+    // must not paint opaque ANSI cells over text after the page scrolls.
+    {
+        std::string html =
+            "<html><head><style>body{background:#070814;color:#fff}"
+            ".grid{position:fixed;inset:0;z-index:0;background:"
+            "linear-gradient(rgba(79,110,247,.18),transparent)}"
+            ".content{position:relative;z-index:1}</style></head><body>"
+            "<div class='grid'></div><main class='content'>";
+        for (int i = 0; i < 30; ++i)
+            html += "<p>SCROLL-LINE-" + std::to_string(i) + " visible page text</p>";
+        html += "</main></body></html>";
+
+        apps::browser::BrowserPage page;
+        page.setBounds(Rect{0, 0, 48, 10});
+        check(page.loadHtml(std::move(html), "https://example.test/"),
+              "fixed-background scrolling fixture lays out");
+        page.handleKey(KeyEvent{Key::PageDown});
+        Screen screen(48, 10);
+        page.draw(screen);
+        bool sawScrolledText = false;
+        for (const Cell& cell : screen.cells())
+            if (cell.character >= U'A' && cell.character <= U'Z') sawScrolledText = true;
+        check(sawScrolledText, "fixed background does not cover scrolled page text");
+
+        std::string documentText;
+        for (int step = 0; step < 30; ++step) {
+            screen.clear();
+            page.draw(screen);
+            for (const Cell& cell : screen.cells())
+                if (cell.character < 128) documentText.push_back(static_cast<char>(cell.character));
+            const int before = page.scrollRow();
+            page.handleKey(KeyEvent{Key::PageDown});
+            if (page.scrollRow() == before) break;
+        }
+        check(documentText.find("SCROLL-LINE-29") != std::string::npos,
+              "scrolling reaches text beyond the initial viewport");
+    }
 }
