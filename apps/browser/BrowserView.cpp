@@ -151,6 +151,10 @@ void BrowserView::reload() {
         navigateCurrent(page->url(), false);
 }
 
+void BrowserView::waitForLoad() {
+    if (auto* page = activePage()) page->waitForLoad();
+}
+
 std::string BrowserView::currentUrl() const {
     const auto* page = activePage();
     return page ? page->url() : std::string{};
@@ -230,9 +234,9 @@ void BrowserView::draw(Screen& screen) {
                              bounds_.w, pageHeight});
         page->setFocused(focused_ && !toolbarActive_);
         page->draw(screen);
-        if (!toolbarActive_ && !page->url().empty() && address_->value() != text::toUtf32(page->url()))
+        if (!page->loading() && !toolbarActive_ && !page->url().empty() && address_->value() != text::toUtf32(page->url()))
             address_->setValue(text::toUtf32(page->url()));
-        if (!page->title().empty()) context_.setWindowTitle(page->title());
+        if (!page->loading() && !page->title().empty()) context_.setWindowTitle(page->title());
         // Show JS errors in a popup dialog (once per new error).
         const auto& errs = page->jsErrors();
         if (errs.empty()) shownJsErrorCount_ = 0;
@@ -260,11 +264,12 @@ KeyEventResult BrowserView::handleKey(const KeyEvent& event) {
         switch (event.character) {
             case U'l': toolbarActive_ = true; toolbar_.focus(addressSlot_); return KeyEventResult::EnteredEdit;
             case U't': newTab(); return KeyEventResult::Consumed;
-            case U'w': closeTab(); return KeyEventResult::Consumed;
             case U'r': reload(); return KeyEventResult::Consumed;
+            case U'h': goHome(); return KeyEventResult::Consumed;
             default: break;
         }
     }
+    if (event.ctrl && event.key == Key::F4) { closeTab(); return KeyEventResult::Consumed; }
     if (event.ctrl && event.key == Key::Left) { goBack(); return KeyEventResult::Consumed; }
     if (event.ctrl && event.key == Key::Right) { goForward(); return KeyEventResult::Consumed; }
     if (event.ctrl && event.key == Key::Enter) { openFocusedLinkInNewTab(); return KeyEventResult::Consumed; }

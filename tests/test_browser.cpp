@@ -94,6 +94,7 @@ void runBrowserTests() {
                 (void)browser.handleKey(KeyEvent{Key::Char, static_cast<char32_t>(c)});
             (void)browser.handleKey(KeyEvent{Key::Enter});
             currentAddress = address;
+            browser.waitForLoad();
             browser.draw(screen);
         };
         navigate("https://example.test/first");
@@ -102,15 +103,18 @@ void runBrowserTests() {
               "address navigation updates the active browser page");
 
         (void)browser.handleKey(KeyEvent{Key::Left, 0, false, true});
+        browser.waitForLoad();
         browser.draw(screen);
         check(context.windowTitle == "https://example.test/second",
               "Alt+Left is not intercepted as browser history navigation");
 
         (void)browser.handleKey(KeyEvent{Key::Left, 0, true});
+        browser.waitForLoad();
         browser.draw(screen);
         check(context.windowTitle == "https://example.test/first",
               "Ctrl+Left navigates backward");
         (void)browser.handleKey(KeyEvent{Key::Right, 0, true});
+        browser.waitForLoad();
         browser.draw(screen);
         check(context.windowTitle == "https://example.test/second",
               "Ctrl+Right navigates forward");
