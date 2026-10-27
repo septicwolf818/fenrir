@@ -13,8 +13,14 @@ namespace litehtml
 
 		void parse_attributes() override;
 		bool appendChild(const ptr &el) override;
+		void set_attr(const char* name, const char* value) override;
+		const char* get_attr(const char* name, const char* def = nullptr) const override;
+		const string& script_text() const { return m_text; }
 		string_id tag() const override;
-		const char*	get_tagName() const override;
+		const char* get_tagName() const override;
+
+	private:
+		string_map m_attributes;
 	};
 }
 

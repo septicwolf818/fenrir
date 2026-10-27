@@ -388,8 +388,10 @@ inline Library buildLibrary() {
                 })
                 .section("Rendering limits")
                 .text("The prototype lays out static HTML and CSS and maps page colors to the "
-                      "16-color terminal palette. JavaScript is disabled and images are shown "
-                      "as placeholders; fonts and some modern CSS are approximated.")
+                      "16-color terminal palette. Page scripts run in a restricted QuickJS "
+                      "context with a small DOM subset; unsupported browser APIs may leave "
+                      "dynamic content incomplete. Images are placeholders, and fonts and some "
+                      "modern CSS are approximated.")
                 .seeAlso({"windows"})
                 .build());
 

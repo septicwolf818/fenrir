@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "BrowserNetwork.hpp"
+#include "BrowserScriptRuntime.hpp"
 #include "fenrir/core/Screen.hpp"
 #include "fenrir/core/Text.hpp"
 #include "fenrir/core/Theme.hpp"
@@ -371,12 +372,25 @@ bool BrowserPage::loadHtml(std::string html, std::string baseUrl) {
     focusedLink_ = -1;
     scrollRow_ = 0;
     lastLayoutWidth_ = lastLayoutHeight_ = -1;
+    links_.clear();
+    document_.reset();
     container_ = std::make_unique<BrowserContainer>(*this);
     container_->set_base_url(url_.c_str());
-    document_ = litehtml::document::createFromString(html, container_.get());
+    document_ = litehtml::document::createFromString(
+        html, container_.get(), litehtml::master_css,
+        ".reveal{opacity:1!important;visibility:visible!important;transform:none!important}");
     if (!document_) {
         error_ = "Could not parse HTML.";
         return false;
+    }
+    BrowserScriptRuntime scripts;
+    std::vector<BrowserScriptRuntime::DomPatch> patches;
+    std::string scriptError;
+    (void)scripts.execute(document_, url_, patches, scriptError);
+    for (const auto& patch : patches) {
+        const auto target = document_->root()->select_one("#" + patch.id);
+        if (target)
+            document_->append_children_from_string(*target, patch.html.c_str(), true);
     }
     ensureLayout();
     rebuildLinks();
@@ -439,21 +453,17 @@ void BrowserPage::rebuildLinks() {
             const char* href = element->get_attr("href");
             if (href && *href) {
                 litehtml::position placement;
-                litehtml::position clickPlacement;
                 bool hasPlacement = false;
                 std::function<void(const litehtml::element::ptr&)> includeText =
                     [&](const litehtml::element::ptr& child) {
                         const auto childPlacement = child->get_placement();
-                        if (!hasPlacement && childPlacement.width > 0 && childPlacement.height > 0)
-                            clickPlacement = childPlacement;
                         include(placement, childPlacement, hasPlacement);
                         for (const auto& descendant : child->children()) includeText(descendant);
                     };
                 for (const auto& child : element->children()) includeText(child);
                 include(placement, element->get_placement(), hasPlacement);
                 if (hasPlacement)
-                    links_.push_back(Link{element, placement, clickPlacement,
-                                          browser::resolveUrl(url_, href)});
+                    links_.push_back(Link{element, placement, browser::resolveUrl(url_, href)});
             }
         }
         for (const auto& child : element->children()) visit(child);
@@ -514,13 +524,11 @@ bool BrowserPage::focusLink(int direction) {
 bool BrowserPage::activateFocusedLink() {
     if (!document_ || focusedLink_ < 0 || static_cast<std::size_t>(focusedLink_) >= links_.size())
         return false;
-    const auto& link = links_[static_cast<std::size_t>(focusedLink_)];
-    const auto& p = link.clickPlacement.width > 0 ? link.clickPlacement : link.placement;
-    const auto x = p.x + p.width / 2;
-    const auto y = p.y + p.height / 2;
-    litehtml::position::vector redraw;
-    (void)document_->on_lbutton_down(x, y, x, y, redraw);
-    return document_->on_lbutton_up(x, y, x, y, redraw);
+    // LiteHTML can split an inline anchor into several text render boxes; its
+    // mouse hit-test does not always map the box center back to the anchor.
+    // Activate the focused semantic element directly instead.
+    links_[static_cast<std::size_t>(focusedLink_)].element->on_click();
+    return true;
 }
 
 void BrowserPage::draw(Screen& screen) {
@@ -574,6 +582,13 @@ bool BrowserPage::clickAt(int x, int y) {
     const float py = static_cast<float>((y - bounds_.y + scrollRow_) * kCellHeightPx);
     litehtml::position::vector redraw;
     (void)document_->on_mouse_over(px, py, px, py, redraw);
+    for (const auto& link : links_) {
+        const auto& area = link.placement;
+        if (px >= area.x && px < area.right() && py >= area.y && py < area.bottom()) {
+            link.element->on_click();
+            return true;
+        }
+    }
     (void)document_->on_lbutton_down(px, py, px, py, redraw);
     (void)document_->on_lbutton_up(px, py, px, py, redraw);
     return true;

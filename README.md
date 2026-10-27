@@ -19,7 +19,7 @@ features rather than system administration.
 - Photo Viewer for common raster formats, rendered with ANSI colors and a
   brightness-to-character ramp.
 - A lightweight HTML/CSS browser with tabs, history, keyboard-focused links,
-  and 16-color terminal rendering. JavaScript is disabled and images are
+  restricted QuickJS scripting, and 16-color terminal rendering. Images are
   placeholders in this first version.
 - Reusable widgets for menus, dialogs, lists, text input, file selection,
   directory trees, tabs, and status bars.

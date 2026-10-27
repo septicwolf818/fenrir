@@ -66,10 +66,43 @@ void runBrowserTests() {
         check(screen.at(2, 2).bg == colors::BrightWhite,
               "CSS page background maps to an ANSI background color");
         check(page.focusLink(), "Tab-style focus finds a page link");
-        check(page.cursorPosition().has_value(), "focused page link exposes a Fenrir cursor position");
+        const auto linkCursor = page.cursorPosition();
+        check(linkCursor.has_value(), "focused page link exposes a Fenrir cursor position");
+        if (linkCursor) {
+            check(page.clickAt(linkCursor->first, linkCursor->second),
+                  "virtual cursor click is routed to the focused link");
+            check(page.takePendingNavigation() == "https://example.test/next",
+                  "clicking the focused link requests navigation");
+        }
+
+        check(page.loadHtml(html, "https://example.test/start"),
+              "fixture can be reloaded for Enter activation");
+        check(page.focusLink(), "link can be focused again after reload");
         (void)page.activateFocusedLink();
         check(page.takePendingNavigation() == "https://example.test/next",
-              "activating a link produces a resolved navigation URL");
+              "Enter activation produces a resolved navigation URL");
+    }
+
+    // QuickJS executes both classic scripts and ES modules through the
+    // restricted DOM bridge; generated markup is inserted before layout.
+    {
+        apps::browser::BrowserPage page;
+        page.setBounds(Rect{0, 0, 48, 10});
+        const std::string html =
+            "<html><body><div id='classic'></div><div id='module'></div>"
+            "<script>document.getElementById('classic').textContent='CLASSIC-RAN';</script>"
+            "<script type='module'>document.getElementById('module').innerHTML='<p>MODULE-RAN</p>';</script>"
+            "</body></html>";
+        check(page.loadHtml(html, "https://example.test/scripts"), "script fixture parses");
+        Screen screen(48, 10);
+        page.draw(screen);
+        std::string rendered;
+        for (const Cell& cell : screen.cells())
+            if (cell.character < 128) rendered.push_back(static_cast<char>(cell.character));
+        check(rendered.find("CLASSIC-RAN") != std::string::npos,
+              "classic JavaScript DOM mutation renders");
+        check(rendered.find("MODULE-RAN") != std::string::npos,
+              "module JavaScript DOM mutation renders");
     }
 
     // Fixed decorative layers (like the portfolio's grid/glow backgrounds)
