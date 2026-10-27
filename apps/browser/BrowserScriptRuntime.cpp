@@ -6,6 +6,7 @@
 #include <string>
 #include <utility>
 #include <cstdio>
+#include <atomic>
 
 #include "BrowserNetwork.hpp"
 #include "litehtml/el_script.h"
@@ -93,6 +94,60 @@ JSValue jsCookieGet(JSContext* context, JSValueConst, int argc, JSValueConst*) {
     JS_FreeValue(context, global);
     std::string cookies = browser::getCookieString(u);
     return JS_NewString(context, cookies.c_str());
+}
+
+static std::atomic<int> sSynthIdCounter{0};
+
+JSValue jsQuerySelector(JSContext* context, JSValueConst, int argc, JSValueConst* argv) {
+    if (argc < 1) return JS_NULL;
+    auto* ctx = static_cast<BrowserScriptContext*>(JS_GetContextOpaque(context));
+    if (!ctx || !ctx->document() || !ctx->document()->root()) return JS_NULL;
+    const char* sel = JS_ToCString(context, argv[0]);
+    if (!sel) return JS_NULL;
+    std::string selector(sel);
+    JS_FreeCString(context, sel);
+    litehtml::element::ptr el = ctx->document()->root()->select_one(selector);
+    if (!el) return JS_NULL;
+    const char* id = el->get_attr("id");
+    std::string idStr;
+    if (id && *id) {
+        idStr = id;
+    } else {
+        // assign synthetic id
+        idStr = "__el_" + std::to_string(++sSynthIdCounter);
+        el->set_attr("id", idStr.c_str());
+    }
+    JSValue obj = JS_NewObject(context);
+    JS_SetPropertyStr(context, obj, "id", JS_NewString(context, idStr.c_str()));
+    JS_SetPropertyStr(context, obj, "tag", JS_NewString(context, el->get_tagName()));
+    return obj;
+}
+
+JSValue jsQuerySelectorAll(JSContext* context, JSValueConst, int argc, JSValueConst* argv) {
+    if (argc < 1) return JS_NewArray(context);
+    auto* ctx = static_cast<BrowserScriptContext*>(JS_GetContextOpaque(context));
+    if (!ctx || !ctx->document() || !ctx->document()->root()) return JS_NewArray(context);
+    const char* sel = JS_ToCString(context, argv[0]);
+    if (!sel) return JS_NewArray(context);
+    std::string selector(sel);
+    JS_FreeCString(context, sel);
+    litehtml::elements_list els = ctx->document()->root()->select_all(selector);
+    JSValue arr = JS_NewArray(context);
+    uint32_t idx = 0;
+    for (const auto& el : els) {
+        const char* id = el->get_attr("id");
+        std::string idStr;
+        if (id && *id) idStr = id;
+        else {
+            idStr = "__el_" + std::to_string(++sSynthIdCounter);
+            el->set_attr("id", idStr.c_str());
+        }
+        JSValue o = JS_NewObject(context);
+        JS_SetPropertyStr(context, o, "id", JS_NewString(context, idStr.c_str()));
+        JS_SetPropertyStr(context, o, "tag", JS_NewString(context, el->get_tagName()));
+        JS_SetPropertyUint32(context, arr, idx++, o);
+    }
+    return arr;
 }
 
 JSValue jsCookieSet(JSContext* context, JSValueConst, int argc, JSValueConst* argv) {
@@ -327,11 +382,27 @@ const char* kDomShim = R"JS(
     createTextNode(text) { const node = new FenrirNode('#text'); node.textContent = text; return node; },
     createDocumentFragment() { return new FenrirNode('#fragment', '', true); },
     querySelector(selector) {
-      for (const node of __allNodes) if (__matchSelector(node, selector)) return node;
-      return null;
+      const r = __querySelector(String(selector));
+      if (!r) return null;
+      if (!nodes[r.id]) nodes[r.id] = new FenrirNode(r.tag, r.id);
+      return nodes[r.id];
     },
     querySelectorAll(selector) {
-      return __allNodes.filter(node => __matchSelector(node, selector));
+      const res = __querySelectorAll(String(selector));
+      const out = [];
+      for (let i = 0; i < res.length; i++) {
+        const r = res[i];
+        if (!r) continue;
+        if (!nodes[r.id]) nodes[r.id] = new FenrirNode(r.tag, r.id);
+        out.push(nodes[r.id]);
+      }
+      return out;
+    },
+    getElementsByTagName(tag) {
+      return this.querySelectorAll(String(tag));
+    },
+    getElementsByClassName(cls) {
+      return this.querySelectorAll('.' + String(cls));
     },
     getElementsByTagName(tag) {
       tag = String(tag).toLowerCase();
@@ -807,6 +878,7 @@ bool BrowserScriptContext::setupRuntime(const std::string& pageUrl, std::string&
 
     context_ = JS_NewContext(runtime_);
     if (!context_) { teardown(); error = "Could not create JavaScript context."; return false; }
+    JS_SetContextOpaque(context_, this);
 
     {
         JSValue global = JS_GetGlobalObject(context_);
@@ -817,6 +889,10 @@ bool BrowserScriptContext::setupRuntime(const std::string& pageUrl, std::string&
         JS_SetPropertyStr(context_, global, "__cookieGet", cg);
         JSValue cs = JS_NewCFunction(context_, jsCookieSet, "__cookieSet", 1);
         JS_SetPropertyStr(context_, global, "__cookieSet", cs);
+        JSValue qs = JS_NewCFunction(context_, jsQuerySelector, "__querySelector", 1);
+        JS_SetPropertyStr(context_, global, "__querySelector", qs);
+        JSValue qsa = JS_NewCFunction(context_, jsQuerySelectorAll, "__querySelectorAll", 1);
+        JS_SetPropertyStr(context_, global, "__querySelectorAll", qsa);
         JSValue el = JS_NewCFunction(context_, [](JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)->JSValue {
             if (argc>0) { const char* m = JS_ToCString(ctx, argv[0]); if (m){ fprintf(stderr, "JSERR: %s\\n", m); JS_FreeCString(ctx, m); } }
             return JS_UNDEFINED;
@@ -922,6 +998,7 @@ bool BrowserScriptContext::initialize(const litehtml::document::ptr& document,
                                      std::string& error) {
     patches.clear();
     if (!document || !document->root()) return true;
+    document_ = document;
     if (!setupRuntime(pageUrl, error)) return false;
     std::string scriptError;
     (void)runScripts(document, scriptError);
