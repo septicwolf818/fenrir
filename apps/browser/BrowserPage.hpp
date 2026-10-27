@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -25,6 +26,7 @@ public:
 
     void navigate(std::string url);
     bool loadHtml(std::string html, std::string baseUrl);
+    void waitForLoad();
     void poll();
 
     const std::string& url() const { return url_; }
@@ -107,7 +109,7 @@ private:
     int scrollRow_ = 0;
     int lastLayoutWidth_ = -1;
     int lastLayoutHeight_ = -1;
-    bool loading_ = false;
+    std::atomic<bool> loading_{false};
     std::string url_;
     std::string title_;
     std::string error_;

@@ -23,6 +23,7 @@ public:
     void goBack();
     void goForward();
     void reload();
+    void waitForLoad();
     void goHome();
     void openFocusedLinkInNewTab();
     std::string currentUrl() const;

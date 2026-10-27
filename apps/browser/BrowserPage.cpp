@@ -616,6 +616,7 @@ void BrowserPage::navigate(std::string url) {
         fetchWorker_.join();
     }
     fetchState_.reset();
+    // Clear current state.
     document_.reset();
     links_.clear();
     error_.clear();
@@ -626,6 +627,8 @@ void BrowserPage::navigate(std::string url) {
     pointerX_ = pointerY_ = -1;
     scrollRow_ = 0;
     lastLayoutWidth_ = lastLayoutHeight_ = -1;
+    scriptContext_.reset();
+    container_.reset();
     url = browser::normalizeUrl(url);
     if (url.empty()) {
         url_.clear();
@@ -634,30 +637,26 @@ void BrowserPage::navigate(std::string url) {
         loading_ = false;
         return;
     }
-    url_ = std::move(url);
+    url_ = url;
     title_ = url_;
-    error_.clear();
-    pendingNavigation_.clear();
-    focusedLink_ = -1;
-    focusedTextField_ = -1;
-    focusedControl_ = -1;
-    pointerX_ = pointerY_ = -1;
-    scrollRow_ = 0;
-    lastLayoutWidth_ = lastLayoutHeight_ = -1;
-    document_.reset();
     loading_ = true;
-    fetchState_ = std::make_shared<FetchState>();
-    const auto result = fetchState_;
     const std::string requestUrl = url_;
-    fetchWorker_ = std::jthread([result, requestUrl](std::stop_token stop) {
+    fetchWorker_ = std::jthread([this, requestUrl](std::stop_token stop) {
         Response response = browser::fetch(requestUrl, 4 * 1024 * 1024, 10000, stop);
-        std::lock_guard lock(result->mutex);
-        result->response = std::move(response);
+        if (stop.stop_requested()) { loading_ = false; return; }
+        if (!response.error.empty()) {
+            error_ = response.error;
+            loading_ = false;
+            return;
+        }
+        const std::string finalUrl = response.finalUrl.empty() ? response.requestedUrl : response.finalUrl;
+        (void)loadHtml(std::move(response.body), finalUrl);
+        loading_ = false;
     });
 }
 
 bool BrowserPage::loadHtml(std::string html, std::string baseUrl) {
-    if (fetchWorker_.joinable()) {
+    if (fetchWorker_.joinable() && fetchWorker_.get_id() != std::this_thread::get_id()) {
         fetchWorker_.request_stop();
         fetchWorker_.join();
     }
@@ -735,30 +734,12 @@ bool BrowserPage::loadHtml(std::string html, std::string baseUrl) {
 }
 
 void BrowserPage::poll() {
-    if (!loading_ || !fetchState_) return;
-    std::optional<Response> result;
-    {
-        std::lock_guard lock(fetchState_->mutex);
-        if (fetchState_->response) result = std::move(fetchState_->response);
-    }
-    if (!result) return;
-    loading_ = false;
-    fetchState_.reset();
-    if (!result->error.empty()) {
-        error_ = result->error;
-        return;
-    }
+    // Loading is handled by a background thread spawned in navigate().
+    // Nothing to do here.
+}
 
-    url_ = result->finalUrl.empty() ? result->requestedUrl : result->finalUrl;
-    std::string type = result->contentType;
-    std::transform(type.begin(), type.end(), type.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    if (type.find("text/html") == std::string::npos &&
-        type.find("application/xhtml+xml") == std::string::npos) {
-        error_ = "This prototype currently displays HTML pages only.";
-        return;
-    }
-    (void)loadHtml(std::move(result->body), url_);
+void BrowserPage::waitForLoad() {
+    if (fetchWorker_.joinable()) fetchWorker_.join();
 }
 
 void BrowserPage::ensureLayout() {
@@ -1238,6 +1219,7 @@ void BrowserPage::drawTextFields(Screen& screen) {
 }
 
 KeyEventResult BrowserPage::handleKey(const KeyEvent& event) {
+    if (loading_) return KeyEventResult::Ignored;
     if (event.ctrl || event.alt) return KeyEventResult::Ignored;
     if (inputFocused()) {
         auto& field = textFields_[static_cast<std::size_t>(focusedTextField_)];
