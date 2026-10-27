@@ -252,6 +252,7 @@ const char* kDomShim = R"JS(
   class FenrirNode {
     constructor(tag, id = '', fragment = false) {
         this.tagName = String(tag || 'div').toUpperCase();
+        this.nodeType = fragment ? 11 : (this.tagName === '#TEXT' ? 3 : 1);
         this.id = id || '';
         this._html = '';
         this._text = '';
@@ -366,7 +367,10 @@ const char* kDomShim = R"JS(
         }
       }
     }
-    get textContent() { return this._text; }
+    get textContent() {
+      if (this.nodeType === 3) return this._text;
+      return this._text + this._children.map(node => node.textContent).join('');
+    }
     set textContent(value) {
       this._text = String(value);
       this._html = escapeHtml(this._text);
@@ -375,6 +379,7 @@ const char* kDomShim = R"JS(
     }
     get outerHTML() {
       if (this._fragment) return this.innerHTML;
+      if (this.nodeType === 3) return escapeHtml(this._text);
       const attrs = [];
       if (this.id) attrs.push('id="' + String(this.id).replace(/"/g, '&quot;') + '"');
       if (this.className) attrs.push('class="' + this.className.replace(/"/g, '&quot;') + '"');
