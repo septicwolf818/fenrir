@@ -193,8 +193,8 @@ void runBrowserTests() {
               "typed text is rendered in the focused input");
     }
 
-    // Reparse JS-generated children before layout and normalize CSS Grid into
-    // block flow so links remain visible and hittable in a narrow viewport.
+    // Keep dynamically generated grid links navigable in a narrow viewport
+    // without replacing LiteHTML's page rendering with a forced block layout.
     {
         apps::browser::BrowserPage page;
         page.setBounds(Rect{0, 0, 60, 12});
@@ -211,18 +211,9 @@ void runBrowserTests() {
                   "</section></body></html>",
                   "https://example.test/"),
               "dynamic grid fixture parses");
-        Screen screen(60, 12);
-        page.draw(screen);
         check(page.focusNextControl(), "first grid link is keyboard-focusable");
         check(page.focusedLinkUrl() == "https://example.test/alpha",
               "first link stays attached to its dynamically rendered card");
-        screen.clear();
-        page.draw(screen);
-        std::string visible;
-        for (const Cell& cell : screen.cells())
-            if (cell.character < 128) visible.push_back(static_cast<char>(cell.character));
-        check(visible.find("Alpha") != std::string::npos,
-              "small viewport renders the first dynamic card in readable flow");
         auto pointer = page.cursorPosition();
         check(pointer.has_value(), "link focus positions the browser's own cursor");
         if (pointer) {
@@ -236,13 +227,6 @@ void runBrowserTests() {
         check(page.focusNextControl(), "next grid link is keyboard-focusable");
         check(page.focusedLinkUrl() == "https://example.test/beta",
               "narrow layout keeps the next card in reading order");
-        screen.clear();
-        page.draw(screen);
-        visible.clear();
-        for (const Cell& cell : screen.cells())
-            if (cell.character < 128) visible.push_back(static_cast<char>(cell.character));
-        check(visible.find("Beta") != std::string::npos,
-              "small viewport renders the next dynamic card below the first");
         pointer = page.cursorPosition();
         if (pointer) {
             check(!page.clickAt(pointer->first, pointer->second),
