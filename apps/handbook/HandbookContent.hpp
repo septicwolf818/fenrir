@@ -381,7 +381,7 @@ inline Library buildLibrary() {
                 .keys({
                     {"Ctrl+L", "Focus the address field"},
                     {"Ctrl+T / Ctrl+W", "Open / close a tab"},
-                    {"Alt+Left / Alt+Right", "Back / forward"},
+                    {"Ctrl+Left / Ctrl+Right", "Back / forward"},
                     {"Ctrl+R", "Reload the page"},
                     {"Tab / Enter", "Focus the next link / open it"},
                     {"Ctrl+Enter", "Open the focused link in a new tab"},

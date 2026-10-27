@@ -27,8 +27,11 @@ public:
     std::vector<std::string> backgroundWorkers() const override { return {}; }
     void openDialog(std::u32string, std::unique_ptr<Dialog>, OnDialogResult) override {}
     void closeWindow() override {}
+    void setWindowTitle(std::string value) override { windowTitle = std::move(value); }
     void addFdSource(int, std::function<void()>, std::function<bool()>) override {}
     void removeFdSource(int) override {}
+
+    std::string windowTitle;
 
 private:
     notifications::Bus bus_;
@@ -74,6 +77,43 @@ void runBrowserTests() {
         BrowserTestContext context;
         apps::browser::BrowserView browser(context);
         check(!browser.editable(), "browser opens in keyboard navigation mode, not text edit mode");
+    }
+
+    // Browser history uses Ctrl+Arrow because Alt+Arrow switches Linux TTYs.
+    {
+        BrowserTestContext context;
+        apps::browser::BrowserView browser(context);
+        browser.setBounds(Rect{0, 0, 80, 24});
+        Screen screen(80, 24);
+        std::string currentAddress;
+        const auto navigate = [&](const std::string& address) {
+            (void)browser.handleKey(KeyEvent{Key::Char, U'l', true});
+            for (std::size_t i = 0; i < currentAddress.size(); ++i)
+                (void)browser.handleKey(KeyEvent{Key::Backspace});
+            for (char c : address)
+                (void)browser.handleKey(KeyEvent{Key::Char, static_cast<char32_t>(c)});
+            (void)browser.handleKey(KeyEvent{Key::Enter});
+            currentAddress = address;
+            browser.draw(screen);
+        };
+        navigate("https://example.test/first");
+        navigate("https://example.test/second");
+        check(context.windowTitle == "https://example.test/second",
+              "address navigation updates the active browser page");
+
+        (void)browser.handleKey(KeyEvent{Key::Left, 0, false, true});
+        browser.draw(screen);
+        check(context.windowTitle == "https://example.test/second",
+              "Alt+Left is not intercepted as browser history navigation");
+
+        (void)browser.handleKey(KeyEvent{Key::Left, 0, true});
+        browser.draw(screen);
+        check(context.windowTitle == "https://example.test/first",
+              "Ctrl+Left navigates backward");
+        (void)browser.handleKey(KeyEvent{Key::Right, 0, true});
+        browser.draw(screen);
+        check(context.windowTitle == "https://example.test/second",
+              "Ctrl+Right navigates forward");
     }
 
     // Parse HTML, apply inline CSS, paint the page through Fenrir's Screen, and
