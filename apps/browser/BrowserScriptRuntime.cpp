@@ -90,6 +90,7 @@ bool runJobs(JSRuntime* runtime, JSContext* context, std::string& error) {
 const char* kDomShim = R"JS(
 (() => {
   const nodes = Object.create(null);
+  const __allNodes = [];
   const escapeHtml = value => String(value).replace(/&/g, '&amp;')
     .replace(/</g, '&lt;').replace(/>/g, '&gt;');
   class FenrirNode {
@@ -103,6 +104,7 @@ const char* kDomShim = R"JS(
       this._classes = new Set();
       this._dirty = false;
       this._fragment = fragment;
+      if (!fragment) __allNodes.push(this);
       this.style = Object.create(null);
       Object.defineProperty(this, 'className', {
         get: () => Array.from(this._classes).join(' '),
@@ -163,8 +165,23 @@ const char* kDomShim = R"JS(
     getBoundingClientRect() { return {top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0}; }
     focus() {}
   }
+  function __matchSelector(node, selector) {
+    selector = String(selector).trim();
+    if (!selector) return false;
+    if (selector.startsWith('#')) return node.id === selector.slice(1);
+    if (selector.startsWith('.')) return !!(node._classes && node._classes.has(selector.slice(1)));
+    if (selector.includes('.')) {
+      const parts = selector.split('.');
+      const tag = parts[0].toLowerCase();
+      const cls = parts.slice(1).join('.');
+      if (tag && node.tagName.toLowerCase() !== tag) return false;
+      return !!(node._classes && node._classes.has(cls));
+    }
+    return node.tagName.toLowerCase() === selector.toLowerCase();
+  }
   const document = {
     documentElement: new FenrirNode('html'),
+    readyState: 'complete',
     getElementById(id) {
       id = String(id);
       return nodes[id] || (nodes[id] = new FenrirNode('div', id));
@@ -172,8 +189,13 @@ const char* kDomShim = R"JS(
     createElement(tag) { return new FenrirNode(tag); },
     createTextNode(text) { const node = new FenrirNode('#text'); node.textContent = text; return node; },
     createDocumentFragment() { return new FenrirNode('#fragment', '', true); },
-    querySelectorAll() { return []; },
-    querySelector() { return null; },
+    querySelector(selector) {
+      for (const node of __allNodes) if (__matchSelector(node, selector)) return node;
+      return null;
+    },
+    querySelectorAll(selector) {
+      return __allNodes.filter(node => __matchSelector(node, selector));
+    },
     addEventListener() {}
   };
   globalThis.document = document;
@@ -181,9 +203,25 @@ const char* kDomShim = R"JS(
     innerHeight: 768, scrollY: 0, addEventListener() {}, scrollTo() {},
     matchMedia: () => ({matches: true, addEventListener() {}})
   };
+  globalThis.navigator = {
+    userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    platform: 'Linux x86_64', language: 'en-US', languages: ['en-US', 'en'],
+    onLine: true, cookieEnabled: false, hardwareConcurrency: 4, maxTouchPoints: 0
+  };
   globalThis.location = {hash: '', href: ''};
   globalThis.requestAnimationFrame = () => 0;
+  let __timerSeq = 1;
+  globalThis.setTimeout = (fn, delay) => {
+    const id = __timerSeq++;
+    try { if (typeof fn === 'function') fn(); }
+    catch (e) { console.error(e); }
+    return id;
+  };
+  globalThis.setInterval = (fn, delay) => globalThis.setTimeout(fn, delay);
+  globalThis.clearTimeout = (id) => {};
+  globalThis.clearInterval = (id) => {};
   globalThis.IntersectionObserver = class { constructor() {} observe() {} unobserve() {} disconnect() {} };
+  globalThis.MutationObserver = class { constructor(cb) {} observe() {} disconnect() {} takeRecords() { return []; } };
   globalThis.console = {log() {}, info() {}, warn() {}, error() {}};
   globalThis.__fenrirNodes = nodes;
   globalThis.__fenrirTakePatches = () => Object.values(nodes)
