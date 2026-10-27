@@ -77,6 +77,10 @@ void BrowserView::newTab(std::string url) {
     syncTabs();
     toolbar_.focus(addressSlot_);
     toolbarActive_ = false;
+    if (url.empty()) {
+        auto& p = prefs::forApp("browser");
+        url = p.get("homepage", "");
+    }
     address_->setValue(text::toUtf32(url));
     if (!url.empty()) navigateCurrent(url);
     else if (auto* page = activePage())
