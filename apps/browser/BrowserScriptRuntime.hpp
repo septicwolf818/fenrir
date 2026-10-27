@@ -47,12 +47,14 @@ public:
     std::string evalString(const std::string& code, std::string& error);
 
     bool valid() const { return context_ != nullptr; }
+    litehtml::document::ptr document() const { return document_; }
 
 private:
     JSRuntime* runtime_ = nullptr;
     JSContext* context_ = nullptr;
     void* host_ = nullptr; // RuntimeHost*
     std::string pageUrl_;
+    litehtml::document::ptr document_;
     bool setupRuntime(const std::string& pageUrl, std::string& error);
     void teardown();
     bool collectPatches(std::vector<BrowserScriptRuntime::DomPatch>& patches, std::string& error);
