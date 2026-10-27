@@ -23,6 +23,7 @@ struct RuntimeHost {
     std::string pageUrl;
     std::chrono::steady_clock::time_point deadline;
     int moduleRequests = 0;
+    RuntimeHost(std::string url) : pageUrl(std::move(url)), deadline(std::chrono::steady_clock::now()) {}
 };
 
 int interruptRuntime(JSRuntime*, void* opaque) {
@@ -688,40 +689,65 @@ bool evaluate(JSContext* context, RuntimeHost& host, const std::string& source,
 } // namespace
 
 bool BrowserScriptRuntime::execute(const litehtml::document::ptr& document,
-                                   const std::string& pageUrl,
-                                   std::vector<DomPatch>& patches,
-                                   std::string& error) const {
+                                    const std::string& pageUrl,
+                                    std::vector<BrowserScriptRuntime::DomPatch>& patches,
+                                    std::string& error) const {
     patches.clear();
     error.clear();
     if (!document || !document->root()) return true;
 
-    JSRuntime* runtime = JS_NewRuntime();
-    if (!runtime) { error = "Could not create JavaScript runtime."; return false; }
-    JS_SetMemoryLimit(runtime, kRuntimeMemoryLimit);
-    JS_SetMaxStackSize(runtime, 256 * 1024);
-    RuntimeHost host{pageUrl, std::chrono::steady_clock::now() + kScriptBudget};
-    JS_SetInterruptHandler(runtime, interruptRuntime, &host);
-    JS_SetModuleLoaderFunc(runtime, normalizeModule, loadModule, &host);
-    JSContext* context = JS_NewContext(runtime);
-    if (!context) {
-        JS_FreeRuntime(runtime);
-        error = "Could not create JavaScript context.";
-        return false;
+    BrowserScriptContext ctx;
+    if (!ctx.initialize(document, pageUrl, patches, error)) return false;
+    return true;
+}
+
+
+
+BrowserScriptContext::BrowserScriptContext() = default;
+
+BrowserScriptContext::~BrowserScriptContext() { teardown(); }
+
+bool BrowserScriptContext::setupRuntime(const std::string& pageUrl, std::string& error) {
+    pageUrl_ = pageUrl;
+    auto* host = new RuntimeHost(pageUrl);
+    host_ = host;
+    runtime_ = JS_NewRuntime();
+    if (!runtime_) { error = "Could not create JavaScript runtime."; delete host; host_ = nullptr; return false; }
+    JS_SetMemoryLimit(runtime_, kRuntimeMemoryLimit);
+    JS_SetMaxStackSize(runtime_, 256 * 1024);
+    host->deadline = std::chrono::steady_clock::now() + kScriptBudget;
+    JS_SetInterruptHandler(runtime_, interruptRuntime, host);
+    JS_SetModuleLoaderFunc(runtime_, normalizeModule, loadModule, host);
+
+    context_ = JS_NewContext(runtime_);
+    if (!context_) { teardown(); error = "Could not create JavaScript context."; return false; }
+
+    {
+        JSValue global = JS_GetGlobalObject(context_);
+        JS_SetPropertyStr(context_, global, "__pageUrl", JS_NewString(context_, pageUrl.c_str()));
+        JSValue fn = JS_NewCFunction(context_, jsFetchSync, "__fetchSync", 1);
+        JS_SetPropertyStr(context_, global, "__fetchSync", fn);
+        JSValue cg = JS_NewCFunction(context_, jsCookieGet, "__cookieGet", 0);
+        JS_SetPropertyStr(context_, global, "__cookieGet", cg);
+        JSValue cs = JS_NewCFunction(context_, jsCookieSet, "__cookieSet", 1);
+        JS_SetPropertyStr(context_, global, "__cookieSet", cs);
+        JS_FreeValue(context_, global);
     }
 
-    // Expose bridges used by the JS shim.
-    {
-        JSValue global = JS_GetGlobalObject(context);
-        JS_SetPropertyStr(context, global, "__pageUrl", JS_NewString(context, pageUrl.c_str()));
-        JSValue fn = JS_NewCFunction(context, jsFetchSync, "__fetchSync", 1);
-        JS_SetPropertyStr(context, global, "__fetchSync", fn);
-        JSValue cg = JS_NewCFunction(context, jsCookieGet, "__cookieGet", 0);
-        JS_SetPropertyStr(context, global, "__cookieGet", cg);
-        JSValue cs = JS_NewCFunction(context, jsCookieSet, "__cookieSet", 1);
-        JS_SetPropertyStr(context, global, "__cookieSet", cs);
-        JS_FreeValue(context, global);
-    }
-    bool success = evaluate(context, host, kDomShim, "fenrir:dom", false, error);
+    bool success = evaluate(context_, *host, kDomShim, "fenrir:dom", false, error);
+    if (!success && error.empty()) error = "DOM shim failed.";
+    return true;
+}
+
+void BrowserScriptContext::teardown() {
+    if (context_) { JS_FreeContext(context_); context_ = nullptr; }
+    if (runtime_) { JS_FreeRuntime(runtime_); runtime_ = nullptr; }
+    if (host_) { delete static_cast<RuntimeHost*>(host_); host_ = nullptr; }
+}
+
+bool BrowserScriptContext::runScripts(const litehtml::document::ptr& document, std::string& error) {
+    if (!context_) return false;
+    auto* host = static_cast<RuntimeHost*>(host_);
     std::vector<litehtml::element::ptr> scripts;
     std::function<void(const litehtml::element::ptr&)> collect = [&](const litehtml::element::ptr& element) {
         if (std::string(element->get_tagName()) == "script") scripts.push_back(element);
@@ -730,16 +756,17 @@ bool BrowserScriptRuntime::execute(const litehtml::document::ptr& document,
     collect(document->root());
 
     int inlineIndex = 0;
+    bool success = true;
     for (const auto& script : scripts) {
         const char* typeAttr = script->get_attr("type");
         const std::string type = typeAttr ? typeAttr : "";
         if (type == "application/ld+json") continue;
         const bool module = type == "module";
         const char* srcAttr = script->get_attr("src");
-        std::string filename = pageUrl + "#inline-" + std::to_string(inlineIndex++);
+        std::string filename = pageUrl_ + "#inline-" + std::to_string(inlineIndex++);
         std::string source;
         if (srcAttr && *srcAttr) {
-            filename = browser::resolveUrl(pageUrl, srcAttr);
+            filename = browser::resolveUrl(pageUrl_, srcAttr);
             if (filename.empty()) continue;
             Response response = browser::fetch(filename, kMaxScriptBytes, 2000);
             if (!response.error.empty()) continue;
@@ -751,50 +778,84 @@ bool BrowserScriptRuntime::execute(const litehtml::document::ptr& document,
         }
         if (source.empty() || source.size() > kMaxScriptBytes) continue;
         std::string scriptError;
-        if (!evaluate(context, host, source, filename, module, scriptError)) {
-            // Continue with later scripts; one unsupported API should not
-            // suppress independent page content.
+        if (!evaluate(context_, *host, source, filename, module, scriptError)) {
             success = false;
             if (error.empty()) error = std::move(scriptError);
         }
     }
+    std::string e;
+    (void)evaluate(context_, *host, "if(typeof __drainTasks==='function')__drainTasks();", "fenrir:drain", false, e);
+    (void)evaluate(context_, *host, "if(typeof __dispatchReady==='function')__dispatchReady();", "fenrir:ready", false, e);
+    if (!e.empty() && error.empty()) error = e;
+    return success;
+}
 
-    // Drain deferred tasks (setTimeout, rAF, IO callbacks) and dispatch
-    // DOMContentLoaded/load so scripts that wait for readiness can run.
-    (void)evaluate(context, host, "if(typeof __drainTasks==='function')__drainTasks();",
-                   "fenrir:drain", false, error);
-    (void)evaluate(context, host, "if(typeof __dispatchReady==='function')__dispatchReady();",
-                   "fenrir:ready", false, error);
-
-    JSValue global = JS_GetGlobalObject(context);
-    JSValue nodes = JS_GetPropertyStr(context, global, "__fenrirNodes");
+bool BrowserScriptContext::collectPatches(std::vector<BrowserScriptRuntime::DomPatch>& patches, std::string& error) {
+    patches.clear();
+    if (!context_) return false;
+    JSValue global = JS_GetGlobalObject(context_);
+    JSValue nodes = JS_GetPropertyStr(context_, global, "__fenrirNodes");
     JSPropertyEnum* properties = nullptr;
     uint32_t propertyCount = 0;
     if (JS_IsObject(nodes) &&
-        JS_GetOwnPropertyNames(context, &properties, &propertyCount, nodes,
+        JS_GetOwnPropertyNames(context_, &properties, &propertyCount, nodes,
                                JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) == 0) {
         for (uint32_t i = 0; i < propertyCount; ++i) {
-            const char* idValue = JS_AtomToCString(context, properties[i].atom);
+            const char* idValue = JS_AtomToCString(context_, properties[i].atom);
             if (!idValue) continue;
             const std::string id(idValue);
-            JS_FreeCString(context, idValue);
-            JSValue node = JS_GetProperty(context, nodes, properties[i].atom);
-            JSValue dirty = JS_GetPropertyStr(context, node, "_dirty");
-            if (JS_ToBool(context, dirty) > 0) {
-                JSValue html = JS_GetPropertyStr(context, node, "innerHTML");
-                patches.push_back(DomPatch{id, getString(context, html)});
-                JS_FreeValue(context, html);
+            JS_FreeCString(context_, idValue);
+            JSValue node = JS_GetProperty(context_, nodes, properties[i].atom);
+            JSValue dirty = JS_GetPropertyStr(context_, node, "_dirty");
+            if (JS_ToBool(context_, dirty) > 0) {
+                JSValue html = JS_GetPropertyStr(context_, node, "innerHTML");
+                patches.push_back(BrowserScriptRuntime::DomPatch{id, getString(context_, html)});
+                JS_FreeValue(context_, html);
             }
-            JS_FreeValue(context, dirty);
-            JS_FreeValue(context, node);
+            JS_FreeValue(context_, dirty);
+            JS_FreeValue(context_, node);
         }
-        JS_FreePropertyEnum(context, properties, propertyCount);
+        JS_FreePropertyEnum(context_, properties, propertyCount);
     }
-    JS_FreeValue(context, nodes);
-    JS_FreeValue(context, global);
-    JS_FreeContext(context);
-    JS_FreeRuntime(runtime);
-    return success;
+    JS_FreeValue(context_, nodes);
+    JS_FreeValue(context_, global);
+    return true;
+}
+
+bool BrowserScriptContext::initialize(const litehtml::document::ptr& document,
+                                     const std::string& pageUrl,
+                                     std::vector<BrowserScriptRuntime::DomPatch>& patches,
+                                     std::string& error) {
+    patches.clear();
+    if (!document || !document->root()) return true;
+    if (!setupRuntime(pageUrl, error)) return false;
+    std::string scriptError;
+    (void)runScripts(document, scriptError);
+    collectPatches(patches, error);
+    if (!scriptError.empty() && error.empty()) error = scriptError;
+    return true;
+}
+
+bool BrowserScriptContext::dispatchEvent(const std::string& targetId, const std::string& type,
+                                       std::vector<BrowserScriptRuntime::DomPatch>& patches, std::string& error) {
+    patches.clear();
+    if (!context_) return false;
+    auto* host = static_cast<RuntimeHost*>(host_);
+    std::string code = "var __t = (typeof __fenrirNodes!=='undefined' && " +
+        std::string(targetId.empty() ? "null" : ("__fenrirNodes['" + targetId + "']")) +
+        ") || document; if (__t && typeof __t.dispatchEvent==='function') __t.dispatchEvent({type:'" + type +
+        "', target:__t, bubbles:true, cancelable:true}); if (typeof __drainTasks==='function') __drainTasks();";
+    std::string e;
+    (void)evaluate(context_, *host, code, "fenrir:dispatch", false, e);
+    collectPatches(patches, error);
+    if (!e.empty() && error.empty()) error = e;
+    return true;
+}
+
+bool BrowserScriptContext::evaluateSnippet(const std::string& code, std::string& error) {
+    if (!context_) return false;
+    auto* host = static_cast<RuntimeHost*>(host_);
+    return evaluate(context_, *host, code, "fenrir:snippet", false, error);
 }
 
 } // namespace fenrir::apps::browser

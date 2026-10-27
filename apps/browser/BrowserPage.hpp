@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "BrowserNetwork.hpp"
+#include "BrowserScriptRuntime.hpp"
 #include "fenrir/widgets/Widget.hpp"
 #include "litehtml.h"
 
@@ -74,6 +75,8 @@ private:
     void rebuildLinks();
     void updateHoveredControl();
     bool setPointerPosition(int x, int y);
+    void dispatchScriptEvent(const std::string& targetId, const std::string& type);
+    void syncTextFieldToScript(int fieldIndex);
     void movePageCursorBy(int dx, int dy);
     void focusControl(std::size_t index);
     void scrollIntoView(const litehtml::position& placement);
@@ -83,6 +86,7 @@ private:
     int maxScrollRow() const;
 
     std::unique_ptr<BrowserContainer> container_;
+    std::unique_ptr<BrowserScriptContext> scriptContext_;
     litehtml::document::ptr document_;
     std::shared_ptr<FetchState> fetchState_;
     std::jthread fetchWorker_;
