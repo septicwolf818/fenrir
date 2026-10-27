@@ -293,6 +293,10 @@ private:
     }
 
     void syncNormalLinesFromGrid() {
+        std::vector<std::pair<std::size_t, std::vector<VtCell>>> previousFixedTails;
+        for (std::size_t li = 0; li < normalLines_.size(); ++li)
+            if (isFixedRow(normalLines_[li]) && normalLines_[li].size() > static_cast<std::size_t>(w_))
+                previousFixedTails.emplace_back(li, normalLines_[li]);
         normalLines_.assign(history_.begin(), history_.end());
         normalCursorLine_ = normalSavedLine_ = 0;
         normalCursorOffset_ = normalSavedOffset_ = 0;
@@ -338,6 +342,24 @@ private:
             row = nextRow;
         }
 
+        // Fixed-layout rows do not reflow when the viewport narrows. Keep a
+        // clipped tail in the logical buffer across later PTY output syncs so
+        // widening the terminal can restore those cells.
+        const auto sameCell = [](const VtCell& a, const VtCell& b) {
+            return a.ch == b.ch && a.fg == b.fg && a.bg == b.bg &&
+                   a.style == b.style && a.fixedRow == b.fixedRow;
+        };
+        for (const auto& [li, previous] : previousFixedTails) {
+            if (li >= normalLines_.size()) continue;
+            auto& current = normalLines_[li];
+            if (!isFixedRow(previous) || !isFixedRow(current) ||
+                previous.size() <= current.size())
+                continue;
+            if (std::equal(current.begin(), current.end(), previous.begin(), sameCell))
+                current.insert(current.end(),
+                               previous.begin() + static_cast<long>(current.size()), previous.end());
+        }
+
         if (normalLines_.empty()) normalLines_.emplace_back();
         // A saved cursor can point into the grid's unused rows (shells and
         // full-screen programs commonly save/restore it while drawing). Those
@@ -355,13 +377,17 @@ private:
         normalCursorOffset_ = std::min(normalCursorOffset_, normalLines_[normalCursorLine_].size());
         normalSavedOffset_ = std::min(normalSavedOffset_, normalLines_[normalSavedLine_].size());
 
-        normalBufferStartLine_ = historyOpen_ && !history_.empty()
-                                     ? history_.size() - 1
-                                     : history_.size();
-        normalBufferStartOffset_ = historyOpen_ && !history_.empty()
-                                       ? history_.back().size()
-                                       : 0;
+        if (!preserveNormalBufferStart_) {
+            normalBufferStartLine_ = historyOpen_ && !history_.empty()
+                                         ? history_.size() - 1
+                                         : history_.size();
+            normalBufferStartOffset_ = historyOpen_ && !history_.empty()
+                                           ? history_.back().size()
+                                           : 0;
+        }
         normalBufferStartLine_ = std::min(normalBufferStartLine_, normalLines_.size() - 1);
+        normalBufferStartOffset_ = std::min(normalBufferStartOffset_,
+                                            normalLines_[normalBufferStartLine_].size());
         std::size_t rowStart = 0;
         for (std::size_t li = 0; li < normalBufferStartLine_; ++li) {
             const auto& line = normalLines_[li];
@@ -485,6 +511,10 @@ private:
         }
         while (history_.size() > kMaxHistory) history_.pop_front();
         if (history_.empty()) historyOpen_ = false;
+        // Layout may put rows into history only because the viewport became
+        // shorter. Preserve the prior logical screen boundary until actual
+        // normal-screen scrolling advances it.
+        preserveNormalBufferStart_ = true;
 
         auto mapPoint = [&](std::size_t line, std::size_t offset, bool pendingWrap,
                             int& x, int& y) {
@@ -556,6 +586,7 @@ private:
         view_ = 0;
         topPadding_ = 0;
         preserveViewOnOutput_ = false;
+        preserveNormalBufferStart_ = false;
         syncNormalLinesFromGrid();
     }
 
@@ -976,6 +1007,7 @@ private:
         auto& rowWraps = wraps();
         if (!altOn_ && top_ == 0 && bot_ == h_ - 1 && h_ > 0 &&
             g.size() == static_cast<std::size_t>(w_) * static_cast<std::size_t>(h_)) {
+            preserveNormalBufferStart_ = false;
             // The top row of the normal screen scrolls off — keep it for PgUp.
             // The row continues the line above it when that line was
             // soft-wrapped, so it joins the open history line instead of
@@ -1228,6 +1260,7 @@ private:
         normalCursorLine_ = normalSavedLine_ = 0;
         normalCursorOffset_ = normalSavedOffset_ = 0;
         normalBufferStartLine_ = normalBufferStartOffset_ = normalScreenStartRow_ = 0;
+        preserveNormalBufferStart_ = false;
         normalCursorPendingWrap_ = normalSavedPendingWrap_ = false;
         displayRowsDirty_ = true;
         view_ = 0;
@@ -1258,6 +1291,7 @@ private:
     // growing the grid must not permanently advance this anchor.
     std::size_t normalBufferStartLine_ = 0, normalBufferStartOffset_ = 0;
     std::size_t normalScreenStartRow_ = 0;
+    bool preserveNormalBufferStart_ = false;
     // Presentation-only leading blanks keep formerly scrolled content
     // bottom-aligned when a resize makes the complete buffer fit.
     int topPadding_ = 0;

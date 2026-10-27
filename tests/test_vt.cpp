@@ -295,6 +295,28 @@ void runTerminalTests() {
                   v.at(0, 4).ch == U'm',
               "resize padding is gone when the content fills the window");
     }
+    // A short resize may temporarily move old live rows into history. A shell
+    // redraw after SIGWINCH must not turn that temporary boundary permanent.
+    {
+        VtScreen v;
+        v.resize(12, 24);
+        for (int i = 0; i < 30; ++i) {
+            const std::string line = std::string("L") + (i < 10 ? "0" : "") +
+                                     std::to_string(i);
+            v.feed(line.data(), line.size());
+            v.feed("\r\n", 2);
+        }
+        const std::size_t originalBoundary = v.historyRowCount();
+        const char32_t originalTopDigit = v.at(2, 0).ch;
+        check(originalBoundary > 0, "fixture begins with real scrollback");
+
+        v.resize(12, 10);
+        v.feed("\x1b[?25l", 6); // shell output after the resize notification
+        v.resize(12, 24);
+        check(v.historyRowCount() == originalBoundary &&
+                  v.at(2, 0).ch == originalTopDigit,
+              "resize redraw does not permanently push live rows into history");
+    }
     // A scrolled viewport is anchored to its logical line when rewrapping,
     // not to a fixed number of physical rows. Preserve it through the shell's
     // prompt redraw after SIGWINCH, but ordinary later output follows live.
@@ -513,6 +535,20 @@ void runTerminalTests() {
         v.feed("H", 1);
         check(v.at(4, 0).ch == U'G' && v.at(0, 1).ch == U'H',
               "DECRST 7 restores automatic wrapping");
+    }
+    // Fixed-layout text clipped by a narrow resize remains in the logical
+    // buffer even if PTY output synchronizes the visible grid before widening.
+    {
+        VtScreen v;
+        v.resize(20, 3);
+        v.feed("\x1b[?7l", 5);
+        v.feed("ABCDEFGHIJKLMNOPQRST", 20);
+        v.resize(10, 3);
+        v.feed("\x1b[?25l", 6);
+        v.resize(20, 3);
+        check(v.at(0, 0).ch == U'A' && v.at(9, 0).ch == U'J' &&
+                  v.at(19, 0).ch == U'T',
+              "fixed-row tail survives resize, output sync, and widening");
     }
     // A cursor-positioned right-hand field can run past the margin with
     // autowrap disabled. The control bytes here match the captured PTY output.
