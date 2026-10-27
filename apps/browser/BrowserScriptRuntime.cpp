@@ -6,6 +6,7 @@
 #include <string>
 #include <utility>
 #include <atomic>
+#include <cstdio>
 
 #include "BrowserNetwork.hpp"
 #include "litehtml/el_script.h"
@@ -97,6 +98,46 @@ JSValue jsCookieGet(JSContext* context, JSValueConst, int argc, JSValueConst*) {
 
 static std::atomic<int> sSynthIdCounter{0};
 
+static JSValue buildDomTree(JSContext* context, const litehtml::element::ptr& el) {
+    if (!el) return JS_NULL;
+    JSValue obj = JS_NewObject(context);
+    const char* id = el->get_attr("id");
+    std::string idStr;
+    if (id && *id) idStr = id;
+    else {
+        idStr = "__el_" + std::to_string(++sSynthIdCounter);
+        el->set_attr("id", idStr.c_str());
+    }
+    JS_SetPropertyStr(context, obj, "id", JS_NewString(context, idStr.c_str()));
+    const char* tg = el->get_tagName();
+    JS_SetPropertyStr(context, obj, "tag", JS_NewString(context, tg ? tg : ""));
+    // attributes
+    const char* commonAttrs[] = {"href","src","class","title","name","type","value","action","method","alt","placeholder","checked","disabled","target","rel"};
+    for (const char* a : commonAttrs) {
+        const char* v = el->get_attr(a);
+        if (v) JS_SetPropertyStr(context, obj, a, JS_NewString(context, v));
+    }
+    // children
+    JSValue arr = JS_NewArray(context);
+    uint32_t idx = 0;
+    for (const auto& c : el->children()) {
+        if (std::string(c->get_tagName()) == "#text") continue;
+        JSValue child = buildDomTree(context, c);
+        JS_SetPropertyUint32(context, arr, idx++, child);
+    }
+    JS_SetPropertyStr(context, obj, "children", arr);
+    return obj;
+}
+
+JSValue jsGetDomTree(JSContext* context, JSValueConst, int argc, JSValueConst* argv) {
+    auto* ctx = static_cast<BrowserScriptContext*>(JS_GetContextOpaque(context));
+    if (!ctx) { fprintf(stderr, "jsGetDomTree: no ctx\n"); return JS_NULL; }
+    if (!ctx->document()) { fprintf(stderr, "jsGetDomTree: no doc\n"); return JS_NULL; }
+    if (!ctx->document()->root()) { fprintf(stderr, "jsGetDomTree: no root\n"); return JS_NULL; }
+    JSValue r = buildDomTree(context, ctx->document()->root());
+    return r;
+}
+
 JSValue jsQuerySelector(JSContext* context, JSValueConst, int argc, JSValueConst* argv) {
     if (argc < 1) return JS_NULL;
     auto* ctx = static_cast<BrowserScriptContext*>(JS_GetContextOpaque(context));
@@ -117,7 +158,8 @@ JSValue jsQuerySelector(JSContext* context, JSValueConst, int argc, JSValueConst
     }
     JSValue obj = JS_NewObject(context);
     JS_SetPropertyStr(context, obj, "id", JS_NewString(context, idStr.c_str()));
-    JS_SetPropertyStr(context, obj, "tag", JS_NewString(context, el->get_tagName()));
+    const char* tg = el->get_tagName();
+    JS_SetPropertyStr(context, obj, "tag", JS_NewString(context, tg ? tg : ""));
     // Copy common attributes so JS can read element.href etc.
     const char* commonAttrs[] = {"href","src","class","title","name","type","value","action","method","alt","placeholder","checked","disabled","target","rel"};
     for (const char* a : commonAttrs) {
@@ -227,19 +269,19 @@ const char* kDomShim = R"JS(
     .replace(/</g, '&lt;').replace(/>/g, '&gt;');
   class FenrirNode {
     constructor(tag, id = '', fragment = false) {
-      this.tagName = String(tag || 'div').toUpperCase();
-      this.id = id;
-      this._html = '';
-      this._text = '';
-      this._children = [];
-      this._attributes = Object.create(null);
-      this._classes = new Set();
-      this._dirty = false;
-      this._fragment = fragment;
-      this.parentNode = null;
-      this.parentElement = null;
-      if (!fragment) __allNodes.push(this);
-      this.style = Object.create(null);
+        this.tagName = String(tag || 'div').toUpperCase();
+        this.id = id || '';
+        this._html = '';
+        this._text = '';
+        this._children = [];
+        this._attributes = Object.create(null);
+        this._classes = new Set();
+        this._dirty = false;
+        this._fragment = fragment;
+        this.parentNode = null;
+        this.parentElement = null;
+        if (!fragment) __allNodes.push(this);
+        this.style = Object.create(null);
       // dataset: proxy for data-* attributes
       Object.defineProperty(this, 'dataset', {
         get() {
@@ -412,6 +454,58 @@ const char* kDomShim = R"JS(
       if (idx >= 0) { this._children.splice(idx, 1); if (child) { child.parentNode = null; child.parentElement = null; } }
       this._dirty = true;
       return child;
+    }
+    insertAdjacentHTML(position, html) {
+      position = String(position).toLowerCase();
+      const parsed = document.createElement('div');
+      parsed.innerHTML = html;
+      const kids = parsed._children.slice();
+      if (position === 'beforebegin') {
+        if (this.parentNode) {
+          kids.forEach(c => this.parentNode.insertBefore(c, this));
+        }
+      } else if (position === 'afterbegin') {
+        kids.reverse().forEach(c => {
+          if (this._children.length) this.insertBefore(c, this._children[0]);
+          else this.appendChild(c);
+        });
+      } else if (position === 'beforeend') {
+        kids.forEach(c => this.appendChild(c));
+      } else if (position === 'afterend') {
+        if (this.parentNode) {
+          const idx = this.parentNode._children.indexOf(this);
+          if (idx >= 0) {
+            kids.forEach((c, i) => this.parentNode.insertBefore(c, this.parentNode._children[idx + 1 + i] || null));
+          } else {
+            kids.forEach(c => this.parentNode.appendChild(c));
+          }
+        }
+      }
+      this._dirty = true;
+      return this;
+    }
+    insertAdjacentText(position, text) {
+      const tn = new FenrirNode('#text');
+      tn.textContent = String(text);
+      if (position === 'beforebegin' || position === 'afterend') {
+        if (this.parentNode) this.parentNode.insertBefore(tn, position === 'beforebegin' ? this : null);
+      } else {
+        this.insertAdjacentHTML(position, ''); // noop for text? simpler:
+      }
+      // simpler: just append text node appropriately
+      return this;
+    }
+    insertAdjacentElement(position, el) {
+      if (!el) return null;
+      if (position === 'beforebegin' && this.parentNode) { this.parentNode.insertBefore(el, this); }
+      else if (position === 'afterbegin') { this.insertBefore(el, this._children[0] || null); }
+      else if (position === 'beforeend') { this.appendChild(el); }
+      else if (position === 'afterend' && this.parentNode) {
+        const idx = this.parentNode._children.indexOf(this);
+        this.parentNode.insertBefore(el, this.parentNode._children[idx+1] || null);
+      }
+      this._dirty = true;
+      return el;
     }
     append(...children) {
       children.forEach(c => this.appendChild(c));
@@ -976,6 +1070,61 @@ const char* kDomShim = R"JS(
       }
     });
   };
+  globalThis.Element = FenrirNode;
+  globalThis.HTMLElement = FenrirNode;
+  globalThis.Node = FenrirNode;
+  // Sync the parsed DOM into the shim so DOM queries and mutations work
+  // on real page elements (not just JS-created ones).
+  (function() {
+    try {
+      const tree = __getDomTree();
+      if (!tree || typeof tree !== 'object') return;
+      let root;
+      try { root = build(tree); } catch(e) { let msg = 'build failed: '; msg += (e === null ? 'null' : (e === undefined ? 'undefined' : (e && e.message ? e.message : String(e)))); if (e && e.stack) msg += '\\n' + e.stack; if (typeof __errLog === 'function') __errLog(msg); return; }
+      function build(node) {
+        if (!node) return null;
+        let el;
+        try { el = new FenrirNode(node.tag, node.id); }
+        catch(e) { if (typeof __errLog === 'function') __errLog('build: FenrirNode ctor failed: ' + (e && e.message ? e.message : e)); throw e; }
+        for (const k in node) {
+          if (k === 'id' || k === 'tag' || k === 'children') continue;
+          try { el.setAttribute(k, node[k]); } catch (e) {}
+        }
+        if (node.class) el.className = node.class;
+        for (const c of (node.children || [])) {
+          let child;
+          try { child = build(c); } catch(e) { if (typeof __errLog === 'function') __errLog('build: recursive failed: ' + (e && e.message ? e.message : e)); throw e; }
+          if (child) el.appendChild(child);
+        }
+        return el;
+      }
+      if (!root) return;
+      // Replace document.documentElement
+      document.documentElement = root;
+      // Find body
+      const findTag = (n, tag) => {
+        if (!n) return null;
+        if (n.tagName && n.tagName.toLowerCase() === tag) return n;
+        for (const c of (n._children || [])) {
+          const r = findTag(c, tag);
+          if (r) return r;
+        }
+        return null;
+      };
+      const bodyNode = findTag(root, 'body');
+      const headNode = findTag(root, 'head');
+      if (bodyNode) document.body = bodyNode;
+      if (headNode) document.head = headNode;
+    } catch (e) {
+      let msg = 'DOM sync failed: ';
+      if (e === null) msg += 'null';
+      else if (e === undefined) msg += 'undefined';
+      else if (e && e.message) msg += e.message;
+      else msg += String(e);
+      if (e && e.stack) msg += '\\n' + e.stack;
+      if (typeof __errLog === 'function') __errLog(msg);
+    }
+  })();
   globalThis.__fenrirTakePatches = () => {
     const result = Object.values(nodes)
       .filter(node => node._dirty && node.id)
@@ -1046,7 +1195,7 @@ bool BrowserScriptContext::setupRuntime(const std::string& pageUrl, std::string&
     runtime_ = JS_NewRuntime();
     if (!runtime_) { error = "Could not create JavaScript runtime."; delete host; host_ = nullptr; return false; }
     JS_SetMemoryLimit(runtime_, kRuntimeMemoryLimit);
-    JS_SetMaxStackSize(runtime_, 256 * 1024);
+    JS_SetMaxStackSize(runtime_, 8 * 1024 * 1024);
     host->deadline = std::chrono::steady_clock::now() + kScriptBudget;
     JS_SetInterruptHandler(runtime_, interruptRuntime, host);
     JS_SetModuleLoaderFunc(runtime_, normalizeModule, loadModule, host);
@@ -1068,6 +1217,8 @@ bool BrowserScriptContext::setupRuntime(const std::string& pageUrl, std::string&
         JS_SetPropertyStr(context_, global, "__querySelector", qs);
         JSValue qsa = JS_NewCFunction(context_, jsQuerySelectorAll, "__querySelectorAll", 1);
         JS_SetPropertyStr(context_, global, "__querySelectorAll", qsa);
+        JSValue gdt = JS_NewCFunction(context_, jsGetDomTree, "__getDomTree", 0);
+        JS_SetPropertyStr(context_, global, "__getDomTree", gdt);
         JSValue el = JS_NewCFunction(context_, [](JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)->JSValue {
             if (argc>0) {
                 const char* m = JS_ToCString(ctx, argv[0]);
@@ -1110,6 +1261,9 @@ bool BrowserScriptContext::runScripts(const litehtml::document::ptr& document, s
         const char* typeAttr = script->get_attr("type");
         const std::string type = typeAttr ? typeAttr : "";
         if (type == "application/ld+json") continue;
+        if (type == "importmap") continue;
+        if (type == "application/json") continue;
+        if (type == "text/template") continue;
         const bool module = type == "module";
         const char* srcAttr = script->get_attr("src");
         std::string filename = pageUrl_ + "#inline-" + std::to_string(inlineIndex++);
