@@ -126,7 +126,6 @@ std::string transformGridCss(std::string css) {
             // replace 'grid' display values
             // We'll do targeted replacements of "display:grid" / "display: grid"
             auto replaceAll = [&](std::string& s, const std::string& from, const std::string& to) {
-                std::size_t pos = 0;
                 std::string lower = s;
                 std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
                 // case-insensitive replace
@@ -1053,7 +1052,6 @@ void BrowserPage::focusControl(std::size_t index) {
     if (lastFocusedControl_ >= 0 && lastFocusedControl_ != static_cast<int>(index) &&
         static_cast<std::size_t>(lastFocusedControl_) < focusOrder_.size()) {
         const auto prev = focusOrder_[static_cast<std::size_t>(lastFocusedControl_)];
-        const auto& prevArea = prev.isTextField ? textFields_[prev.index].placement : links_[prev.index].placement;
         const char* prevId = prev.isTextField ? textFields_[prev.index].element->get_attr("id") : links_[prev.index].element->get_attr("id");
         if (prevId && *prevId) dispatchScriptEvent(prevId, "blur");
     }

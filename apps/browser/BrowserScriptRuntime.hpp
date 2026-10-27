@@ -1,6 +1,8 @@
 #pragma once
 
 #include <memory>
+#include <cstddef>
+#include <unordered_map>
 #include <string>
 #include <vector>
 
@@ -52,6 +54,9 @@ public:
 
     bool valid() const { return context_ != nullptr; }
     litehtml::document::ptr document() const { return document_; }
+    std::string registerElement(const litehtml::element::ptr& element);
+    litehtml::element::ptr resolveElement(const std::string& id) const;
+    litehtml::element::ptr findElementById(const std::string& id) const;
 
 private:
     JSRuntime* runtime_ = nullptr;
@@ -59,6 +64,9 @@ private:
     void* host_ = nullptr; // RuntimeHost*
     std::string pageUrl_;
     litehtml::document::ptr document_;
+    std::unordered_map<std::string, litehtml::element::ptr> elementHandles_;
+    std::unordered_map<const litehtml::element*, std::string> elementHandleByPointer_;
+    std::size_t nextElementHandle_ = 0;
     std::vector<std::string> jsErrors_;
     bool setupRuntime(const std::string& pageUrl, std::string& error);
     void teardown();

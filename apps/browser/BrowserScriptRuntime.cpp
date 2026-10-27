@@ -96,109 +96,91 @@ JSValue jsCookieGet(JSContext* context, JSValueConst, int argc, JSValueConst*) {
     return JS_NewString(context, cookies.c_str());
 }
 
-static std::atomic<int> sSynthIdCounter{0};
-
-static JSValue buildDomTree(JSContext* context, const litehtml::element::ptr& el) {
-    if (!el) return JS_NULL;
+JSValue makeElementHandle(JSContext* context, BrowserScriptContext* ctx,
+                          const litehtml::element::ptr& element) {
+    if (!element) return JS_NULL;
+    const std::string handle = ctx->registerElement(element);
     JSValue obj = JS_NewObject(context);
-    const char* id = el->get_attr("id");
-    std::string idStr;
-    if (id && *id) idStr = id;
-    else {
-        idStr = "__el_" + std::to_string(++sSynthIdCounter);
-        el->set_attr("id", idStr.c_str());
+    const char* id = element->get_attr("id");
+    JS_SetPropertyStr(context, obj, "id", JS_NewString(context, id ? id : ""));
+    JS_SetPropertyStr(context, obj, "__handle", JS_NewString(context, handle.c_str()));
+    const char* tagName = element->get_tagName();
+    JS_SetPropertyStr(context, obj, "tag", JS_NewString(context, tagName ? tagName : ""));
+    if (auto* tag = dynamic_cast<litehtml::html_tag*>(element.get())) {
+        for (const auto& [name, value] : tag->get_attrs()) {
+            JS_SetPropertyStr(context, obj, name.c_str(), JS_NewString(context, value.c_str()));
+        }
     }
-    JS_SetPropertyStr(context, obj, "id", JS_NewString(context, idStr.c_str()));
-    const char* tg = el->get_tagName();
-    JS_SetPropertyStr(context, obj, "tag", JS_NewString(context, tg ? tg : ""));
-    // attributes
-    const char* commonAttrs[] = {"href","src","class","title","name","type","value","action","method","alt","placeholder","checked","disabled","target","rel"};
-    for (const char* a : commonAttrs) {
-        const char* v = el->get_attr(a);
-        if (v) JS_SetPropertyStr(context, obj, a, JS_NewString(context, v));
-    }
-    // children
-    JSValue arr = JS_NewArray(context);
-    uint32_t idx = 0;
-    for (const auto& c : el->children()) {
-        if (std::string(c->get_tagName()) == "#text") continue;
-        JSValue child = buildDomTree(context, c);
-        JS_SetPropertyUint32(context, arr, idx++, child);
-    }
-    JS_SetPropertyStr(context, obj, "children", arr);
     return obj;
 }
 
-JSValue jsGetDomTree(JSContext* context, JSValueConst, int argc, JSValueConst* argv) {
-    auto* ctx = static_cast<BrowserScriptContext*>(JS_GetContextOpaque(context));
-    if (!ctx) { fprintf(stderr, "jsGetDomTree: no ctx\n"); return JS_NULL; }
-    if (!ctx->document()) { fprintf(stderr, "jsGetDomTree: no doc\n"); return JS_NULL; }
-    if (!ctx->document()->root()) { fprintf(stderr, "jsGetDomTree: no root\n"); return JS_NULL; }
-    JSValue r = buildDomTree(context, ctx->document()->root());
-    return r;
+litehtml::element::ptr queryRoot(BrowserScriptContext* ctx, const std::string& selector) {
+    if (!ctx || !ctx->document() || !ctx->document()->root()) return {};
+    return ctx->document()->root()->select_one(selector);
+}
+
+litehtml::element::ptr queryScoped(BrowserScriptContext* ctx, const std::string& handle,
+                                   const std::string& selector) {
+    if (!ctx || !ctx->document() || !ctx->document()->root()) return {};
+    auto root = ctx->resolveElement(handle);
+    if (!root) return {};
+    for (const auto& element : root->select_all(selector)) {
+        if (element != root) return element;
+    }
+    return {};
 }
 
 JSValue jsQuerySelector(JSContext* context, JSValueConst, int argc, JSValueConst* argv) {
     if (argc < 1) return JS_NULL;
     auto* ctx = static_cast<BrowserScriptContext*>(JS_GetContextOpaque(context));
-    if (!ctx || !ctx->document() || !ctx->document()->root()) return JS_NULL;
-    const char* sel = JS_ToCString(context, argv[0]);
-    if (!sel) return JS_NULL;
-    std::string selector(sel);
-    JS_FreeCString(context, sel);
-    litehtml::element::ptr el = ctx->document()->root()->select_one(selector);
-    if (!el) return JS_NULL;
-    const char* id = el->get_attr("id");
-    std::string idStr;
-    if (id && *id) {
-        idStr = id;
-    } else {
-        idStr = "__el_" + std::to_string(++sSynthIdCounter);
-        el->set_attr("id", idStr.c_str());
+    if (!ctx) return JS_NULL;
+    const char* selectorValue = JS_ToCString(context, argv[0]);
+    if (!selectorValue) return JS_EXCEPTION;
+    const std::string selector(selectorValue);
+    JS_FreeCString(context, selectorValue);
+    std::string scope;
+    if (argc > 1 && !JS_IsNull(argv[1]) && !JS_IsUndefined(argv[1])) {
+        const char* scopeValue = JS_ToCString(context, argv[1]);
+        if (scopeValue) { scope = scopeValue; JS_FreeCString(context, scopeValue); }
     }
-    JSValue obj = JS_NewObject(context);
-    JS_SetPropertyStr(context, obj, "id", JS_NewString(context, idStr.c_str()));
-    const char* tg = el->get_tagName();
-    JS_SetPropertyStr(context, obj, "tag", JS_NewString(context, tg ? tg : ""));
-    // Copy common attributes so JS can read element.href etc.
-    const char* commonAttrs[] = {"href","src","class","title","name","type","value","action","method","alt","placeholder","checked","disabled","target","rel"};
-    for (const char* a : commonAttrs) {
-        const char* v = el->get_attr(a);
-        if (v) JS_SetPropertyStr(context, obj, a, JS_NewString(context, v));
-    }
-    return obj;
+    auto element = scope.empty() ? queryRoot(ctx, selector) : queryScoped(ctx, scope, selector);
+    return element ? makeElementHandle(context, ctx, element) : JS_NULL;
 }
 
 JSValue jsQuerySelectorAll(JSContext* context, JSValueConst, int argc, JSValueConst* argv) {
-    if (argc < 1) return JS_NewArray(context);
+    JSValue array = JS_NewArray(context);
+    if (argc < 1) return array;
     auto* ctx = static_cast<BrowserScriptContext*>(JS_GetContextOpaque(context));
-    if (!ctx || !ctx->document() || !ctx->document()->root()) return JS_NewArray(context);
-    const char* sel = JS_ToCString(context, argv[0]);
-    if (!sel) return JS_NewArray(context);
-    std::string selector(sel);
-    JS_FreeCString(context, sel);
-    litehtml::elements_list els = ctx->document()->root()->select_all(selector);
-    JSValue arr = JS_NewArray(context);
-    uint32_t idx = 0;
-    for (const auto& el : els) {
-        const char* id = el->get_attr("id");
-        std::string idStr;
-        if (id && *id) idStr = id;
-        else {
-            idStr = "__el_" + std::to_string(++sSynthIdCounter);
-            el->set_attr("id", idStr.c_str());
-        }
-        JSValue o = JS_NewObject(context);
-        JS_SetPropertyStr(context, o, "id", JS_NewString(context, idStr.c_str()));
-        JS_SetPropertyStr(context, o, "tag", JS_NewString(context, el->get_tagName()));
-        const char* commonAttrs[] = {"href","src","class","title","name","type","value","action","method","alt","placeholder","checked","disabled","target","rel"};
-        for (const char* a : commonAttrs) {
-            const char* v = el->get_attr(a);
-            if (v) JS_SetPropertyStr(context, o, a, JS_NewString(context, v));
-        }
-        JS_SetPropertyUint32(context, arr, idx++, o);
+    if (!ctx || !ctx->document() || !ctx->document()->root()) return array;
+    const char* selectorValue = JS_ToCString(context, argv[0]);
+    if (!selectorValue) return JS_EXCEPTION;
+    const std::string selector(selectorValue);
+    JS_FreeCString(context, selectorValue);
+    std::string scope;
+    if (argc > 1 && !JS_IsNull(argv[1]) && !JS_IsUndefined(argv[1])) {
+        const char* scopeValue = JS_ToCString(context, argv[1]);
+        if (scopeValue) { scope = scopeValue; JS_FreeCString(context, scopeValue); }
     }
-    return arr;
+    auto root = scope.empty() ? ctx->document()->root() : ctx->resolveElement(scope);
+    if (!root) return array;
+    uint32_t index = 0;
+    for (const auto& element : root->select_all(selector)) {
+        if (!scope.empty() && element == root) continue;
+        JS_SetPropertyUint32(context, array, index++, makeElementHandle(context, ctx, element));
+    }
+    return array;
+}
+
+JSValue jsGetElementById(JSContext* context, JSValueConst, int argc, JSValueConst* argv) {
+    if (argc < 1) return JS_NULL;
+    auto* ctx = static_cast<BrowserScriptContext*>(JS_GetContextOpaque(context));
+    if (!ctx) return JS_NULL;
+    const char* idValue = JS_ToCString(context, argv[0]);
+    if (!idValue) return JS_EXCEPTION;
+    const std::string id(idValue);
+    JS_FreeCString(context, idValue);
+    const auto element = ctx->findElementById(id);
+    return element ? makeElementHandle(context, ctx, element) : JS_NULL;
 }
 
 JSValue jsCookieSet(JSContext* context, JSValueConst, int argc, JSValueConst* argv) {
@@ -289,9 +271,9 @@ const char* kDomShim = R"JS(
           return new Proxy({}, {
             get(target, prop) {
               if (typeof prop === 'symbol') return target[prop];
-              // convert camelCase to kebab-case
               const attr = 'data-' + String(prop).replace(/[A-Z]/g, m => '-' + m.toLowerCase());
-              return self.getAttribute(attr);
+              const v = self.getAttribute(attr);
+              return v === null ? undefined : v;
             },
             set(target, prop, value) {
               const attr = 'data-' + String(prop).replace(/[A-Z]/g, m => '-' + m.toLowerCase());
@@ -305,7 +287,7 @@ const char* kDomShim = R"JS(
       // Expose common attributes as properties (like real DOM).
       ['href','src','value','title','name','type','action','method','alt','placeholder'].forEach(a => {
         Object.defineProperty(this, a, {
-          get() { return this.getAttribute(a); },
+          get() { const v = this.getAttribute(a); return v === null ? '' : v; },
           set(v) { this.setAttribute(a, v); },
           configurable: true, enumerable: true
         });
@@ -554,6 +536,10 @@ const char* kDomShim = R"JS(
       return true;
     }
     querySelector(sel) {
+      if (this.__handle) {
+        const record = __querySelector(String(sel), this.__handle);
+        if (record) return __wrapNativeElement(record);
+      }
       const __match = (node, s) => {
         s = String(s).trim();
         if (!s) return false;
@@ -576,6 +562,9 @@ const char* kDomShim = R"JS(
       return walk(this, sel);
     }
     querySelectorAll(sel) {
+      if (this.__handle) {
+        return __querySelectorAll(String(sel), this.__handle).map(__wrapNativeElement);
+      }
       const __match = (node, s) => {
         s = String(s).trim();
         if (!s) return false;
@@ -620,6 +609,19 @@ const char* kDomShim = R"JS(
     }
     return node.tagName.toLowerCase() === selector.toLowerCase();
   }
+  function __wrapNativeElement(record) {
+    if (!record) return null;
+    const handle = record.__handle;
+    if (nodes[handle]) return nodes[handle];
+    const element = new FenrirNode(record.tag || 'div', record.id || '');
+    element.__handle = handle;
+    for (const key of Object.keys(record)) {
+      if (key === 'id' || key === 'tag' || key === '__handle') continue;
+      element.setAttribute(key, record[key]);
+    }
+    nodes[handle] = element;
+    return element;
+  }
   const document = {
     documentElement: new FenrirNode('html'),
     body: new FenrirNode('body'),
@@ -629,6 +631,8 @@ const char* kDomShim = R"JS(
     set cookie(v) { __cookieSet(v); },
     getElementById(id) {
       id = String(id);
+      const native = __getElementById(id);
+      if (native) return __wrapNativeElement(native);
       return nodes[id] || (nodes[id] = new FenrirNode('div', id));
     },
     createElement(tag) { return new FenrirNode(tag); },
@@ -636,17 +640,7 @@ const char* kDomShim = R"JS(
     createDocumentFragment() { return new FenrirNode('#fragment', '', true); },
     querySelector(selector) {
       const r = __querySelector(String(selector));
-      if (r) {
-        if (!nodes[r.id]) {
-          const n = new FenrirNode(r.tag, r.id);
-          ['href','src','class','title','name','type','value','action','method','alt','placeholder','checked','disabled','target','rel'].forEach(a => {
-            if (r[a] !== undefined) n.setAttribute(a, r[a]);
-          });
-          if (r.class) n.className = r.class;
-          nodes[r.id] = n;
-        }
-        return nodes[r.id];
-      }
+      if (r) return __wrapNativeElement(r);
       // Fallback: search JS-created (detached) nodes.
       for (const n of __allNodes) {
         const res = n.querySelector ? n.querySelector(selector) : null;
@@ -656,21 +650,7 @@ const char* kDomShim = R"JS(
     },
     querySelectorAll(selector) {
       const res = __querySelectorAll(String(selector));
-      const out = [];
-      for (let i = 0; i < res.length; i++) {
-        const r = res[i];
-        if (!r) continue;
-        if (!nodes[r.id]) {
-          const n = new FenrirNode(r.tag, r.id);
-          ['href','src','class','title','name','type','value','action','method','alt','placeholder','checked','disabled','target','rel'].forEach(a => {
-            if (r[a] !== undefined) n.setAttribute(a, r[a]);
-          });
-          if (r.class) n.className = r.class;
-          nodes[r.id] = n;
-        }
-        out.push(nodes[r.id]);
-      }
-      return out;
+      return res.map(__wrapNativeElement);
     },
     getElementsByTagName(tag) {
       const res = this.querySelectorAll(String(tag));
@@ -700,6 +680,9 @@ const char* kDomShim = R"JS(
       return true;
     }
   };
+  document.documentElement = document.querySelector('html') || document.documentElement;
+  document.body = document.querySelector('body') || document.body;
+  document.head = document.querySelector('head') || document.head;
   globalThis.document = document;
   // window is the global object itself (like browsers), so `window.X = ...`
   // creates a global X. This is required by libraries (modernizr) that do
@@ -733,7 +716,7 @@ const char* kDomShim = R"JS(
   };
   globalThis.window.scrollTo = function(x, y) { this.scrollX = x || 0; this.scrollY = y || 0; };
   globalThis.window.scrollBy = function(x, y) { this.scrollX += x || 0; this.scrollY += y || 0; };
-  globalThis.window.matchMedia = () => ({matches: true, addEventListener() {}});
+  globalThis.window.matchMedia = () => ({matches: true, addEventListener() {}, addListener(cb) { if (typeof cb === 'function') setTimeout(cb, 0); }, removeListener() {}});
   function __parseUrl(href) {
     href = String(href || '');
     let protocol = '', host = '', hostname = '', port = '', pathname = '/', search = '', hash = '';
@@ -810,7 +793,6 @@ const char* kDomShim = R"JS(
     platform: 'Linux x86_64', language: 'en-US', languages: ['en-US', 'en'],
     onLine: true, cookieEnabled: false, hardwareConcurrency: 4, maxTouchPoints: 0
   };
-  globalThis.location = {hash: '', href: ''};
   let __timerSeq = 1;
   globalThis.setTimeout = (fn, delay) => {
     const id = __timerSeq++;
@@ -1073,58 +1055,12 @@ const char* kDomShim = R"JS(
   globalThis.Element = FenrirNode;
   globalThis.HTMLElement = FenrirNode;
   globalThis.Node = FenrirNode;
-  // Sync the parsed DOM into the shim so DOM queries and mutations work
-  // on real page elements (not just JS-created ones).
-  (function() {
-    try {
-      const tree = __getDomTree();
-      if (!tree || typeof tree !== 'object') return;
-      let root;
-      try { root = build(tree); } catch(e) { let msg = 'build failed: '; msg += (e === null ? 'null' : (e === undefined ? 'undefined' : (e && e.message ? e.message : String(e)))); if (e && e.stack) msg += '\\n' + e.stack; if (typeof __errLog === 'function') __errLog(msg); return; }
-      function build(node) {
-        if (!node) return null;
-        let el;
-        try { el = new FenrirNode(node.tag, node.id); }
-        catch(e) { if (typeof __errLog === 'function') __errLog('build: FenrirNode ctor failed: ' + (e && e.message ? e.message : e)); throw e; }
-        for (const k in node) {
-          if (k === 'id' || k === 'tag' || k === 'children') continue;
-          try { el.setAttribute(k, node[k]); } catch (e) {}
-        }
-        if (node.class) el.className = node.class;
-        for (const c of (node.children || [])) {
-          let child;
-          try { child = build(c); } catch(e) { if (typeof __errLog === 'function') __errLog('build: recursive failed: ' + (e && e.message ? e.message : e)); throw e; }
-          if (child) el.appendChild(child);
-        }
-        return el;
-      }
-      if (!root) return;
-      // Replace document.documentElement
-      document.documentElement = root;
-      // Find body
-      const findTag = (n, tag) => {
-        if (!n) return null;
-        if (n.tagName && n.tagName.toLowerCase() === tag) return n;
-        for (const c of (n._children || [])) {
-          const r = findTag(c, tag);
-          if (r) return r;
-        }
-        return null;
-      };
-      const bodyNode = findTag(root, 'body');
-      const headNode = findTag(root, 'head');
-      if (bodyNode) document.body = bodyNode;
-      if (headNode) document.head = headNode;
-    } catch (e) {
-      let msg = 'DOM sync failed: ';
-      if (e === null) msg += 'null';
-      else if (e === undefined) msg += 'undefined';
-      else if (e && e.message) msg += e.message;
-      else msg += String(e);
-      if (e && e.stack) msg += '\\n' + e.stack;
-      if (typeof __errLog === 'function') __errLog(msg);
-    }
-  })();
+  globalThis.Image = function(w, h) {
+    const img = document.createElement('img');
+    if (w) img.width = w;
+    if (h) img.height = h;
+    return img;
+  };
   globalThis.__fenrirTakePatches = () => {
     const result = Object.values(nodes)
       .filter(node => node._dirty && node.id)
@@ -1188,6 +1124,44 @@ BrowserScriptContext::BrowserScriptContext() = default;
 
 BrowserScriptContext::~BrowserScriptContext() { teardown(); }
 
+std::string BrowserScriptContext::registerElement(const litehtml::element::ptr& element) {
+    if (!element) return {};
+    if (const auto existing = elementHandleByPointer_.find(element.get());
+        existing != elementHandleByPointer_.end()) {
+        return existing->second;
+    }
+    const char* existingId = element ? element->get_attr("id") : nullptr;
+    const std::string handle = "__fenrir_handle_" + std::to_string(++nextElementHandle_);
+    if (!existingId || !*existingId) {
+        const std::string syntheticId = "__fenrir_element_" + std::to_string(nextElementHandle_);
+        element->set_attr("id", syntheticId.c_str());
+    }
+    elementHandles_[handle] = element;
+    elementHandleByPointer_[element.get()] = handle;
+    return handle;
+}
+
+litehtml::element::ptr BrowserScriptContext::resolveElement(const std::string& id) const {
+    const auto it = elementHandles_.find(id);
+    return it == elementHandles_.end() ? litehtml::element::ptr{} : it->second;
+}
+
+litehtml::element::ptr BrowserScriptContext::findElementById(const std::string& id) const {
+    if (!document_ || !document_->root()) return {};
+    litehtml::element::ptr found;
+    std::function<void(const litehtml::element::ptr&)> visit = [&](const litehtml::element::ptr& element) {
+        if (!element || found) return;
+        const char* elementId = element->get_attr("id");
+        if (elementId && id == elementId) {
+            found = element;
+            return;
+        }
+        for (const auto& child : element->children()) visit(child);
+    };
+    visit(document_->root());
+    return found;
+}
+
 bool BrowserScriptContext::setupRuntime(const std::string& pageUrl, std::string& error) {
     pageUrl_ = pageUrl;
     auto* host = new RuntimeHost(pageUrl);
@@ -1213,12 +1187,12 @@ bool BrowserScriptContext::setupRuntime(const std::string& pageUrl, std::string&
         JS_SetPropertyStr(context_, global, "__cookieGet", cg);
         JSValue cs = JS_NewCFunction(context_, jsCookieSet, "__cookieSet", 1);
         JS_SetPropertyStr(context_, global, "__cookieSet", cs);
-        JSValue qs = JS_NewCFunction(context_, jsQuerySelector, "__querySelector", 1);
+        JSValue qs = JS_NewCFunction(context_, jsQuerySelector, "__querySelector", 2);
         JS_SetPropertyStr(context_, global, "__querySelector", qs);
-        JSValue qsa = JS_NewCFunction(context_, jsQuerySelectorAll, "__querySelectorAll", 1);
+        JSValue qsa = JS_NewCFunction(context_, jsQuerySelectorAll, "__querySelectorAll", 2);
         JS_SetPropertyStr(context_, global, "__querySelectorAll", qsa);
-        JSValue gdt = JS_NewCFunction(context_, jsGetDomTree, "__getDomTree", 0);
-        JS_SetPropertyStr(context_, global, "__getDomTree", gdt);
+        JSValue byId = JS_NewCFunction(context_, jsGetElementById, "__getElementById", 1);
+        JS_SetPropertyStr(context_, global, "__getElementById", byId);
         JSValue el = JS_NewCFunction(context_, [](JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)->JSValue {
             if (argc>0) {
                 const char* m = JS_ToCString(ctx, argv[0]);
@@ -1243,6 +1217,8 @@ void BrowserScriptContext::teardown() {
     if (context_) { JS_FreeContext(context_); context_ = nullptr; }
     if (runtime_) { JS_FreeRuntime(runtime_); runtime_ = nullptr; }
     if (host_) { delete static_cast<RuntimeHost*>(host_); host_ = nullptr; }
+    elementHandles_.clear();
+    elementHandleByPointer_.clear();
 }
 
 bool BrowserScriptContext::runScripts(const litehtml::document::ptr& document, std::string& error) {
@@ -1307,13 +1283,17 @@ bool BrowserScriptContext::collectPatches(std::vector<BrowserScriptRuntime::DomP
         for (uint32_t i = 0; i < propertyCount; ++i) {
             const char* idValue = JS_AtomToCString(context_, properties[i].atom);
             if (!idValue) continue;
-            const std::string id(idValue);
             JS_FreeCString(context_, idValue);
             JSValue node = JS_GetProperty(context_, nodes, properties[i].atom);
             JSValue dirty = JS_GetPropertyStr(context_, node, "_dirty");
             if (JS_ToBool(context_, dirty) > 0) {
+                JSValue nodeId = JS_GetPropertyStr(context_, node, "id");
                 JSValue html = JS_GetPropertyStr(context_, node, "innerHTML");
-                patches.push_back(BrowserScriptRuntime::DomPatch{id, getString(context_, html)});
+                const std::string id = getString(context_, nodeId);
+                if (!id.empty()) {
+                    patches.push_back(BrowserScriptRuntime::DomPatch{ id, getString(context_, html) });
+                }
+                JS_FreeValue(context_, nodeId);
                 JS_FreeValue(context_, html);
             }
             // Clear the dirty flag so subsequent dispatches don't re-emit.
