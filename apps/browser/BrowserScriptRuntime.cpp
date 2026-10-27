@@ -5,6 +5,7 @@
 #include <functional>
 #include <string>
 #include <utility>
+#include <cstdio>
 
 #include "BrowserNetwork.hpp"
 #include "litehtml/el_script.h"
@@ -36,6 +37,13 @@ std::string exceptionText(JSContext* context) {
     const char* message = JS_ToCString(context, exception);
     std::string result = message ? message : "JavaScript exception";
     if (message) JS_FreeCString(context, message);
+    // Append stack if available.
+    JSValue stack = JS_GetPropertyStr(context, exception, "stack");
+    if (!JS_IsUndefined(stack) && !JS_IsNull(stack)) {
+        const char* st = JS_ToCString(context, stack);
+        if (st) { result += "\n"; result += st; JS_FreeCString(context, st); }
+    }
+    JS_FreeValue(context, stack);
     JS_FreeValue(context, exception);
     return result;
 }
@@ -75,6 +83,7 @@ JSModuleDef* loadModule(JSContext* context, const char* moduleName, void* opaque
 }
 
 JSValue jsCookieGet(JSContext* context, JSValueConst, int argc, JSValueConst*) {
+    (void)argc;
     JSValue global = JS_GetGlobalObject(context);
     JSValue pu = JS_GetPropertyStr(context, global, "__pageUrl");
     const char* url = JS_ToCString(context, pu);
@@ -163,7 +172,8 @@ const char* kDomShim = R"JS(
       this._classes = new Set();
       this._dirty = false;
       this._fragment = fragment;
-      if (!fragment) __allNodes.push(this);
+      this.parentNode = null;
+      this.parentElement = null;
       if (!fragment) __allNodes.push(this);
       this.style = Object.create(null);
       Object.defineProperty(this, 'className', {
@@ -203,8 +213,55 @@ const char* kDomShim = R"JS(
         this.innerHTML + '</' + tag + '>';
     }
     appendChild(child) {
-      if (child && child._fragment) this._children.push(...child._children);
-      else if (child) this._children.push(child);
+      if (child && child._fragment) {
+        child._children.forEach(c => { if (c) { c.parentNode = this; c.parentElement = this; } });
+        this._children.push(...child._children);
+      } else if (child) {
+        child.parentNode = this;
+        child.parentElement = this;
+        this._children.push(child);
+      }
+      this._dirty = true;
+      return child;
+    }
+    get children() { return this._children; }
+    get childNodes() { return this._children; }
+    get firstChild() { return this._children.length ? this._children[0] : null; }
+    get lastChild() { return this._children.length ? this._children[this._children.length-1] : null; }
+    get nextSibling() {
+      if (!this.parentNode) return null;
+      const idx = this.parentNode._children.indexOf(this);
+      return idx >= 0 && idx + 1 < this.parentNode._children.length ? this.parentNode._children[idx+1] : null;
+    }
+    get previousSibling() {
+      if (!this.parentNode) return null;
+      const idx = this.parentNode._children.indexOf(this);
+      return idx > 0 ? this.parentNode._children[idx-1] : null;
+    }
+    insertBefore(child, ref) {
+      if (child && child._fragment) {
+        child._children.forEach(c => { if (c) { c.parentNode = this; c.parentElement = this; } });
+        if (!ref) this._children.push(...child._children);
+        else {
+          const idx = this._children.indexOf(ref);
+          if (idx < 0) this._children.push(...child._children);
+          else this._children.splice(idx, 0, ...child._children);
+        }
+      } else if (child) {
+        child.parentNode = this; child.parentElement = this;
+        if (!ref) this._children.push(child);
+        else {
+          const idx = this._children.indexOf(ref);
+          if (idx < 0) this._children.push(child);
+          else this._children.splice(idx, 0, child);
+        }
+      }
+      this._dirty = true;
+      return child;
+    }
+    removeChild(child) {
+      const idx = this._children.indexOf(child);
+      if (idx >= 0) { this._children.splice(idx, 1); if (child) { child.parentNode = null; child.parentElement = null; } }
       this._dirty = true;
       return child;
     }
@@ -257,6 +314,8 @@ const char* kDomShim = R"JS(
   }
   const document = {
     documentElement: new FenrirNode('html'),
+    body: null,
+    head: new FenrirNode('head'),
     readyState: 'loading',
     get cookie() { return __cookieGet(); },
     set cookie(v) { __cookieSet(v); },
@@ -274,6 +333,16 @@ const char* kDomShim = R"JS(
     querySelectorAll(selector) {
       return __allNodes.filter(node => __matchSelector(node, selector));
     },
+    getElementsByTagName(tag) {
+      tag = String(tag).toLowerCase();
+      const res = __allNodes.filter(n => n.tagName.toLowerCase() === tag);
+      if (res.length === 0 && tag === 'script') return [document.documentElement || this.documentElement];
+      return res;
+    },
+    getElementsByClassName(cls) {
+      return __allNodes.filter(n => n._classes && n._classes.has(String(cls)));
+    },
+    defaultView: null,
     addEventListener(type, cb) {
       if (typeof cb !== 'function') return;
       this._listeners = this._listeners || {};
@@ -292,28 +361,39 @@ const char* kDomShim = R"JS(
     }
   };
   globalThis.document = document;
-  globalThis.window = {
-    innerWidth: 1024, innerHeight: 768, scrollX: 0, scrollY: 0,
-    addEventListener(type, cb) {
-      if (typeof cb !== 'function') return;
-      this._listeners = this._listeners || {};
-      this._listeners[type] = this._listeners[type] || [];
-      if (!this._listeners[type].includes(cb)) this._listeners[type].push(cb);
-    },
-    removeEventListener(type, cb) {
-      if (!this._listeners || !this._listeners[type]) return;
-      this._listeners[type] = this._listeners[type].filter(x => x !== cb);
-    },
-    dispatchEvent(evt) {
-      const type = (evt && evt.type) || '';
-      const cbs = (this._listeners && this._listeners[type]) || [];
-      cbs.slice().forEach(cb => { try { cb(evt); } catch (e) { console.error(e); } });
-      return true;
-    },
-    scrollTo(x, y) { this.scrollX = x || 0; this.scrollY = y || 0; },
-    scrollBy(x, y) { this.scrollX += x || 0; this.scrollY += y || 0; },
-    matchMedia: () => ({matches: true, addEventListener() {}})
+  // window is the global object itself (like browsers), so `window.X = ...`
+  // creates a global X. This is required by libraries (modernizr) that do
+  // `window.Modernizr = ...` then reference `Modernizr` globally.
+  if (!globalThis.window || globalThis.window !== globalThis) {
+    // merge any existing window props into globalThis
+    const w = globalThis.window || {};
+    for (const k of Object.keys(w)) { try { globalThis[k] = w[k]; } catch (e) {} }
+    globalThis.window = globalThis;
+  }
+  globalThis.window.innerWidth = 1024;
+  globalThis.window.innerHeight = 768;
+  globalThis.window.scrollX = 0;
+  globalThis.window.scrollY = 0;
+  globalThis.window._listeners = globalThis.window._listeners || {};
+  globalThis.window.addEventListener = function(type, cb) {
+    if (typeof cb !== 'function') return;
+    this._listeners = this._listeners || {};
+    this._listeners[type] = this._listeners[type] || [];
+    if (!this._listeners[type].includes(cb)) this._listeners[type].push(cb);
   };
+  globalThis.window.removeEventListener = function(type, cb) {
+    if (!this._listeners || !this._listeners[type]) return;
+    this._listeners[type] = this._listeners[type].filter(x => x !== cb);
+  };
+  globalThis.window.dispatchEvent = function(evt) {
+    const type = (evt && evt.type) || '';
+    const cbs = (this._listeners && this._listeners[type]) || [];
+    cbs.slice().forEach(cb => { try { cb(evt); } catch (e) { console.error(e); } });
+    return true;
+  };
+  globalThis.window.scrollTo = function(x, y) { this.scrollX = x || 0; this.scrollY = y || 0; };
+  globalThis.window.scrollBy = function(x, y) { this.scrollX += x || 0; this.scrollY += y || 0; };
+  globalThis.window.matchMedia = () => ({matches: true, addEventListener() {}});
   function __parseUrl(href) {
     href = String(href || '');
     let protocol = '', host = '', hostname = '', port = '', pathname = '/', search = '', hash = '';
@@ -348,6 +428,8 @@ const char* kDomShim = R"JS(
   const __initialHref = (typeof __pageUrl === 'string' && __pageUrl) ? __pageUrl : '';
   const __loc = __parseUrl(__initialHref);
   __loc.href = __initialHref;
+  document.defaultView = window;
+  window.document = document;
   globalThis.location = __loc;
   // Make location.href a live-ish property via accessor is complex; provide assign/replace/reload
   globalThis.location.assign = (u) => { globalThis.location.href = String(u); };
@@ -426,7 +508,7 @@ const char* kDomShim = R"JS(
     takeRecords() { return []; }
   };
   globalThis.MutationObserver = class { constructor(cb) {} observe() {} disconnect() {} takeRecords() { return []; } };
-  globalThis.console = {log() {}, info() {}, warn() {}, error() {}};
+  globalThis.console = {log(){}, info(){}, warn(){}, error(...a){ if (typeof __errLog === 'function') __errLog(a.map(String).join(' ')); }};
   globalThis.__fenrirNodes = nodes;
   globalThis.Event = class Event {
     constructor(type, init) { this.type = String(type); if (init) Object.assign(this, init); }
@@ -648,9 +730,13 @@ const char* kDomShim = R"JS(
       }
     });
   };
-  globalThis.__fenrirTakePatches = () => Object.values(nodes)
-    .filter(node => node._dirty && node.id)
-    .map(node => ({id: node.id, html: node.innerHTML}));
+  globalThis.__fenrirTakePatches = () => {
+    const result = Object.values(nodes)
+      .filter(node => node._dirty && node.id)
+      .map(node => ({id: node.id, html: node.innerHTML}));
+    Object.values(nodes).forEach(node => { node._dirty = false; });
+    return result;
+  };
 })();
 )JS";
 
@@ -731,6 +817,11 @@ bool BrowserScriptContext::setupRuntime(const std::string& pageUrl, std::string&
         JS_SetPropertyStr(context_, global, "__cookieGet", cg);
         JSValue cs = JS_NewCFunction(context_, jsCookieSet, "__cookieSet", 1);
         JS_SetPropertyStr(context_, global, "__cookieSet", cs);
+        JSValue el = JS_NewCFunction(context_, [](JSContext* ctx, JSValueConst, int argc, JSValueConst* argv)->JSValue {
+            if (argc>0) { const char* m = JS_ToCString(ctx, argv[0]); if (m){ fprintf(stderr, "JSERR: %s\\n", m); JS_FreeCString(ctx, m); } }
+            return JS_UNDEFINED;
+        }, "__errLog", 1);
+        JS_SetPropertyStr(context_, global, "__errLog", el);
         JS_FreeValue(context_, global);
     }
 
@@ -780,7 +871,7 @@ bool BrowserScriptContext::runScripts(const litehtml::document::ptr& document, s
         std::string scriptError;
         if (!evaluate(context_, *host, source, filename, module, scriptError)) {
             success = false;
-            if (error.empty()) error = std::move(scriptError);
+            if (error.empty()) error = filename + ": " + scriptError;
         }
     }
     std::string e;
@@ -791,6 +882,7 @@ bool BrowserScriptContext::runScripts(const litehtml::document::ptr& document, s
 }
 
 bool BrowserScriptContext::collectPatches(std::vector<BrowserScriptRuntime::DomPatch>& patches, std::string& error) {
+    (void)error;
     patches.clear();
     if (!context_) return false;
     JSValue global = JS_GetGlobalObject(context_);
@@ -812,6 +904,8 @@ bool BrowserScriptContext::collectPatches(std::vector<BrowserScriptRuntime::DomP
                 patches.push_back(BrowserScriptRuntime::DomPatch{id, getString(context_, html)});
                 JS_FreeValue(context_, html);
             }
+            // Clear the dirty flag so subsequent dispatches don't re-emit.
+            JS_SetPropertyStr(context_, node, "_dirty", JS_NewBool(context_, 0));
             JS_FreeValue(context_, dirty);
             JS_FreeValue(context_, node);
         }
@@ -856,6 +950,22 @@ bool BrowserScriptContext::evaluateSnippet(const std::string& code, std::string&
     if (!context_) return false;
     auto* host = static_cast<RuntimeHost*>(host_);
     return evaluate(context_, *host, code, "fenrir:snippet", false, error);
+}
+
+std::string BrowserScriptContext::evalString(const std::string& code, std::string& error) {
+    if (!context_) return {};
+    auto* host = static_cast<RuntimeHost*>(host_);
+    JSValue result = JS_Eval(context_, code.c_str(), code.size(), "fenrir:evalstr", JS_EVAL_TYPE_GLOBAL);
+    if (JS_IsException(result)) {
+        error = exceptionText(context_);
+        return {};
+    }
+    const char* str = JS_ToCString(context_, result);
+    std::string out = str ? str : "";
+    if (str) JS_FreeCString(context_, str);
+    JS_FreeValue(context_, result);
+    (void)host;
+    return out;
 }
 
 } // namespace fenrir::apps::browser

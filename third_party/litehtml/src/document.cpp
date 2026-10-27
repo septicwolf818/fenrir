@@ -833,6 +833,21 @@ void document::add_fixed_box( const position& pos )
 	m_fixed_boxes.push_back(pos);
 }
 
+void document::rebuild_render_tree() {
+	if (m_root) {
+		m_root_render = m_root->create_render_item(nullptr);
+		if (m_root_render) m_root_render = m_root_render->init();
+	}
+}
+
+void document::recompute_styles() {
+	if (!m_root) return;
+	m_root->apply_stylesheet(m_master_css);
+	m_root->apply_stylesheet(m_styles);
+	m_root->apply_stylesheet(m_user_css);
+	m_root->compute_styles(true);
+}
+
 bool document::media_changed()
 {
 	container()->get_media_features(m_media);
@@ -1117,7 +1132,7 @@ void document::append_children_from_string(element& parent, const char* str, boo
 	if (replace_existing)
 	{
 		parent.clearRecursive();
-		parent_render->children().clear();
+		if (parent_render) parent_render->children().clear();
 	}
 
 	// Let's process created elements tree

@@ -44,6 +44,7 @@ public:
                        std::vector<BrowserScriptRuntime::DomPatch>& patches, std::string& error);
 
     bool evaluateSnippet(const std::string& code, std::string& error);
+    std::string evalString(const std::string& code, std::string& error);
 
     bool valid() const { return context_ != nullptr; }
 
