@@ -240,6 +240,34 @@ void runBrowserTests() {
               "module JavaScript DOM mutation renders");
     }
 
+    // Appending generated cards through a DocumentFragment must serialize text
+    // children as text, not as literal <#text> elements.
+    {
+        apps::browser::BrowserPage page;
+        page.setBounds(Rect{0, 0, 64, 10});
+        const std::string html =
+            "<html><body><div id='generated'></div><script>"
+            "const fragment=document.createDocumentFragment();"
+            "const card=document.createElement('p');"
+            "card.innerHTML='CARD-HTML-TEXT';"
+            "card.appendChild(document.createTextNode(' DIRECT-TEXT'));"
+            "fragment.appendChild(card);"
+            "document.getElementById('generated').appendChild(fragment);"
+            "</script></body></html>";
+        check(page.loadHtml(html, "https://example.test/text-node"),
+              "generated text-node fixture parses");
+        Screen screen(64, 10);
+        page.draw(screen);
+        std::string rendered;
+        for (const Cell& cell : screen.cells())
+            if (cell.character < 128) rendered.push_back(static_cast<char>(cell.character));
+        check(rendered.find("CARD-HTML-TEXT DIRECT-TEXT") != std::string::npos,
+              "fragment-appended text nodes render as normal text");
+        check(rendered.find("<#text>") == std::string::npos,
+              "text-node serialization does not expose internal tag names");
+        check(page.jsErrors().empty(), "generated text-node operations report no JavaScript errors");
+    }
+
     // Parsed LiteHTML elements are represented by lazy native handles rather
     // than an eager duplicate JS tree. ID lookup and scoped selectors must
     // still resolve attributes and honor Element.querySelector semantics.
