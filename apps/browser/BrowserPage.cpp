@@ -891,6 +891,11 @@ void BrowserPage::updateHoveredControl() {
     // baseline, so a pixel-center test lands one row below the visible text.
     const int cellX = pointerX_ - bounds_.x;
     const int cellY = pointerY_ - bounds_.y + scrollRow_;
+    // Among all overlapping controls, prefer the smallest area (innermost link)
+    // so wide container links don't shadow the actual nav links.
+    int bestIndex = -1;
+    double bestArea = 0;
+    bool bestSet = false;
     for (std::size_t i = 0; i < focusOrder_.size(); ++i) {
         const auto target = focusOrder_[i];
         const auto& area = target.isTextField
@@ -901,11 +906,19 @@ void BrowserPage::updateHoveredControl() {
         const int topCell = static_cast<int>(std::floor(area.y / kCellHeightPx));
         const int bottomCell = topCell + std::max(1, static_cast<int>(std::ceil(area.height / kCellHeightPx)));
         if (cellX >= leftCell && cellX < rightCell && cellY >= topCell && cellY < bottomCell) {
-            focusedControl_ = static_cast<int>(i);
-            if (target.isTextField) focusedTextField_ = static_cast<int>(target.index);
-            else focusedLink_ = static_cast<int>(target.index);
-            return;
+            const double areaSize = static_cast<double>(area.width) * area.height;
+            if (!bestSet || areaSize < bestArea) {
+                bestSet = true;
+                bestArea = areaSize;
+                bestIndex = static_cast<int>(i);
+            }
         }
+    }
+    if (bestIndex >= 0) {
+        const auto target = focusOrder_[static_cast<std::size_t>(bestIndex)];
+        focusedControl_ = bestIndex;
+        if (target.isTextField) focusedTextField_ = static_cast<int>(target.index);
+        else focusedLink_ = static_cast<int>(target.index);
     }
 }
 
