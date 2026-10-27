@@ -110,6 +110,7 @@ private:
     int lastLayoutWidth_ = -1;
     int lastLayoutHeight_ = -1;
     std::atomic<bool> loading_{false};
+    std::atomic<bool> needsRefresh_{false};
     std::string url_;
     std::string title_;
     std::string error_;
