@@ -76,6 +76,18 @@ public:
         }
     }
 
+    bool clickAt(int x, int y) override {
+        if (!bounds_.contains(x, y)) return false;
+        focused_ = true;
+        const int prefixW = static_cast<int>(label_.size());
+        const int fieldW = bounds_.w - prefixW;
+        if (fieldW <= 0) return true;
+        const int col = std::clamp(x - bounds_.x - prefixW, 0, fieldW - 1);
+        cursor_ = std::clamp(scrollX_ + col, 0, static_cast<int>(value_.size()));
+        ensureVisible(fieldW);
+        return true;
+    }
+
     std::optional<std::pair<int, int>> cursorPosition() const override {
         if (bounds_.w <= 0 || bounds_.h <= 0) return std::nullopt;
         const int prefixW = static_cast<int>(label_.size());

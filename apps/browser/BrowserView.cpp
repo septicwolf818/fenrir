@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "fenrir/core/Text.hpp"
+#include "fenrir/core/Prefs.hpp"
 
 namespace fenrir::apps::browser {
 
@@ -24,6 +25,11 @@ BrowserView::BrowserView(AppContext& context) : context_(context) {
     reloadButton_ = reloadButton.get();
     reloadButton_->onActivate = [this] { reload(); };
     toolbar_.addFixed(std::move(reloadButton), 9);
+
+    auto homeButton = std::make_unique<Button>(U"Home");
+    homeButton_ = homeButton.get();
+    homeButton_->onActivate = [this] { goHome(); };
+    toolbar_.addFixed(std::move(homeButton), 7);
 
     auto addTabButton = std::make_unique<Button>(U"+");
     newTabButton_ = addTabButton.get();
@@ -55,6 +61,11 @@ const BrowserView::Tab* BrowserView::activeTab() const {
 
 BrowserPage* BrowserView::activePage() {
     Tab* tab = activeTab();
+    return tab ? tab->page.get() : nullptr;
+}
+
+const BrowserPage* BrowserView::activePage() const {
+    const Tab* tab = activeTab();
     return tab ? tab->page.get() : nullptr;
 }
 
@@ -138,6 +149,18 @@ void BrowserView::goForward() {
 void BrowserView::reload() {
     if (auto* page = activePage(); page && !page->url().empty())
         navigateCurrent(page->url(), false);
+}
+
+std::string BrowserView::currentUrl() const {
+    const auto* page = activePage();
+    return page ? page->url() : std::string{};
+}
+
+void BrowserView::goHome() {
+    auto& p = prefs::forApp("browser");
+    std::string home = p.get("homepage", "");
+    if (home.empty()) home = "https://example.com";
+    navigateCurrent(home);
 }
 
 void BrowserView::openFocusedLinkInNewTab() {
