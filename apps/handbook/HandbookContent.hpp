@@ -375,6 +375,24 @@ inline Library buildLibrary() {
                 .seeAlso({"clipboard", "files"})
                 .build());
 
+    lib.add(PageBuilder("apps", "browser", "Browser")
+                .summary("Browse HTML pages in Fenrir's terminal-cell display.")
+                .section("Navigation")
+                .keys({
+                    {"Ctrl+L", "Focus the address field"},
+                    {"Ctrl+T / Ctrl+W", "Open / close a tab"},
+                    {"Alt+Left / Alt+Right", "Back / forward"},
+                    {"Ctrl+R", "Reload the page"},
+                    {"Tab / Enter", "Focus the next link / open it"},
+                    {"Ctrl+Enter", "Open the focused link in a new tab"},
+                })
+                .section("Rendering limits")
+                .text("The prototype lays out static HTML and CSS and maps page colors to the "
+                      "16-color terminal palette. JavaScript is disabled and images are shown "
+                      "as placeholders; fonts and some modern CSS are approximated.")
+                .seeAlso({"windows"})
+                .build());
+
     lib.add(PageBuilder("apps", "file-manager", "File Manager")
                 .summary("Two panels, copy and move, and the file associations.")
                 .section("The layout")

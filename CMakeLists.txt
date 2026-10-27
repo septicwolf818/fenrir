@@ -5,6 +5,10 @@ enable_testing()
 
 option(BUILD_TESTING "Build the test suite" OFF)
 
+add_subdirectory(third_party/litehtml EXCLUDE_FROM_ALL)
+find_package(CURL REQUIRED)
+find_package(Threads REQUIRED)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -59,7 +63,18 @@ add_executable(fenrir_desktop
     apps/shell/main.cpp
     apps/photoviewer/ImageDecoder.cpp
 )
-target_link_libraries(fenrir_desktop PRIVATE fenrir)
+
+add_library(fenrir_browser STATIC
+    apps/browser/BrowserNetwork.cpp
+    apps/browser/BrowserPage.cpp
+    apps/browser/BrowserView.cpp
+    apps/browser/BrowserApp.cpp
+)
+target_include_directories(fenrir_browser PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/apps/browser
+)
+target_link_libraries(fenrir_browser PUBLIC fenrir litehtml CURL::libcurl Threads::Threads)
+target_link_libraries(fenrir_desktop PRIVATE fenrir_browser)
 set_target_properties(fenrir_desktop PROPERTIES OUTPUT_NAME fenrir)
 
 # --- tests -----------------------------------------------------------------
@@ -75,8 +90,9 @@ if(BUILD_TESTING)
         tests/test_clipboard.cpp
         tests/test_handbook.cpp
         tests/test_window.cpp
+        tests/test_browser.cpp
     )
-    target_link_libraries(fenrir_tests PRIVATE fenrir)
+    target_link_libraries(fenrir_tests PRIVATE fenrir_browser)
     add_test(NAME fenrir_tests COMMAND fenrir_tests)
 endif()
 
