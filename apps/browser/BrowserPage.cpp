@@ -6,6 +6,7 @@
 #include <limits>
 #include <map>
 #include <set>
+#include <string_view>
 #include <utility>
 
 #include "BrowserNetwork.hpp"
@@ -68,6 +69,307 @@ int cellWidth(std::u32string_view text) {
     return width;
 }
 
+bool startsWithInsensitive(std::string_view value, std::size_t offset, std::string_view token) {
+    if (offset + token.size() > value.size()) return false;
+    for (std::size_t i = 0; i < token.size(); ++i) {
+        const auto left = static_cast<unsigned char>(value[offset + i]);
+        const auto right = static_cast<unsigned char>(token[i]);
+        if (std::tolower(left) != std::tolower(right)) return false;
+    }
+    return true;
+}
+
+bool cssNameCharacter(char value) {
+    const auto c = static_cast<unsigned char>(value);
+    return std::isalnum(c) || value == '-' || value == '_';
+}
+
+void normalizeUnsupportedLayout(std::string& css) {
+    std::size_t pos = 0;
+    while (pos < css.size()) {
+        if (css.compare(pos, 2, "/*") == 0) {
+            const auto end = css.find("*/", pos + 2);
+            pos = end == std::string::npos ? css.size() : end + 2;
+            continue;
+        }
+        if ((css[pos] == '\'' || css[pos] == '"')) {
+            const char quote = css[pos++];
+            while (pos < css.size() && css[pos] != quote) {
+                if (css[pos] == '\\' && pos + 1 < css.size()) ++pos;
+                ++pos;
+            }
+            if (pos < css.size()) ++pos;
+            continue;
+        }
+        if (!startsWithInsensitive(css, pos, "display") ||
+            (pos > 0 && cssNameCharacter(css[pos - 1])) ||
+            (pos + 7 < css.size() && cssNameCharacter(css[pos + 7]))) {
+            ++pos;
+            continue;
+        }
+        std::size_t value = pos + 7;
+        while (value < css.size() && std::isspace(static_cast<unsigned char>(css[value]))) ++value;
+        if (value >= css.size() || css[value] != ':') { pos += 7; continue; }
+        ++value;
+        while (value < css.size() && std::isspace(static_cast<unsigned char>(css[value]))) ++value;
+        std::size_t length = 0;
+        std::string replacement;
+        if (startsWithInsensitive(css, value, "inline-grid") &&
+            (value + 11 == css.size() || !cssNameCharacter(css[value + 11]))) {
+            length = 11;
+            replacement = "inline-block";
+        } else if (startsWithInsensitive(css, value, "grid") &&
+                   (value + 4 == css.size() || !cssNameCharacter(css[value + 4]))) {
+            length = 4;
+            replacement = "block";
+        } else if (startsWithInsensitive(css, value, "inline-flex") &&
+                   (value + 11 == css.size() || !cssNameCharacter(css[value + 11]))) {
+            length = 11;
+            replacement = "inline-block";
+        } else if (startsWithInsensitive(css, value, "flex") &&
+                   (value + 4 == css.size() || !cssNameCharacter(css[value + 4]))) {
+            length = 4;
+            replacement = "block";
+        }
+        if (length == 0) { pos += 7; continue; }
+        css.replace(value, length, replacement);
+        pos = value + replacement.size();
+    }
+}
+
+void normalizeHtmlStyles(std::string& html) {
+    std::size_t searchFrom = 0;
+    while (searchFrom < html.size()) {
+        auto begin = std::search(html.begin() + static_cast<std::ptrdiff_t>(searchFrom), html.end(),
+            std::string_view("<style").begin(), std::string_view("<style").end(),
+            [](char left, char right) {
+                return std::tolower(static_cast<unsigned char>(left)) ==
+                       std::tolower(static_cast<unsigned char>(right));
+            });
+        if (begin == html.end()) break;
+        const std::size_t tagStart = static_cast<std::size_t>(begin - html.begin());
+        const auto openEnd = html.find('>', tagStart);
+        if (openEnd == std::string::npos) break;
+        auto end = std::search(html.begin() + static_cast<std::ptrdiff_t>(openEnd + 1), html.end(),
+            std::string_view("</style").begin(), std::string_view("</style").end(),
+            [](char left, char right) {
+                return std::tolower(static_cast<unsigned char>(left)) ==
+                       std::tolower(static_cast<unsigned char>(right));
+            });
+        if (end == html.end()) break;
+        const std::size_t cssStart = openEnd + 1;
+        const std::size_t cssEnd = static_cast<std::size_t>(end - html.begin());
+        std::string css = html.substr(cssStart, cssEnd - cssStart);
+        normalizeUnsupportedLayout(css);
+        html.replace(cssStart, cssEnd - cssStart, css);
+        searchFrom = cssStart + css.size() + 7;
+    }
+
+    std::size_t cursor = 0;
+    while (cursor < html.size()) {
+        const auto open = html.find('<', cursor);
+        if (open == std::string::npos || open + 1 >= html.size()) break;
+        if (html[open + 1] == '/' || html[open + 1] == '!' || html[open + 1] == '?') {
+            cursor = open + 2;
+            continue;
+        }
+        std::size_t p = open + 1;
+        const std::size_t nameStart = p;
+        while (p < html.size() && (std::isalnum(static_cast<unsigned char>(html[p])) || html[p] == '-')) ++p;
+        if (p == nameStart) { cursor = open + 1; continue; }
+        std::string tag(html.substr(nameStart, p - nameStart));
+        std::transform(tag.begin(), tag.end(), tag.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+
+        std::size_t tagEnd = p;
+        char quote = 0;
+        while (tagEnd < html.size()) {
+            const char c = html[tagEnd];
+            if (quote) {
+                if (c == quote) quote = 0;
+            } else if (c == '\'' || c == '"') {
+                quote = c;
+            } else if (c == '>') {
+                break;
+            }
+            ++tagEnd;
+        }
+        if (tagEnd >= html.size()) break;
+
+        for (std::size_t attr = p; attr < tagEnd;) {
+            while (attr < tagEnd && (std::isspace(static_cast<unsigned char>(html[attr])) || html[attr] == '/')) ++attr;
+            const std::size_t attrNameStart = attr;
+            while (attr < tagEnd && !std::isspace(static_cast<unsigned char>(html[attr])) &&
+                   html[attr] != '=' && html[attr] != '/' && html[attr] != '>') ++attr;
+            if (attr == attrNameStart) { ++attr; continue; }
+            std::string attrName(html.substr(attrNameStart, attr - attrNameStart));
+            std::transform(attrName.begin(), attrName.end(), attrName.begin(), [](unsigned char c) {
+                return static_cast<char>(std::tolower(c));
+            });
+            while (attr < tagEnd && std::isspace(static_cast<unsigned char>(html[attr]))) ++attr;
+            if (attr >= tagEnd || html[attr] != '=') continue;
+            ++attr;
+            while (attr < tagEnd && std::isspace(static_cast<unsigned char>(html[attr]))) ++attr;
+            std::size_t valueStart = attr;
+            std::size_t valueEnd = attr;
+            if (attr < tagEnd && (html[attr] == '\'' || html[attr] == '"')) {
+                const char valueQuote = html[attr++];
+                valueStart = attr;
+                while (attr < tagEnd && html[attr] != valueQuote) ++attr;
+                valueEnd = attr;
+                if (attr < tagEnd) ++attr;
+            } else {
+                while (attr < tagEnd && !std::isspace(static_cast<unsigned char>(html[attr])) && html[attr] != '>') ++attr;
+                valueEnd = attr;
+            }
+            if (attrName == "style") {
+                std::string style = html.substr(valueStart, valueEnd - valueStart);
+                normalizeUnsupportedLayout(style);
+                html.replace(valueStart, valueEnd - valueStart, style);
+                const auto delta = static_cast<std::ptrdiff_t>(style.size()) -
+                                   static_cast<std::ptrdiff_t>(valueEnd - valueStart);
+                tagEnd = static_cast<std::size_t>(static_cast<std::ptrdiff_t>(tagEnd) + delta);
+                attr = static_cast<std::size_t>(static_cast<std::ptrdiff_t>(attr) + delta);
+            }
+        }
+
+        cursor = tagEnd + 1;
+        if (tag == "script" || tag == "style") {
+            const std::string closeTag = "</" + tag;
+            auto close = std::search(html.begin() + static_cast<std::ptrdiff_t>(cursor), html.end(),
+                closeTag.begin(), closeTag.end(), [](char left, char right) {
+                    return std::tolower(static_cast<unsigned char>(left)) ==
+                           std::tolower(static_cast<unsigned char>(right));
+                });
+            if (close == html.end()) break;
+            const auto closeEnd = html.find('>', static_cast<std::size_t>(close - html.begin()));
+            if (closeEnd == std::string::npos) break;
+            cursor = closeEnd + 1;
+        }
+    }
+}
+
+bool isHtmlVoidElement(std::string_view tag) {
+    return tag == "area" || tag == "base" || tag == "br" || tag == "col" ||
+           tag == "embed" || tag == "hr" || tag == "img" || tag == "input" ||
+           tag == "link" || tag == "meta" || tag == "param" || tag == "source" ||
+           tag == "track" || tag == "wbr";
+}
+
+bool findElementContent(std::string_view html, const std::string& wantedId,
+                        std::string& tagName, std::size_t& contentStart,
+                        std::size_t& contentEnd) {
+    for (std::size_t cursor = 0; cursor < html.size();) {
+        const auto open = html.find('<', cursor);
+        if (open == std::string_view::npos || open + 1 >= html.size()) return false;
+        if (html[open + 1] == '/' || html[open + 1] == '!' || html[open + 1] == '?') {
+            cursor = open + 2;
+            continue;
+        }
+        std::size_t p = open + 1;
+        const std::size_t nameStart = p;
+        while (p < html.size() && (std::isalnum(static_cast<unsigned char>(html[p])) || html[p] == '-')) ++p;
+        if (p == nameStart) { cursor = open + 1; continue; }
+        std::string name(html.substr(nameStart, p - nameStart));
+        std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+
+        bool idMatches = false;
+        bool selfClosing = false;
+        std::size_t tagEnd = p;
+        while (tagEnd < html.size()) {
+            while (tagEnd < html.size() && std::isspace(static_cast<unsigned char>(html[tagEnd]))) ++tagEnd;
+            if (tagEnd >= html.size()) return false;
+            if (html[tagEnd] == '>') break;
+            if (html[tagEnd] == '/') { selfClosing = true; ++tagEnd; continue; }
+
+            const std::size_t attrStart = tagEnd;
+            while (tagEnd < html.size() && !std::isspace(static_cast<unsigned char>(html[tagEnd])) &&
+                   html[tagEnd] != '=' && html[tagEnd] != '>' && html[tagEnd] != '/') ++tagEnd;
+            std::string attrName(html.substr(attrStart, tagEnd - attrStart));
+            std::transform(attrName.begin(), attrName.end(), attrName.begin(), [](unsigned char c) {
+                return static_cast<char>(std::tolower(c));
+            });
+            while (tagEnd < html.size() && std::isspace(static_cast<unsigned char>(html[tagEnd]))) ++tagEnd;
+            std::string attrValue;
+            if (tagEnd < html.size() && html[tagEnd] == '=') {
+                ++tagEnd;
+                while (tagEnd < html.size() && std::isspace(static_cast<unsigned char>(html[tagEnd]))) ++tagEnd;
+                if (tagEnd < html.size() && (html[tagEnd] == '\'' || html[tagEnd] == '"')) {
+                    const char quote = html[tagEnd++];
+                    const std::size_t valueStart = tagEnd;
+                    while (tagEnd < html.size() && html[tagEnd] != quote) ++tagEnd;
+                    attrValue = std::string(html.substr(valueStart, tagEnd - valueStart));
+                    if (tagEnd < html.size()) ++tagEnd;
+                } else {
+                    const std::size_t valueStart = tagEnd;
+                    while (tagEnd < html.size() && !std::isspace(static_cast<unsigned char>(html[tagEnd])) &&
+                           html[tagEnd] != '>') ++tagEnd;
+                    attrValue = std::string(html.substr(valueStart, tagEnd - valueStart));
+                }
+            }
+            if (attrName == "id" && attrValue == wantedId) idMatches = true;
+        }
+        if (tagEnd >= html.size()) return false;
+        const std::size_t openTagEnd = tagEnd + 1;
+        if (!idMatches || selfClosing || isHtmlVoidElement(name)) {
+            cursor = openTagEnd;
+            continue;
+        }
+
+        int depth = 1;
+        std::size_t scan = openTagEnd;
+        while (scan < html.size()) {
+            const auto next = html.find('<', scan);
+            if (next == std::string_view::npos || next + 1 >= html.size()) return false;
+            if (html[next + 1] == '!' && html.substr(next, 4) == "<!--") {
+                const auto commentEnd = html.find("-->", next + 4);
+                if (commentEnd == std::string_view::npos) return false;
+                scan = commentEnd + 3;
+                continue;
+            }
+            std::size_t token = next + 1;
+            const bool closing = html[token] == '/';
+            if (closing) ++token;
+            const std::size_t tokenNameStart = token;
+            while (token < html.size() && (std::isalnum(static_cast<unsigned char>(html[token])) ||
+                   html[token] == '-')) ++token;
+            std::string tokenName(html.substr(tokenNameStart, token - tokenNameStart));
+            std::transform(tokenName.begin(), tokenName.end(), tokenName.begin(), [](unsigned char c) {
+                return static_cast<char>(std::tolower(c));
+            });
+            const auto tokenEnd = html.find('>', token);
+            if (tokenEnd == std::string_view::npos) return false;
+            if (tokenName == name) {
+                if (closing) {
+                    if (--depth == 0) {
+                        tagName = name;
+                        contentStart = openTagEnd;
+                        contentEnd = next;
+                        return true;
+                    }
+                } else if (!isHtmlVoidElement(name)) {
+                    ++depth;
+                }
+            }
+            scan = tokenEnd + 1;
+        }
+        return false;
+    }
+    return false;
+}
+
+bool applyHtmlPatch(std::string& html, const BrowserScriptRuntime::DomPatch& patch) {
+    std::string tag;
+    std::size_t begin = 0;
+    std::size_t end = 0;
+    if (!findElementContent(html, patch.id, tag, begin, end)) return false;
+    html.replace(begin, end - begin, patch.html);
+    return true;
+}
+
 } // namespace
 
 class BrowserContainer final : public litehtml::document_container {
@@ -76,6 +378,7 @@ public:
 
     void beginDraw(Screen& screen) { screen_ = &screen; }
     void endDraw() { screen_ = nullptr; }
+    void resetResourceTracking() { loadedCss_.clear(); cssRequests_ = 0; }
 
     litehtml::uint_ptr create_font(const litehtml::font_description& description,
                                    const litehtml::document*,
@@ -106,7 +409,7 @@ public:
 
     void draw_text(litehtml::uint_ptr, const char* value, litehtml::uint_ptr id,
                    litehtml::web_color color, const litehtml::position& pos) override {
-        if (!screen_ || !value) return;
+        if (!screen_ || !value || pos.width <= 0 || pos.height <= 0) return;
         const auto font = fonts_.find(id);
         uint8_t style = font != fonts_.end() && font->second.weight >= 600 ? StyleBold : StyleNone;
         if (font != fonts_.end() &&
@@ -230,6 +533,7 @@ public:
         ++cssRequests_;
         Response response = browser::fetch(resolved, 512 * 1024, 2500);
         if (response.error.empty()) {
+            normalizeUnsupportedLayout(response.body);
             value = std::move(response.body);
             if (!response.finalUrl.empty()) baseUrl = response.finalUrl;
         }
@@ -333,7 +637,8 @@ void BrowserPage::navigate(std::string url) {
     focusedTextField_ = -1;
     focusedControl_ = -1;
     pointerX_ = pointerY_ = -1;
-    virtualContentBottomPx_ = 0;
+    fallbackFlows_.clear();
+    fallbackContentBottomPx_ = 0;
     scrollRow_ = 0;
     lastLayoutWidth_ = lastLayoutHeight_ = -1;
     url = browser::normalizeUrl(url);
@@ -352,7 +657,8 @@ void BrowserPage::navigate(std::string url) {
     focusedTextField_ = -1;
     focusedControl_ = -1;
     pointerX_ = pointerY_ = -1;
-    virtualContentBottomPx_ = 0;
+    fallbackFlows_.clear();
+    fallbackContentBottomPx_ = 0;
     scrollRow_ = 0;
     lastLayoutWidth_ = lastLayoutHeight_ = -1;
     document_.reset();
@@ -379,20 +685,30 @@ bool BrowserPage::loadHtml(std::string html, std::string baseUrl) {
     title_ = url_.empty() ? "New Tab" : url_;
     pendingNavigation_.clear();
     focusedLink_ = -1;
+    focusedTextField_ = -1;
+    focusedControl_ = -1;
+    pointerX_ = pointerY_ = -1;
+    fallbackFlows_.clear();
+    fallbackContentBottomPx_ = 0;
     scrollRow_ = 0;
     lastLayoutWidth_ = lastLayoutHeight_ = -1;
     links_.clear();
     document_.reset();
     container_ = std::make_unique<BrowserContainer>(*this);
     container_->set_base_url(url_.c_str());
-    document_ = litehtml::document::createFromString(
-        html, container_.get(), litehtml::master_css,
+    normalizeHtmlStyles(html);
+    const std::string browserStyles =
         ".reveal{opacity:1!important;visibility:visible!important;transform:none!important}"
         "input:not([type]),input[type=\"text\"],input[type=\"search\"],input[type=\"email\"],"
         "input[type=\"url\"],input[type=\"tel\"],input[type=\"password\"],"
         "input[type=\"number\"],textarea{box-sizing:border-box;width:240px;height:48px;padding:4px 8px;"
         "border:2px solid #718096;background-color:#1e293b;color:#f8fafc}"
-        "textarea{height:80px}");
+        "textarea{height:80px}";
+    auto parseHtml = [&](const std::string& source) {
+        return litehtml::document::createFromString(
+            source, container_.get(), litehtml::master_css, browserStyles);
+    };
+    document_ = parseHtml(html);
     if (!document_) {
         error_ = "Could not parse HTML.";
         return false;
@@ -401,10 +717,21 @@ bool BrowserPage::loadHtml(std::string html, std::string baseUrl) {
     std::vector<BrowserScriptRuntime::DomPatch> patches;
     std::string scriptError;
     (void)scripts.execute(document_, url_, patches, scriptError);
+    std::string renderedHtml = html;
+    bool patchedHtml = false;
     for (const auto& patch : patches) {
-        const auto target = document_->root()->select_one("#" + patch.id);
-        if (target)
-            document_->append_children_from_string(*target, patch.html.c_str(), true);
+        patchedHtml = applyHtmlPatch(renderedHtml, patch) || patchedHtml;
+    }
+    if (patchedHtml) {
+        normalizeHtmlStyles(renderedHtml);
+        document_.reset();
+        container_->resetResourceTracking();
+        container_->set_base_url(url_.c_str());
+        document_ = parseHtml(renderedHtml);
+        if (!document_) {
+            error_ = "Could not lay out JavaScript-generated HTML.";
+            return false;
+        }
     }
     ensureLayout();
     rebuildLinks();
@@ -460,7 +787,6 @@ void BrowserPage::rebuildLinks() {
     links_.clear();
     textFields_.clear();
     focusOrder_.clear();
-    virtualContentBottomPx_ = 0;
     focusedLink_ = -1;
     focusedTextField_ = -1;
     focusedControl_ = -1;
@@ -474,46 +800,6 @@ void BrowserPage::rebuildLinks() {
         bounds.y = std::min(bounds.y, item.y);
         bounds.width = right - bounds.x;
         bounds.height = bottom - bounds.y;
-    };
-    auto projectCardHitArea = [&](const litehtml::element::ptr& anchor,
-                                  litehtml::position& hitArea) {
-        auto card = anchor;
-        litehtml::element::ptr grid;
-        for (auto parent = anchor->parent(); parent; parent = parent->parent()) {
-            if (std::string(parent->get_attr("id", "")) == "projects-container") {
-                grid = parent;
-                break;
-            }
-            card = parent;
-        }
-        if (!grid) return false;
-
-        const auto gridPlacement = grid->get_placement();
-        std::size_t cardIndex = 0;
-        bool foundCard = false;
-        for (const auto& child : grid->children()) {
-            if (std::string(child->get_tagName()) != "article") continue;
-            if (child == card) { foundCard = true; break; }
-            ++cardIndex;
-        }
-        if (!foundCard) return false;
-
-        constexpr float kGridGapPx = 24.0f;
-        constexpr float kCardRowPitchPx = 300.0f;
-        constexpr float kCardHitHeightPx = 280.0f;
-        const int columns = bounds_.w * kCellWidthPx <= 640 ? 1 : 2;
-        const float gridWidth = gridPlacement.width > 0
-            ? gridPlacement.width : static_cast<float>(bounds_.w * kCellWidthPx);
-        const float cardWidth = std::max(1.0f,
-            (gridWidth - kGridGapPx * static_cast<float>(columns - 1)) / columns);
-        const std::size_t row = cardIndex / static_cast<std::size_t>(columns);
-        const std::size_t column = cardIndex % static_cast<std::size_t>(columns);
-        hitArea = litehtml::position(
-            gridPlacement.x + static_cast<float>(column) * (cardWidth + kGridGapPx),
-            gridPlacement.y + static_cast<float>(row) * kCardRowPitchPx,
-            cardWidth, kCardHitHeightPx);
-        virtualContentBottomPx_ = std::max(virtualContentBottomPx_, hitArea.bottom());
-        return true;
     };
     std::function<void(const litehtml::element::ptr&)> visit = [&](const litehtml::element::ptr& element) {
         const std::string tag = element->get_tagName();
@@ -530,7 +816,6 @@ void BrowserPage::rebuildLinks() {
                     };
                 for (const auto& child : element->children()) includeText(child);
                 include(placement, element->get_placement(), hasPlacement);
-                if (!hasPlacement) hasPlacement = projectCardHitArea(element, placement);
                 if (hasPlacement || href) {
                     links_.push_back(Link{element, placement, browser::resolveUrl(url_, href)});
                     focusOrder_.push_back(FocusTarget{false, links_.size() - 1});
@@ -571,6 +856,7 @@ void BrowserPage::rebuildLinks() {
         for (const auto& child : element->children()) visit(child);
     };
     visit(document_->root());
+    rebuildFallbackFlows();
     if (preservedFocus) {
         for (std::size_t i = 0; i < focusOrder_.size(); ++i) {
             const auto target = focusOrder_[i];
@@ -588,6 +874,125 @@ void BrowserPage::rebuildLinks() {
     scrollRow_ = std::clamp(scrollRow_, 0, maxScrollRow());
 }
 
+void BrowserPage::rebuildFallbackFlows() {
+    fallbackFlows_.clear();
+    fallbackContentBottomPx_ = 0;
+    if (!document_ || !document_->root()) return;
+
+    std::function<bool(const litehtml::element::ptr&)> containsUnplacedLink =
+        [&](const litehtml::element::ptr& element) {
+            if (std::string(element->get_tagName()) == "a" && element->get_attr("href")) {
+                const auto placement = element->get_placement();
+                if (placement.width <= 0 || placement.height <= 0) return true;
+            }
+            for (const auto& child : element->children())
+                if (containsUnplacedLink(child)) return true;
+            return false;
+        };
+
+    std::function<void(const litehtml::element::ptr&)> findFallbackHost =
+        [&](const litehtml::element::ptr& host) {
+            const auto hostPlacement = host->get_placement();
+            if (hostPlacement.width > 0 && hostPlacement.height <= 0 && containsUnplacedLink(host)) {
+                FallbackFlow flow;
+                const float viewportWidth = static_cast<float>(bounds_.w * kCellWidthPx);
+                flow.placement = litehtml::position(
+                    std::max(0.0f, hostPlacement.x), hostPlacement.y,
+                    std::min(hostPlacement.width, viewportWidth), 0);
+                const int textColumns = std::max(1,
+                    static_cast<int>(std::floor(flow.placement.width / kCellWidthPx)) - 2);
+                flow.lines.push_back(FallbackLine{});
+
+                auto breakLine = [&] {
+                    if (!flow.lines.back().runs.empty()) flow.lines.push_back(FallbackLine{});
+                };
+                auto appendText = [&](std::u32string_view text, int linkIndex, bool bold) {
+                    for (char32_t cp : text) {
+                        if (cp == U'\n') { breakLine(); continue; }
+                        const int width = wideGlyph(cp) ? 2 : 1;
+                        if (flow.lines.back().cells + width > textColumns &&
+                            flow.lines.back().cells > 0) {
+                            flow.lines.push_back(FallbackLine{});
+                        }
+                        if (cp == U' ' && flow.lines.back().cells == 0) continue;
+                        auto& line = flow.lines.back();
+                        if (line.runs.empty() || line.runs.back().linkIndex != linkIndex ||
+                            line.runs.back().bold != bold)
+                            line.runs.push_back(FallbackRun{{}, linkIndex, bold});
+                        line.runs.back().text.push_back(cp);
+                        line.cells += width;
+                    }
+                };
+                auto findLinkIndex = [&](const litehtml::element::ptr& element) {
+                    auto link = std::find_if(links_.begin(), links_.end(), [&](const Link& candidate) {
+                        return candidate.element == element;
+                    });
+                    return link == links_.end() ? -1 : static_cast<int>(link - links_.begin());
+                };
+
+                std::function<void(const litehtml::element::ptr&)> flatten =
+                    [&](const litehtml::element::ptr& element) {
+                        const std::string tag = element->get_tagName();
+                        if (tag == "a" && element->get_attr("href")) {
+                            const int index = findLinkIndex(element);
+                            if (index >= 0) {
+                                const auto existing = links_[static_cast<std::size_t>(index)].placement;
+                                if (existing.width <= 0 || existing.height <= 0) {
+                                    breakLine();
+                                    const std::size_t firstLine = flow.lines.size() - 1;
+                                    std::string label;
+                                    element->get_text(label);
+                                    appendText(text::toUtf32(label), index, false);
+                                    const std::size_t lastLine = flow.lines.size() - 1;
+                                    const float x = flow.placement.x + kCellWidthPx;
+                                    const float y = flow.placement.y +
+                                        static_cast<float>(firstLine * kCellHeightPx);
+                                    const float height = static_cast<float>(
+                                        (lastLine - firstLine + 1) * kCellHeightPx);
+                                    links_[static_cast<std::size_t>(index)].placement =
+                                        litehtml::position(x, y,
+                                            std::max(static_cast<float>(kCellWidthPx),
+                                                flow.placement.width - kCellWidthPx * 2), height);
+                                    breakLine();
+                                    return;
+                                }
+                            }
+                        }
+
+                        const bool block = tag == "address" || tag == "article" || tag == "blockquote" ||
+                            tag == "div" || tag == "dl" || tag == "fieldset" || tag == "figure" ||
+                            tag == "footer" || tag == "form" || tag == "h1" || tag == "h2" ||
+                            tag == "h3" || tag == "h4" || tag == "h5" || tag == "h6" ||
+                            tag == "header" || tag == "li" || tag == "main" || tag == "nav" ||
+                            tag == "ol" || tag == "p" || tag == "section" || tag == "ul";
+                        if (block) breakLine();
+                        const bool heading = tag == "h1" || tag == "h2" || tag == "h3" ||
+                                             tag == "h4" || tag == "h5" || tag == "h6";
+                        if (element->children().empty()) {
+                            std::string value;
+                            element->get_text(value);
+                            appendText(text::toUtf32(value), -1, heading);
+                        } else {
+                            for (const auto& child : element->children()) flatten(child);
+                        }
+                        if (block) breakLine();
+                    };
+
+                for (const auto& child : host->children()) flatten(child);
+                while (!flow.lines.empty() && flow.lines.back().runs.empty()) flow.lines.pop_back();
+                if (!flow.lines.empty()) {
+                    flow.placement.height = static_cast<float>(flow.lines.size() * kCellHeightPx);
+                    fallbackContentBottomPx_ = std::max(fallbackContentBottomPx_,
+                                                        flow.placement.bottom());
+                    fallbackFlows_.push_back(std::move(flow));
+                }
+                return;
+            }
+            for (const auto& child : host->children()) findFallbackHost(child);
+        };
+    findFallbackHost(document_->root());
+}
+
 void BrowserPage::updateHoveredControl() {
     focusedLink_ = -1;
     focusedTextField_ = -1;
@@ -596,8 +1001,10 @@ void BrowserPage::updateHoveredControl() {
         pointerY_ < bounds_.y || pointerY_ >= bounds_.y + bounds_.h)
         return;
 
-    const float px = static_cast<float>((pointerX_ - bounds_.x) * kCellWidthPx);
-    const float py = static_cast<float>((pointerY_ - bounds_.y + scrollRow_) * kCellHeightPx);
+    const float px = static_cast<float>((pointerX_ - bounds_.x) * kCellWidthPx) +
+                     static_cast<float>(kCellWidthPx) / 2.0f;
+    const float py = static_cast<float>((pointerY_ - bounds_.y + scrollRow_) * kCellHeightPx) +
+                     static_cast<float>(kCellHeightPx) / 2.0f;
     for (std::size_t i = 0; i < focusOrder_.size(); ++i) {
         const auto target = focusOrder_[i];
         const auto& area = target.isTextField
@@ -645,9 +1052,29 @@ std::string BrowserPage::takePendingNavigation() {
 
 int BrowserPage::maxScrollRow() const {
     if (!document_) return 0;
-    const float contentHeight = std::max(document_->height(), virtualContentBottomPx_);
+    const float contentHeight = std::max(document_->height(), fallbackContentBottomPx_);
     const int rows = static_cast<int>(std::ceil(contentHeight / kCellHeightPx));
     return std::max(0, rows - bounds_.h);
+}
+
+void BrowserPage::movePageCursorBy(int dx, int dy) {
+    if (bounds_.w <= 0 || bounds_.h <= 0) return;
+    if (pointerX_ < bounds_.x || pointerX_ >= bounds_.x + bounds_.w ||
+        pointerY_ < bounds_.y || pointerY_ >= bounds_.y + bounds_.h) {
+        pointerX_ = bounds_.x;
+        pointerY_ = bounds_.y;
+    }
+
+    const int lastRow = bounds_.y + bounds_.h - 1;
+    if (dy < 0 && pointerY_ == bounds_.y && scrollRow_ > 0) {
+        --scrollRow_;
+    } else if (dy > 0 && pointerY_ == lastRow && scrollRow_ < maxScrollRow()) {
+        ++scrollRow_;
+    } else {
+        pointerX_ = std::clamp(pointerX_ + dx, bounds_.x, bounds_.x + bounds_.w - 1);
+        pointerY_ = std::clamp(pointerY_ + dy, bounds_.y, lastRow);
+    }
+    updateHoveredControl();
 }
 
 bool BrowserPage::focusLink(int direction) {
@@ -766,6 +1193,7 @@ void BrowserPage::draw(Screen& screen) {
     document_->draw(0, 0, -scrollPx, &clip);
     container_->endDraw();
     drawTextFields(screen);
+    drawFallbackFlows(screen);
 }
 
 void BrowserPage::drawTextFields(Screen& screen) {
@@ -811,6 +1239,36 @@ void BrowserPage::drawTextFields(Screen& screen) {
     }
 }
 
+void BrowserPage::drawFallbackFlows(Screen& screen) {
+    for (const auto& flow : fallbackFlows_) {
+        const int x = bounds_.x + static_cast<int>(std::floor(flow.placement.x / kCellWidthPx)) + 1;
+        const int firstRow = bounds_.y + static_cast<int>(std::floor(flow.placement.y / kCellHeightPx)) - scrollRow_;
+        for (std::size_t row = 0; row < flow.lines.size(); ++row) {
+            const int y = firstRow + static_cast<int>(row);
+            if (y < bounds_.y || y >= bounds_.y + bounds_.h) continue;
+            int column = x;
+            for (const auto& run : flow.lines[row].runs) {
+                const Color foreground = run.linkIndex >= 0 ? colors::BrightCyan :
+                    (run.bold ? colors::BrightWhite : colors::White);
+                const uint8_t style = static_cast<uint8_t>(
+                    (run.bold ? StyleBold : StyleNone) |
+                    (run.linkIndex >= 0 ? StyleUnderline : StyleNone));
+                for (char32_t cp : run.text) {
+                    const int width = wideGlyph(cp) ? 2 : 1;
+                    if (column >= bounds_.x + bounds_.w) break;
+                    if (column >= bounds_.x) {
+                        const Color background = screen.at(column, y).bg;
+                        screen.set(column, y, Cell{cp, foreground, background, style});
+                        for (int i = 1; i < width && column + i < bounds_.x + bounds_.w; ++i)
+                            screen.set(column + i, y, Cell{U' ', foreground, background, style});
+                    }
+                    column += width;
+                }
+            }
+        }
+    }
+}
+
 KeyEventResult BrowserPage::handleKey(const KeyEvent& event) {
     if (event.ctrl || event.alt) return KeyEventResult::Ignored;
     if (inputFocused()) {
@@ -849,12 +1307,26 @@ KeyEventResult BrowserPage::handleKey(const KeyEvent& event) {
         case Key::Enter:
             if (inputFocused()) return KeyEventResult::EnteredEdit;
             return activateFocusedLink() ? KeyEventResult::Activated : KeyEventResult::Ignored;
-        case Key::Up: scrollRow_ = std::max(0, scrollRow_ - 1); return KeyEventResult::Consumed;
-        case Key::Down: scrollRow_ = std::min(maxScrollRow(), scrollRow_ + 1); return KeyEventResult::Consumed;
-        case Key::PageUp: scrollRow_ = std::max(0, scrollRow_ - std::max(1, bounds_.h - 1)); return KeyEventResult::Consumed;
-        case Key::PageDown: scrollRow_ = std::min(maxScrollRow(), scrollRow_ + std::max(1, bounds_.h - 1)); return KeyEventResult::Consumed;
-        case Key::Home: scrollRow_ = 0; return KeyEventResult::Consumed;
-        case Key::End: scrollRow_ = maxScrollRow(); return KeyEventResult::Consumed;
+        case Key::Up: movePageCursorBy(0, -1); return KeyEventResult::Consumed;
+        case Key::Down: movePageCursorBy(0, 1); return KeyEventResult::Consumed;
+        case Key::Left: movePageCursorBy(-1, 0); return KeyEventResult::Consumed;
+        case Key::Right: movePageCursorBy(1, 0); return KeyEventResult::Consumed;
+        case Key::PageUp:
+            scrollRow_ = std::max(0, scrollRow_ - std::max(1, bounds_.h - 1));
+            updateHoveredControl();
+            return KeyEventResult::Consumed;
+        case Key::PageDown:
+            scrollRow_ = std::min(maxScrollRow(), scrollRow_ + std::max(1, bounds_.h - 1));
+            updateHoveredControl();
+            return KeyEventResult::Consumed;
+        case Key::Home:
+            scrollRow_ = 0;
+            updateHoveredControl();
+            return KeyEventResult::Consumed;
+        case Key::End:
+            scrollRow_ = maxScrollRow();
+            updateHoveredControl();
+            return KeyEventResult::Consumed;
         default: return KeyEventResult::Ignored;
     }
 }
@@ -862,44 +1334,9 @@ KeyEventResult BrowserPage::handleKey(const KeyEvent& event) {
 bool BrowserPage::clickAt(int x, int y) {
     if (!document_ || !bounds_.contains(x, y)) return false;
     (void)setPointerPosition(x, y);
-    const float px = static_cast<float>((x - bounds_.x) * kCellWidthPx);
-    const float py = static_cast<float>((y - bounds_.y + scrollRow_) * kCellHeightPx);
-    litehtml::position::vector redraw;
-    (void)document_->on_mouse_over(px, py, px, py, redraw);
-    if (focusedLink_ >= 0 && static_cast<std::size_t>(focusedLink_) < links_.size()) {
-        links_[static_cast<std::size_t>(focusedLink_)].element->on_click();
-        return true;
-    }
-    (void)document_->on_lbutton_down(px, py, px, py, redraw);
-    (void)document_->on_lbutton_up(px, py, px, py, redraw);
+    // Desktop-mode activation only enters the browser. The page cursor is
+    // acted on later by Enter in Keyboard mode, not by the desktop pointer.
     return false;
-}
-
-bool BrowserPage::movePointer(int fromX, int fromY, int& toX, int& toY) {
-    if (!document_ || !bounds_.contains(fromX, fromY) ||
-        toX < bounds_.x || toX >= bounds_.x + bounds_.w)
-        return false;
-    const int lastRow = bounds_.y + bounds_.h - 1;
-    if (toY < bounds_.y && scrollRow_ > 0) {
-        const int rows = bounds_.y - toY;
-        scrollRow_ = std::max(0, scrollRow_ - rows);
-        toY = bounds_.y;
-        return true;
-    }
-    if (toY > lastRow && scrollRow_ < maxScrollRow()) {
-        const int rows = toY - lastRow;
-        scrollRow_ = std::min(maxScrollRow(), scrollRow_ + rows);
-        toY = lastRow;
-        return true;
-    }
-    return false;
-}
-
-void BrowserPage::pointerMovedAt(int x, int y, int, int) {
-    if (!setPointerPosition(x, y)) {
-        pointerX_ = pointerY_ = -1;
-        focusedLink_ = -1;
-    }
 }
 
 bool BrowserPage::wantsGuiCursor() const {

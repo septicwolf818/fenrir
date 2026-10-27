@@ -1081,28 +1081,8 @@ void Desktop::moveCursorBy(int dx, int dy) {
         lastCursorDx_ = dx;
         lastCursorDy_ = dy;
     }
-    const int fromX = cursor_.x();
-    const int fromY = cursor_.y();
-    int toX = fromX + dx * step;
-    int toY = fromY + dy * step;
-    Window* fromWindow = wm_.windowAt(fromX, fromY);
-    Widget* fromContent = fromWindow ? fromWindow->content() : nullptr;
-    if (fromContent && fromContent->movePointer(fromX, fromY, toX, toY)) {
-        cursor_.moveTo(toX, toY);
-        cursor_.clamp(screenWidth(), screenHeight());
-    } else {
-        cursor_.moveTo(toX, toY);
-        cursor_.clamp(screenWidth(), screenHeight());
-    }
-
-    const int movedX = cursor_.x() - fromX;
-    const int movedY = cursor_.y() - fromY;
-    if (fromContent)
-        fromContent->pointerMovedAt(cursor_.x(), cursor_.y(), movedX, movedY);
-    Window* toWindow = wm_.windowAt(cursor_.x(), cursor_.y());
-    Widget* toContent = toWindow ? toWindow->content() : nullptr;
-    if (toContent && toContent != fromContent)
-        toContent->pointerMovedAt(cursor_.x(), cursor_.y(), movedX, movedY);
+    cursor_.moveBy(dx * step, dy * step);
+    cursor_.clamp(screenWidth(), screenHeight());
 }
 
 void Desktop::drawDesktopBackground(Screen& screen) {
