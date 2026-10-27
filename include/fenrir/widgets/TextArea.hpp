@@ -77,6 +77,14 @@ public:
     bool hasSelection() const { return selecting_; }
     // The selected text ("" when nothing is selected).
     std::u32string selectedText() const;
+    // Case-sensitive search from the current cursor/selection end, wrapping at
+    // the start of the document. A match becomes the active selection.
+    bool findNext(std::u32string_view query);
+    // Replace the selected match, or the next match if the selection differs.
+    // Selects the following match after replacement when one exists.
+    bool replaceNext(std::u32string_view query, std::u32string_view replacement);
+    // Replace non-overlapping matches throughout the buffer; returns the count.
+    int replaceAll(std::u32string_view query, std::u32string_view replacement);
     void selectAll();
     void clearSelection();
     // Copies the selection to the clipboard; true when something was copied.

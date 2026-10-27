@@ -1,3 +1,4 @@
+#include "../apps/texteditor/TextEditorApp.hpp"
 #include "../apps/texteditor/TextEditorView.hpp"
 
 #include "test_harness.hpp"
@@ -5,6 +6,7 @@
 #include "fenrir/core/Screen.hpp"
 #include "fenrir/widgets/Dialog.hpp"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -22,6 +24,7 @@ public:
         std::u32string title;
         std::u32string message;
         OnDialogResult result;
+        std::unique_ptr<Dialog> content;
     };
     std::vector<DialogCall> dialogs;
     int saveFileCalls = 0;
@@ -60,6 +63,7 @@ public:
         call.title = std::move(title);
         call.message = content->message();
         call.result = std::move(onResult);
+        call.content = std::move(content);
         dialogs.push_back(std::move(call));
     }
 
@@ -78,6 +82,101 @@ void runEditorTests() {
         std::filesystem::temp_directory_path() / "fenrir_editor_conflict";
     std::filesystem::remove_all(root);
     std::filesystem::create_directories(root);
+
+    // Search walks across logical line breaks, selects matches, and wraps to
+    // the beginning after reaching the end of the document.
+    {
+        const std::filesystem::path file = root / "find.txt";
+        { std::ofstream out(file); out << "cat scatter\ncatapult cat"; }
+        TextArea area;
+        area.loadFile(file.string());
+        check(area.findNext(U"cat") && area.selectedText() == U"cat",
+              "find selects the first match");
+        check(area.findNext(U"cat") && area.selectedText() == U"cat",
+              "find continues after the current selection");
+        check(area.findNext(U"scatter\ncatapult") &&
+                  area.selectedText() == U"scatter\ncatapult",
+              "find matches across a newline");
+        check(area.findNext(U"cat") && area.cursorLineCol() == std::pair{2, 13},
+              "find continues at the last document match");
+        check(area.findNext(U"cat") && area.cursorLineCol() == std::pair{1, 4},
+              "find wraps back to the first match");
+        check(area.findNext(U"missing") == false && !area.hasSelection(),
+              "a failed find clears the previous selection");
+        check(!area.findNext(U""), "empty search text is ignored");
+    }
+
+    // Replace-one replaces the current/next match; replace-all is global,
+    // non-overlapping, and permits an empty replacement.
+    {
+        const std::filesystem::path file = root / "replace.txt";
+        { std::ofstream out(file); out << "red red\nred"; }
+        TextArea area;
+        area.loadFile(file.string());
+        check(area.replaceNext(U"red", U"blue"), "replace-next finds and replaces a match");
+        check(area.selectedText() == U"red", "replace-next selects the following match");
+        const std::filesystem::path afterOne = root / "replace-one.txt";
+        area.saveFile(afterOne.string());
+        check(readFile(afterOne) == "blue red\nred", "replace-next changes only one match");
+
+        area.loadFile(file.string());
+        check(area.replaceAll(U"red", U"fox") == 3, "replace-all reports the number of matches");
+        const std::filesystem::path afterAll = root / "replace-all.txt";
+        area.saveFile(afterAll.string());
+        check(readFile(afterAll) == "fox fox\nfox", "replace-all changes every match");
+        area.loadFile(file.string());
+        check(area.replaceAll(U"red", U"") == 3, "replace-all permits deleting matches");
+        const std::filesystem::path afterDelete = root / "replace-delete.txt";
+        area.saveFile(afterDelete.string());
+        check(readFile(afterDelete) == " \n", "empty replacement removes matches");
+        check(area.replaceAll(U"", U"x") == 0, "empty find text cannot replace the buffer");
+
+        area.loadFile(file.string());
+        check(area.replaceNext(U"red", U""), "replace-next permits deleting a match");
+        const std::filesystem::path afterOneDelete = root / "replace-one-delete.txt";
+        area.saveFile(afterOneDelete.string());
+        check(readFile(afterOneDelete) == " red\nred",
+              "empty replace-next keeps the remaining document intact");
+    }
+
+    // The app exposes find/replace through its documented keyboard shortcuts
+    // and the Replace all dialog action.
+    {
+        const std::filesystem::path file = root / "replace-ui.txt";
+        { std::ofstream out(file); out << "old value old"; }
+        FakeContext ctx;
+        apps::TextEditorApp app;
+        std::unique_ptr<Widget> widget = app.createFileView(ctx, file.string());
+        auto* view = dynamic_cast<apps::TextEditorView*>(widget.get());
+        check(view != nullptr, "text editor app creates its editor view");
+        auto shortcut = [&](char32_t key) {
+            return std::find_if(view->shortcuts().begin(), view->shortcuts().end(),
+                                [key](const auto& entry) {
+                return entry.first.ctrl && entry.first.key == Key::Char &&
+                       entry.first.character == key;
+            });
+        };
+        const auto findShortcut = shortcut(U'f');
+        const auto replaceShortcut = shortcut(U'h');
+        check(findShortcut != view->shortcuts().end() &&
+                  replaceShortcut != view->shortcuts().end(),
+              "find and replace keyboard shortcuts are registered");
+        if (findShortcut != view->shortcuts().end()) {
+            findShortcut->second();
+            check(ctx.dialogs.back().content->inputCount() == 1,
+                  "Ctrl+F opens the find dialog");
+        }
+        if (replaceShortcut != view->shortcuts().end()) {
+            replaceShortcut->second();
+            check(ctx.dialogs.back().content->inputCount() == 2,
+                  "Ctrl+H opens the replace dialog");
+            ctx.dialogs.back().content->input(0)->setValue(U"old");
+            ctx.dialogs.back().content->input(1)->setValue(U"new");
+            ctx.dialogs.back().result(1);
+            view->save();
+            check(readFile(file) == "new value new", "Replace all dialog action updates the file buffer");
+        }
+    }
 
     // The view is created before its window is focused, so its initial title
     // must be deferred until draw. Untitled tabs clear the subtitle entirely.

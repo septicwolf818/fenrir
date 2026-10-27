@@ -134,6 +134,140 @@ std::u32string TextArea::selectedText() const {
     return out;
 }
 
+bool TextArea::findNext(std::u32string_view query) {
+    if (query.empty() || lines_.empty()) {
+        clearSelection();
+        return false;
+    }
+
+    std::u32string content;
+    for (std::size_t row = 0; row < lines_.size(); ++row) {
+        if (row > 0) content.push_back(U'\n');
+        content += lines_[row];
+    }
+
+    auto offsetAt = [&](int row, int col) {
+        std::size_t offset = 0;
+        const int lastRow = std::clamp(row, 0, static_cast<int>(lines_.size()) - 1);
+        for (int i = 0; i < lastRow; ++i)
+            offset += lines_[static_cast<std::size_t>(i)].size() + 1;
+        const auto& line = lines_[static_cast<std::size_t>(lastRow)];
+        return offset + static_cast<std::size_t>(std::clamp(col, 0, static_cast<int>(line.size())));
+    };
+    auto positionAt = [&](std::size_t offset) {
+        for (std::size_t row = 0; row < lines_.size(); ++row) {
+            if (offset <= lines_[row].size())
+                return std::pair{static_cast<int>(row), static_cast<int>(offset)};
+            offset -= lines_[row].size() + 1;
+        }
+        const std::size_t last = lines_.size() - 1;
+        return std::pair{static_cast<int>(last), static_cast<int>(lines_[last].size())};
+    };
+
+    std::size_t start = offsetAt(cursorRow_, cursorCol_);
+    if (selecting_) {
+        const auto [startRow, startCol, endRow, endCol] = selectionRange();
+        (void)startRow;
+        (void)startCol;
+        start = offsetAt(endRow, endCol);
+    }
+    const std::u32string needle(query);
+    std::size_t found = content.find(needle, start);
+    if (found == std::u32string::npos && start > 0)
+        found = content.find(needle, 0);
+    if (found == std::u32string::npos) {
+        clearSelection();
+        return false;
+    }
+
+    const auto [startRow, startCol] = positionAt(found);
+    const auto [endRow, endCol] = positionAt(found + needle.size());
+    selRow_ = startRow;
+    selCol_ = startCol;
+    cursorRow_ = endRow;
+    cursorCol_ = endCol;
+    selecting_ = true;
+    selectionMode_ = false;
+    goalCol_ = 0;
+    ensureVisible();
+    return true;
+}
+
+bool TextArea::replaceNext(std::u32string_view query, std::u32string_view replacement) {
+    if (query.empty()) return false;
+    if (!selecting_ || selectedText() != query) {
+        if (!findNext(query)) return false;
+    }
+    deleteSelection();
+    insertText(std::u32string(replacement));
+    syncGoal();
+    ensureVisible();
+    findNext(query);
+    return true;
+}
+
+int TextArea::replaceAll(std::u32string_view query, std::u32string_view replacement) {
+    if (query.empty() || lines_.empty()) return 0;
+
+    std::u32string content;
+    for (std::size_t row = 0; row < lines_.size(); ++row) {
+        if (row > 0) content.push_back(U'\n');
+        content += lines_[row];
+    }
+    const std::u32string needle(query);
+    const std::u32string substitute(replacement);
+    std::u32string updated;
+    updated.reserve(content.size());
+    std::size_t source = 0;
+    std::size_t search = 0;
+    std::size_t cursorOffset = 0;
+    int count = 0;
+    while ((search = content.find(needle, search)) != std::u32string::npos) {
+        updated.append(content, source, search - source);
+        updated += substitute;
+        cursorOffset = updated.size();
+        source = search + needle.size();
+        search = source;
+        ++count;
+    }
+    if (count == 0) return 0;
+    updated.append(content, source, std::u32string::npos);
+
+    lines_.clear();
+    std::size_t lineStart = 0;
+    while (true) {
+        const std::size_t newline = updated.find(U'\n', lineStart);
+        if (newline == std::u32string::npos) {
+            lines_.push_back(updated.substr(lineStart));
+            break;
+        }
+        lines_.push_back(updated.substr(lineStart, newline - lineStart));
+        lineStart = newline + 1;
+    }
+    if (lines_.empty()) lines_.emplace_back();
+
+    cursorRow_ = 0;
+    cursorCol_ = 0;
+    while (cursorRow_ + 1 < static_cast<int>(lines_.size()) &&
+           cursorOffset > lines_[static_cast<std::size_t>(cursorRow_)].size()) {
+        cursorOffset -= lines_[static_cast<std::size_t>(cursorRow_)].size() + 1;
+        ++cursorRow_;
+    }
+    cursorCol_ = static_cast<int>(std::min(cursorOffset,
+        lines_[static_cast<std::size_t>(cursorRow_)].size()));
+    selecting_ = false;
+    selectionMode_ = false;
+    selRow_ = cursorRow_;
+    selCol_ = cursorCol_;
+    scrollCol_ = 0;
+    goalCol_ = 0;
+    dirty_ = true;
+    markDirty();
+    syncGoal();
+    ensureVisible();
+    return count;
+}
+
 void TextArea::selectAll() {
     selRow_ = 0;
     selCol_ = 0;
