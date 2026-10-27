@@ -6,6 +6,12 @@ enable_testing()
 option(BUILD_TESTING "Build the test suite" OFF)
 
 add_subdirectory(third_party/litehtml EXCLUDE_FROM_ALL)
+set(QJS_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+set(QJS_BUILD_WERROR ON CACHE BOOL "" FORCE)
+set(QJS_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(QJS_BUILD_LIBC OFF CACHE BOOL "" FORCE)
+set(QJS_BUILD_CLI_STATIC OFF CACHE BOOL "" FORCE)
+add_subdirectory(third_party/quickjs-ng EXCLUDE_FROM_ALL)
 find_package(CURL REQUIRED)
 find_package(Threads REQUIRED)
 
@@ -66,6 +72,7 @@ add_executable(fenrir_desktop
 
 add_library(fenrir_browser STATIC
     apps/browser/BrowserNetwork.cpp
+    apps/browser/BrowserScriptRuntime.cpp
     apps/browser/BrowserPage.cpp
     apps/browser/BrowserView.cpp
     apps/browser/BrowserApp.cpp
@@ -73,7 +80,7 @@ add_library(fenrir_browser STATIC
 target_include_directories(fenrir_browser PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/apps/browser
 )
-target_link_libraries(fenrir_browser PUBLIC fenrir litehtml CURL::libcurl Threads::Threads)
+target_link_libraries(fenrir_browser PUBLIC fenrir litehtml qjs CURL::libcurl Threads::Threads)
 target_link_libraries(fenrir_desktop PRIVATE fenrir_browser)
 set_target_properties(fenrir_desktop PROPERTIES OUTPUT_NAME fenrir)
 

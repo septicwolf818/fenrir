@@ -8,4 +8,10 @@ license is included in the header (MIT or public domain).
 `litehtml` v0.10 is vendored from <https://github.com/litehtml/litehtml> for
 the Fenrir Browser's HTML/CSS layout. It is licensed under BSD-3-Clause; its
 bundled Gumbo HTML parser is licensed under Apache-2.0. Their license files are
-kept alongside the sources.
+kept alongside the sources. Fenrir also preserves `<script>` text and
+attributes in litehtml's script elements so the browser can hand them to its
+script runtime.
+
+QuickJS-NG v0.17.0 is vendored from <https://github.com/quickjs-ng/quickjs>
+for restricted browser-script execution. It is licensed under MIT; see its
+`LICENSE` file. Fenrir does not link QuickJS's OS or std modules into pages.

@@ -49,7 +49,6 @@ private:
     struct Link {
         litehtml::element::ptr element;
         litehtml::position placement;
-        litehtml::position clickPlacement;
         std::string url;
     };
     struct FetchState {
