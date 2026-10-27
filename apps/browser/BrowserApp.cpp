@@ -42,7 +42,7 @@ std::unique_ptr<Widget> BrowserApp::createView(AppContext& context) {
 }
 
 Rect BrowserApp::preferredBounds(const Rect& area) const {
-    const int width = std::min(82, std::max(32, area.w - 4));
+    const int width = std::min(82, std::max(44, area.w - 4));
     const int height = std::min(28, std::max(6, area.h - 3));
     return Rect{area.x + std::max(0, (area.w - width) / 2),
                 area.y + std::max(0, (area.h - height) / 2), width, height};
