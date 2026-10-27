@@ -24,7 +24,8 @@ namespace fenrir::apps {
 // Every open tab = its own TextArea (separate buffer, cursor, path).
 // Ctrl+N = new tab (nothing is lost — no guard needed, it's a fresh buffer),
 // Ctrl+O = open in a new tab (already open = switches), Ctrl+T =
-// close tab (dirty asks for confirmation), F3/F4 = previous/next tab,
+// close tab (dirty asks for confirmation), Ctrl+F/Ctrl+H = find/replace,
+// F3/F4 = previous/next tab,
 // Alt+1..Alt+9 = go directly to a tab.
 // dirty() = ANY tab is dirty — the window-close guard protects everything.
 // Settings (line numbers, spaces instead of tabs, syntax highlighting) are
@@ -150,6 +151,55 @@ public:
             cur().saveFile(picked);
             shownFileState_ = FileState::Unchanged;
             refreshTabBar();
+        });
+    }
+
+    void findDialog() {
+        auto dlg = std::make_unique<Dialog>(
+            U"Search is case-sensitive. Find next wraps to the start of the document.",
+            std::vector<std::u32string>{U"Find next", U"Cancel"});
+        LineEdit* query = dlg->addInput(U"Find: ", lastFind_);
+        const auto token = lifetimeToken();
+        ctx_.openDialog(U"Find", std::move(dlg), [token, this, query](int action) {
+            if (!token.lock() || action != 0) return;
+            lastFind_ = query->value();
+            if (lastFind_.empty()) {
+                status_.setMessage(U"Enter text to find");
+            } else if (cur().findNext(lastFind_)) {
+                status_.setMessage(U"Match selected");
+            } else {
+                status_.setMessage(U"No match found");
+            }
+        });
+    }
+
+    void replaceDialog() {
+        auto dlg = std::make_unique<Dialog>(
+            U"Replace the next match, or replace every non-overlapping match.",
+            std::vector<std::u32string>{U"Replace", U"Replace all", U"Cancel"});
+        LineEdit* query = dlg->addInput(U"Find: ", lastFind_);
+        LineEdit* replacement = dlg->addInput(U"Replace with: ", lastReplacement_);
+        const auto token = lifetimeToken();
+        ctx_.openDialog(U"Replace", std::move(dlg),
+                        [token, this, query, replacement](int action) {
+            if (!token.lock() || action < 0 || action > 1) return;
+            lastFind_ = query->value();
+            lastReplacement_ = replacement->value();
+            if (lastFind_.empty()) {
+                status_.setMessage(U"Enter text to find");
+                return;
+            }
+            if (action == 0) {
+                status_.setMessage(cur().replaceNext(lastFind_, lastReplacement_)
+                                       ? U"Replaced one match"
+                                       : U"No match found");
+                return;
+            }
+            const int count = cur().replaceAll(lastFind_, lastReplacement_);
+            status_.setMessage(count == 0
+                                   ? U"No match found"
+                                   : text::toUtf32("Replaced " + std::to_string(count) +
+                                                   (count == 1 ? " match" : " matches")));
         });
     }
 
@@ -480,6 +530,8 @@ private:
 
     AppContext& ctx_;
     std::string windowSubtitle_;
+    std::u32string lastFind_;
+    std::u32string lastReplacement_;
     bool windowTitleReady_ = false;
     std::vector<std::unique_ptr<TextArea>> tabs_;
     int current_ = 0;

@@ -348,6 +348,13 @@ inline Library buildLibrary() {
                 })
                 .section("Editing")
                 .keys({
+                    {"Ctrl+F", "Find the next case-sensitive match (wraps at document start)"},
+                    {"Ctrl+H", "Replace the next match or all matches"},
+                })
+                .text("Find and replace use the active tab. Repeating search wraps to the start; "
+                      "replace all changes non-overlapping matches throughout the document.")
+                .section("Other editing keys")
+                .keys({
                     {"Ctrl+C / Ctrl+X / Ctrl+V", "Copy / cut / paste"},
                     {"Ctrl+A", "Select all"},
                     {"Ctrl+Space", "Toggle selection mode; arrows extend the selection"},

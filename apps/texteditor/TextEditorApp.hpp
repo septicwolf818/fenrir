@@ -48,6 +48,10 @@ public:
             {U"Previous tab (F3)", [raw] { raw->prevTab(); }},
             {U"Next tab (F4)", [raw] { raw->nextTab(); }},
         }},
+        {U"Edit", std::vector<MenuItem>{
+            {U"Find... (Ctrl+F)", [raw] { raw->findDialog(); }},
+            {U"Replace... (Ctrl+H)", [raw] { raw->replaceDialog(); }},
+        }},
         {U"Format", std::vector<MenuItem>{
             {U"Line wrap (Ctrl+E)", [raw] { raw->toggleWrap(); }},
             {U"Line numbers (Ctrl+G)", [raw] { raw->toggleLineNumbers(); }},
@@ -68,6 +72,8 @@ public:
         view->pushShortcut({true, Key::Char, U'y'}, [raw] { raw->toggleSpaces(); });
         view->pushShortcut({true, Key::Char, U'd'}, [raw] { raw->openFolder(); });
         view->pushShortcut({true, Key::Char, U'b'}, [raw] { raw->toggleTree(); });
+        view->pushShortcut({true, Key::Char, U'f'}, [raw] { raw->findDialog(); });
+        view->pushShortcut({true, Key::Char, U'h'}, [raw] { raw->replaceDialog(); });
         // F3/F4 = previous/next tab. Plain function keys reach the app on
         // every console and emulator, unlike Alt+PgUp/PgDn (eaten or sent
         // without the Alt bit by some keymaps) and Alt+Left/Right (the
