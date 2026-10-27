@@ -232,6 +232,25 @@ void BrowserView::draw(Screen& screen) {
     toolbar_.setBounds(Rect{bounds_.x, bounds_.y + tabHeight, bounds_.w, toolbarHeight});
     toolbar_.setFocused(focused_ && toolbarActive_);
     toolbar_.draw(screen);
+    // Make the address field visually distinct.
+    if (address_) {
+        const Rect b = address_->bounds();
+        if (b.w > 2 && b.h > 0) {
+            // Draw left/right edges so the field reads as an input box.
+            for (int y = b.y; y < b.y + b.h; ++y) {
+                Cell lc = screen.at(b.x, y);
+                lc.character = U'│';
+                lc.fg = theme::active.fieldText;
+                lc.bg = theme::active.fieldBg;
+                screen.set(b.x, y, lc);
+                Cell rc = screen.at(b.x + b.w - 1, y);
+                rc.character = U'│';
+                rc.fg = theme::active.fieldText;
+                rc.bg = theme::active.fieldBg;
+                screen.set(b.x + b.w - 1, y, rc);
+            }
+        }
+    }
 
     if (auto* page = activePage()) {
         page->setBounds(Rect{bounds_.x, bounds_.y + tabHeight + toolbarHeight,
